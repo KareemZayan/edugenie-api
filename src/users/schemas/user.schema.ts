@@ -5,6 +5,7 @@ export enum UserRole {
   STUDENT = 'Student',
   INSTRUCTOR = 'Instructor',
   ADMIN = 'Admin',
+  SuperAdmin = 'SuperAdmin',
 }
 
 @Schema({ timestamps: true })
