@@ -2,7 +2,8 @@ import { Document } from 'mongoose';
 export declare enum UserRole {
     STUDENT = "Student",
     INSTRUCTOR = "Instructor",
-    ADMIN = "Admin"
+    ADMIN = "Admin",
+    SuperAdmin = "SuperAdmin"
 }
 export declare class User {
     firstName: string;

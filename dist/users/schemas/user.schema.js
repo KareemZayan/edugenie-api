@@ -16,6 +16,7 @@ var UserRole;
     UserRole["STUDENT"] = "Student";
     UserRole["INSTRUCTOR"] = "Instructor";
     UserRole["ADMIN"] = "Admin";
+    UserRole["SuperAdmin"] = "SuperAdmin";
 })(UserRole || (exports.UserRole = UserRole = {}));
 let User = class User {
     firstName;
