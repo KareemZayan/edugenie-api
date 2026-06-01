@@ -14,7 +14,6 @@ app.useGlobalPipes(
   }),
 );
 
-
 //
   mongoose.connection.on('connected', () => {
     console.log('Successfully connected to MongoDB!');
