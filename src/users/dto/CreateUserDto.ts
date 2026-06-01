@@ -1,4 +1,10 @@
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 import { UserRole } from '../schemas/user.schema';
 
 export class CreateUserDto {
@@ -16,6 +22,6 @@ export class CreateUserDto {
   password: string;
 
   @IsEnum(UserRole)
-  @IsOptional()   
+  @IsOptional()
   role?: UserRole;
 }
