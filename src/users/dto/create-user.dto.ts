@@ -42,10 +42,6 @@ export class CreateUserDto {
   level?: UserLevel;
 
   @IsOptional()
-  @IsString()
-  goal?: string;
-
-  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   skills?: string[];

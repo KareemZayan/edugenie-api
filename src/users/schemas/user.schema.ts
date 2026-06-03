@@ -37,9 +37,6 @@ export class User extends Document {
   @Prop({ enum: UserLevel })
   level?: UserLevel;
 
-  @Prop()
-  goal?: string;
-
   @Prop({ type: [String], default: [] })
   skills!: string[];
 
