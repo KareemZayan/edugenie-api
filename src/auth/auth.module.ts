@@ -16,9 +16,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         secretOrPrivateKey: configService.get<string>('JWT_SECRET'),
         signOptions: { expiresIn: '7d' },
       }),
-    })
+    }),
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController],
 })
-export class AuthModule { }
+export class AuthModule {}

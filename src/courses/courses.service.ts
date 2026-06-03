@@ -7,9 +7,7 @@ import { UpdateCourseDto } from './dto/update-course.dto';
 
 @Injectable()
 export class CoursesService {
-  constructor(
-    @InjectModel(Course.name) private courseModel: Model<Course>,
-  ) {}
+  constructor(@InjectModel(Course.name) private courseModel: Model<Course>) {}
 
   async create(createCourseDto: CreateCourseDto): Promise<Course> {
     const createdCourse = new this.courseModel(createCourseDto);
