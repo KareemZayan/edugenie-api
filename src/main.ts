@@ -13,7 +13,7 @@ async function bootstrap() {
   );
 
   mongoose.connection.on('connected', () => {
-    console.log('Successfully connected to MongoDB!');
+    console.log('Successfully connected to MongoDB');
   });
 
   await app.listen(3000);
