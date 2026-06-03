@@ -1,5 +1,5 @@
 import { IsString, IsNumber, IsEnum, IsArray, IsMongoId, IsOptional, Min, MinLength, IsNotEmpty } from 'class-validator';
-import { CourseLevel } from '../enums/level.enum';
+import { CourseLevel } from '../../shared/enums/level.enum';
 
 export class CreateCourseDto {
     @IsString()
@@ -14,10 +14,11 @@ export class CreateCourseDto {
 
     @IsNumber()
     @Min(0)
+    @IsNotEmpty()
     price!: number;
 
     @IsString()
-
+    @IsNotEmpty()
     thumbnail!: string;
 
     @IsEnum(CourseLevel)
