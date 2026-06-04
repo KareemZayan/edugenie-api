@@ -1,15 +1,5 @@
-import {
-  IsString,
-  IsNumber,
-  IsEnum,
-  IsArray,
-  IsMongoId,
-  IsOptional,
-  Min,
-  MinLength,
-  IsNotEmpty,
-} from 'class-validator';
-import { CourseLevel } from '../enums/level.enum';
+import { IsString, IsNumber, IsEnum, IsArray, IsMongoId, IsOptional, Min, MinLength, IsNotEmpty } from 'class-validator';
+import { CourseLevel } from '../../shared/enums/level.enum';
 
 export class CreateCourseDto {
   @IsString()
@@ -22,12 +12,13 @@ export class CreateCourseDto {
   @MinLength(20, { message: 'Description must be detailed' })
   description!: string;
 
-  @IsNumber()
-  @Min(0)
-  price!: number;
+    @IsNumber()
+    @Min(0)
+    price!: number;
 
-  @IsString()
-  thumbnail!: string;
+    @IsString()
+
+    thumbnail!: string;
 
   @IsEnum(CourseLevel)
   level!: CourseLevel;
