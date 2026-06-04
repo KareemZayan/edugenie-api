@@ -12,6 +12,14 @@ async function bootstrap() {
     }),
   );
 
+  app.enableCors({
+    origin: [
+      'https://edugenie-dashboard.vercel.app',
+      'http://localhost:4200'
+    ],
+    credentials: true,
+  });
+
   mongoose.connection.on('connected', () => {
     console.log('Successfully connected to MongoDB');
   });
