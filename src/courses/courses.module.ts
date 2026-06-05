@@ -4,7 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { CoursesService } from './courses.service';
 import { CoursesController } from './courses.controller';
 
-import { Course, CourseSchema } from './schemas/course.schema';
+import { Course, CourseSchema } from './schema/course.schema';
 
 @Module({
   imports: [
@@ -17,6 +17,6 @@ import { Course, CourseSchema } from './schemas/course.schema';
   ],
   controllers: [CoursesController],
   providers: [CoursesService],
-  exports: [CoursesService], 
+  exports: [CoursesService],
 })
-export class CoursesModule { }
+export class CoursesModule {}
