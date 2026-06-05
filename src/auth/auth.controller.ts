@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { Response } from 'express';
+import { LoginDto } from './dto/login.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -22,7 +23,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Post('login')
   async login(
-    @Body() loginDto: any,
+    @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) response: Response,
   ) {
     // 1. Verify credentials and Generate Token

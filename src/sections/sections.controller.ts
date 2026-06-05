@@ -21,7 +21,7 @@ export class SectionsController {
   addSection(
     @Param('id') id: string,
     @Body() createSectionDto: CreateSectionDto,
-    @Req() req: any,
+    @Req() req: { user: { userId: string } },
   ) {
     return this.sectionsService.addSection(
       id,
@@ -35,7 +35,7 @@ export class SectionsController {
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,
     @Body('title') title: string,
-    @Req() req: any,
+    @Req() req: { user: { userId: string } },
   ) {
     return this.sectionsService.updateSection(
       courseId,
@@ -49,7 +49,7 @@ export class SectionsController {
   async removeSection(
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,
-    @Req() req: any,
+    @Req() req: { user: { userId: string } },
   ) {
     await this.sectionsService.removeSection(
       courseId,
