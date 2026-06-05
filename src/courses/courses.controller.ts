@@ -21,7 +21,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses')
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) {}
+  constructor(private readonly coursesService: CoursesService) { }
 
   @Roles(UserRole.INSTRUCTOR)
   @Post()
@@ -61,6 +61,6 @@ export class CoursesController {
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: { userId: string }) {
-    return this.coursesService.remove(id, user.userId);
+    return this.coursesService.remove(id);
   }
 }

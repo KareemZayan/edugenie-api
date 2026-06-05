@@ -77,12 +77,9 @@ export class CoursesService {
     return updated;
   }
 
-  async remove(id: string, instructorId: string) {
-    const result = await this.courseModel.findOneAndDelete({
-      _id: id,
-      instructorId: new Types.ObjectId(instructorId),
-    });
-    if (!result) throw new ForbiddenException('Not authorized');
+  async remove(id: string) {
+    const result = await this.courseModel.findByIdAndDelete(id);
+    if (!result) throw new NotFoundException('Course not found');
     return { success: true };
   }
 
