@@ -38,6 +38,7 @@ export class AuthController {
     return {
       message: 'Login successful',
       user: userData,
+       accessToken: token,
     };
   }
 }

@@ -1,20 +1,22 @@
-import { IsString, IsNumber, IsOptional, MinLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsUrl, IsNumber, Min, IsOptional } from 'class-validator';
 
 export class CreateLessonDto {
     @IsString()
+    @IsNotEmpty({ message: 'Lesson title is required' })
     title!: string;
 
-    @IsString()
+    @IsUrl({}, { message: 'Invalid video URL' })
+    @IsNotEmpty()
     videoUrl!: string;
 
     @IsString()
+    @IsNotEmpty()
     videoPublicId!: string;
 
     @IsNumber()
+    @Min(1)
     videoDuration!: number;
-
     @IsOptional()
     @IsString()
-    @MinLength(5)
     transcript?: string;
 }
