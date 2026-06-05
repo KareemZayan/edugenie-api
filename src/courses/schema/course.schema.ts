@@ -3,7 +3,7 @@ import { HydratedDocument, Types } from 'mongoose';
 
 import { CourseLevel } from '../../shared/enums/level.enum';
 import { CourseStatus } from '../../shared/enums/status.enum';
-import { Section, SectionSchema } from './section.schema';
+import { Section, SectionSchema } from '../../sections/schema/section.schema';
 
 export type CourseDocument = HydratedDocument<Course>;
 
@@ -83,7 +83,7 @@ export class Course {
 
   // Embedded subdocuments — Course is the aggregate root
   @Prop({ type: [SectionSchema], default: [] })
-  sections!:Types.DocumentArray<Section>;
+  sections!: Types.DocumentArray<Section>;
 }
 
 export const CourseSchema = SchemaFactory.createForClass(Course);

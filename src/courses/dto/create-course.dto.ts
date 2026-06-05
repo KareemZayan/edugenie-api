@@ -41,8 +41,6 @@ export class CreateCourseDto {
   @IsNotEmpty()
   categoryId!: string;
 
-
-
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
