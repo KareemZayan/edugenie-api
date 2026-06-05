@@ -7,7 +7,7 @@ import {
   MaxLength,
   IsUrl,
 } from 'class-validator';
-import { UserLevel } from '../schemas/user.schema';
+import { UserLevel } from '../schema/user.schema';
 
 export class UpdateUserDto {
   @IsOptional()
