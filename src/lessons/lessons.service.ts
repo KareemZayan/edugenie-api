@@ -8,6 +8,7 @@ import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { CoursesService } from '../courses/courses.service';
+import { UpdateLessonDto } from './dto/update-lesson.dto';
 
 @Injectable()
 export class LessonsService {
@@ -20,7 +21,7 @@ export class LessonsService {
     courseId: string,
     sectionId: string,
     instructorId: string,
-    dto: CreateLessonDto,
+    createLessonDto: CreateLessonDto,
   ) {
     const updated = await this.courseModel
       .findOneAndUpdate(
@@ -29,7 +30,7 @@ export class LessonsService {
           instructorId: new Types.ObjectId(instructorId),
           'sections._id': new Types.ObjectId(sectionId),
         },
-        { $push: { 'sections.$.lessons': dto } },
+        { $push: { 'sections.$.lessons': createLessonDto } },
         { new: true },
       )
       .exec();
@@ -46,9 +47,9 @@ export class LessonsService {
     sectionId: string,
     lessonId: string,
     instructorId: string,
-    dto: any,
+    updateLessonDto: UpdateLessonDto,
   ) {
-    if (!dto || Object.keys(dto).length === 0) {
+    if (!updateLessonDto || Object.keys(updateLessonDto).length === 0) {
       throw new BadRequestException(
         'Update data (Request Body) cannot be empty',
       );
@@ -56,8 +57,10 @@ export class LessonsService {
 
     const updateFields: Record<string, any> = {};
 
-    Object.keys(dto).forEach((key) => {
-      updateFields[`sections.$[s].lessons.$[l].${key}`] = dto[key];
+    Object.keys(updateLessonDto).forEach((key) => {
+      const safeKey = key as keyof UpdateLessonDto;
+      updateFields[`sections.$[s].lessons.$[l].${safeKey}`] =
+        updateLessonDto[safeKey];
     });
 
     const updated = await this.courseModel

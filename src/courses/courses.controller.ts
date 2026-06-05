@@ -6,8 +6,8 @@ import {
   Patch,
   Param,
   Delete,
-  Req,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
@@ -24,13 +24,15 @@ export class CoursesController {
   constructor(private readonly coursesService: CoursesService) {}
 
   @Post()
-  create(@Body() createCourseDto: CreateCourseDto, @Req() req: any) {
+  create(
+    @Body() createCourseDto: CreateCourseDto,
+    @Req() req: { user: { userId: string } },
+  ) {
     return this.coursesService.create(createCourseDto, req.user.userId);
   }
 
   @Get('my-courses')
-  async findInstructorCourses(@Req() req: any) {
-    console.log('--- Fetching courses for userId ---', req.user.userId);
+  async findInstructorCourses(@Req() req: { user: { userId: string } }) {
     return this.coursesService.findInstructorCourses(req.user.userId);
   }
 
@@ -49,14 +51,14 @@ export class CoursesController {
   update(
     @Param('id') id: string,
     @Body() updateCourseDto: UpdateCourseDto,
-    @Req() req: any,
+    @Req() req: { user: { userId: string } },
   ) {
     return this.coursesService.update(id, req.user.userId, updateCourseDto);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string, @Req() req: any) {
+  remove(@Param('id') id: string, @Req() req: { user: { userId: string } }) {
     return this.coursesService.remove(id, req.user.userId);
   }
 }
