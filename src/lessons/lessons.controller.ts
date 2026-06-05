@@ -5,12 +5,13 @@ import {
   Patch,
   Param,
   Delete,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { LessonsService } from './lessons.service';
 import { CreateLessonDto } from './dto/create-lesson.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { UpdateLessonDto } from './dto/update-lesson.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard)
 @Controller('courses/:id/sections/:sectionId/lessons')
@@ -22,9 +23,9 @@ export class LessonsController {
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,
     @Body() createLessonDto: CreateLessonDto,
-    @Req() req: { user: { userId: string } },
+    @CurrentUser() user: { userId: string },
   ) {
-    const instructorId = req.user?.userId;
+    const instructorId = user?.userId;
 
     return this.lessonsService.addLesson(
       courseId,
@@ -39,14 +40,14 @@ export class LessonsController {
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,
     @Param('lessonId') lessonId: string,
-    @Body() updateLessonDto: any,
-    @Req() req: { user: { userId: string } },
+    @Body() updateLessonDto: UpdateLessonDto,
+    @CurrentUser() user: { userId: string },
   ) {
     return this.lessonsService.updateLesson(
       courseId,
       sectionId,
       lessonId,
-      req.user.userId,
+      user.userId,
       updateLessonDto,
     );
   }
@@ -56,13 +57,13 @@ export class LessonsController {
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,
     @Param('lessonId') lessonId: string,
-    @Req() req: { user: { userId: string } },
+    @CurrentUser() user: { userId: string },
   ) {
     return this.lessonsService.removeLesson(
       courseId,
       sectionId,
       lessonId,
-      req.user.userId,
+      user.userId,
     );
   }
 }

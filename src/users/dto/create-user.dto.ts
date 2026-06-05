@@ -8,7 +8,8 @@ import {
   MaxLength,
 } from 'class-validator';
 
-import { UserRole, UserLevel } from '../schema/user.schema';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { UserLevel } from '../enums/user-level.enum';
 
 export class CreateUserDto {
   @IsString()

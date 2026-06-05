@@ -11,7 +11,8 @@ import {
   IsUrl,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CourseLevel } from '../../shared/enums/level.enum';
+import { CourseLevel } from '../enums/course-level.enum';
+import { CourseStatus } from '../enums/course-status.enum';
 
 export class CreateCourseDto {
   @IsString()
@@ -50,4 +51,8 @@ export class CreateCourseDto {
   @IsArray()
   @IsString({ each: true })
   requirements?: string[];
+
+  @IsEnum(CourseStatus)
+  courseStatus!: CourseStatus;
+
 }

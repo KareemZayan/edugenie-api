@@ -1,8 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-
-import { CourseLevel } from '../../shared/enums/level.enum';
-import { CourseStatus } from '../../shared/enums/status.enum';
+import { CourseLevel } from '../enums/course-level.enum';
+import { CourseStatus } from '../enums/course-status.enum';
 import { Section, SectionSchema } from '../../sections/schema/section.schema';
 
 export type CourseDocument = HydratedDocument<Course>;
@@ -33,12 +32,14 @@ export class Course {
   thumbnail!: string;
 
   @Prop({
+    type: String,
     required: true,
     enum: CourseLevel,
   })
   level!: CourseLevel;
 
   @Prop({
+    type: String,
     enum: CourseStatus,
     default: CourseStatus.DRAFT,
   })

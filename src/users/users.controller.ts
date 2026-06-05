@@ -1,7 +1,15 @@
-import { Controller, Get, Patch, Body, Request, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Body,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('users')
 export class UsersController {
@@ -9,10 +17,10 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  async getProfile(@Request() req: any) {
-    const userId = req.user.userId;
+  async getProfile(@CurrentUser() user: { userId: string }) {
+    const userId = user.userId;
     const profile = await this.usersService.getProfile(userId);
-    
+
     return {
       success: true,
       message: 'Profile retrieved successfully',
@@ -22,10 +30,16 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @Patch('profile')
-  async updateProfile(@Request() req: any, @Body() updateUserDto: UpdateUserDto) {
-    const userId = req.user.userId;
-    const updatedProfile = await this.usersService.updateProfile(userId, updateUserDto);
-    
+  async updateProfile(
+    @CurrentUser() user: { userId: string },
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    const userId = user.userId;
+    const updatedProfile = await this.usersService.updateProfile(
+      userId,
+      updateUserDto,
+    );
+
     return {
       success: true,
       message: 'Profile updated successfully',
