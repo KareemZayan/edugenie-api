@@ -1,51 +1,49 @@
-import { Controller, Post, Get, Patch, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Post, Body, Patch, Param, Delete, Req, UseGuards } from '@nestjs/common';
 import { SectionsService } from './sections.service';
-import { CreateSectionDto } from './dto/create-section.dto';
+import { CreateSectionDto } from './dto/create-section.dto'; 
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'; 
 
-@Controller('courses/:courseId/sections')
+@UseGuards(JwtAuthGuard) 
+@Controller('courses/:id/sections')
 export class SectionsController {
     constructor(private readonly sectionsService: SectionsService) { }
 
-    //  CREATE
+    
     @Post()
     addSection(
-        @Param('courseId') courseId: string,
-        @Body() dto: CreateSectionDto,
+        @Param('id') id: string,
+        @Body() createSectionDto: CreateSectionDto,
+        @Req() req: any
     ) {
-        return this.sectionsService.addSection(courseId, dto);
+        return this.sectionsService.addSection(id, req.user.userId, createSectionDto);
     }
 
-    //  GET ALL
-    @Get()
-    getAll(@Param('courseId') courseId: string) {
-        return this.sectionsService.getSections(courseId);
-    }
-
-    //  GET ONE
-    @Get(':sectionId')
-    getOne(
-        @Param('courseId') courseId: string,
-        @Param('sectionId') sectionId: string,
-    ) {
-        return this.sectionsService.getSection(courseId, sectionId);
-    }
-
-    //  UPDATE
+    
     @Patch(':sectionId')
-    update(
-        @Param('courseId') courseId: string,
+    updateSection(
+        @Param('id') courseId: string,
         @Param('sectionId') sectionId: string,
-        @Body() dto: Partial<CreateSectionDto>,
+        @Body('title') title: string,
+        @Req() req: any
     ) {
-        return this.sectionsService.updateSection(courseId, sectionId, dto);
+        
+        return this.sectionsService.updateSection(courseId, sectionId, req.user.userId, title);
     }
 
-    //  DELETE
+    
     @Delete(':sectionId')
-    remove(
-        @Param('courseId') courseId: string,
+    async removeSection( 
+        @Param('id') courseId: string,
         @Param('sectionId') sectionId: string,
+        @Req() req: any
     ) {
-        return this.sectionsService.deleteSection(courseId, sectionId);
+       
+        await this.sectionsService.removeSection(courseId, sectionId, req.user.userId);
+
+        
+        return {
+            success: true,
+            message: 'Section has been removed successfully from the course ',
+        };
     }
 }

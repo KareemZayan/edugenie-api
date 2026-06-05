@@ -1,57 +1,55 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Req, UseGuards } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
-import { Course } from './schemas/course.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/schemas/user.schema';
 
-@Controller('courses')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.INSTRUCTOR)
+@Controller('courses')
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) {}
+  constructor(private readonly coursesService: CoursesService) { }
+
 
   @Post()
-  // @Roles(UserRole.INSTRUCTOR, UserRole.ADMIN, UserRole.SUPERADMIN)
-  @Roles(UserRole.INSTRUCTOR) // Only instructors can create courses for now, we can add more roles later if needed
-  create(@Body() createCourseDto: CreateCourseDto): Promise<Course> {
-    return this.coursesService.create(createCourseDto);
+  create(@Body() createCourseDto: CreateCourseDto, @Req() req: any) {
+    return this.coursesService.create(createCourseDto, req.user.userId);
   }
 
-  @Get()
-  findAll(): Promise<Course[]> {
-    return this.coursesService.findAll();
+
+  @Get('my-courses')
+  async findInstructorCourses(@Req() req: any) {
+
+    console.log('--- Fetching courses for userId ---', req.user.userId);
+    return this.coursesService.findInstructorCourses(req.user.userId);
   }
+
+
+  // @Get()
+  // findAll() {
+  //   return this.coursesService.findAll();
+  // }
+
 
   @Get(':id')
-  findOne(@Param('id') id: string): Promise<Course> {
+  findOne(@Param('id') id: string) {
     return this.coursesService.findOne(id);
   }
 
+
+  @Roles(UserRole.INSTRUCTOR)
   @Patch(':id')
-  // @Roles(UserRole.INSTRUCTOR, UserRole.ADMIN, UserRole.SUPERADMIN)
-  @Roles(UserRole.INSTRUCTOR) // Only instructors can update courses for now, we can add more roles later if needed
-  update(
-    @Param('id') id: string,
-    @Body() updateCourseDto: UpdateCourseDto,
-  ): Promise<Course> {
-    return this.coursesService.update(id, updateCourseDto);
+  update(@Param('id') id: string, @Body() updateCourseDto: UpdateCourseDto, @Req() req: any) {
+    return this.coursesService.update(id, req.user.userId, updateCourseDto);
   }
 
-  @Delete(':id')
+
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  remove(@Param('id') id: string): Promise<{ message: string }> {
-    return this.coursesService.remove(id);
+  @Delete(':id')
+  remove(@Param('id') id: string, @Req() req: any) {
+    return this.coursesService.remove(id, req.user.userId);
   }
 }

@@ -1,115 +1,85 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schemas/course.schema';
 import { CreateLessonDto } from './dto/create-lesson.dto';
+import { CoursesService } from '../courses/courses.service';
 
 @Injectable()
 export class LessonsService {
     constructor(
-        @InjectModel(Course.name)
-        private courseModel: Model<Course>,
+        @InjectModel(Course.name) private courseModel: Model<Course>,
+        private coursesService: CoursesService
     ) { }
 
-    private async getCourse(courseId: string) {
-        const course = await this.courseModel.findById(courseId);
 
-        if (!course) {
-            throw new NotFoundException('Course not found');
+    async addLesson(courseId: string, sectionId: string, instructorId: string, dto: CreateLessonDto) {
+        const updated = await this.courseModel.findOneAndUpdate(
+            {
+                _id: new Types.ObjectId(courseId),
+                instructorId: new Types.ObjectId(instructorId),
+                'sections._id': new Types.ObjectId(sectionId)
+            },
+            { $push: { 'sections.$.lessons': dto } },
+            { new: true }
+        ).exec();
+
+        if (!updated) throw new NotFoundException('Invalid Course, Section, or Ownership');
+
+        await this.coursesService.syncMetadata(courseId);
+        return updated.sections;
+    }
+
+
+    async updateLesson(courseId: string, sectionId: string, lessonId: string, instructorId: string, dto: any) {
+
+
+        if (!dto || Object.keys(dto).length === 0) {
+            throw new BadRequestException('Update data (Request Body) cannot be empty');
         }
 
-        return course;
+        const updateFields: Record<string, any> = {};
+
+        Object.keys(dto).forEach(key => {
+            updateFields[`sections.$[s].lessons.$[l].${key}`] = dto[key];
+        });
+
+        const updated = await this.courseModel.findOneAndUpdate(
+            {
+                _id: new Types.ObjectId(courseId),
+                instructorId: new Types.ObjectId(instructorId)
+            },
+            { $set: updateFields },
+            {
+                arrayFilters: [
+                    { 's._id': new Types.ObjectId(sectionId) },
+                    { 'l._id': new Types.ObjectId(lessonId) }
+                ],
+                new: true
+            }
+        ).exec();
+
+        if (!updated) throw new BadRequestException('Update failed: Course/Section not found or Unauthorized');
+
+        await this.coursesService.syncMetadata(courseId);
+        return updated.sections;
     }
 
-    // ADD LESSON
-    async addLesson(courseId: string, sectionId: string, dto: CreateLessonDto) {
-        const course = await this.getCourse(courseId);
 
-        const section = (course.sections as any).id(sectionId);
+    async removeLesson(courseId: string, sectionId: string, lessonId: string, instructorId: string) {
+        const updated = await this.courseModel.findOneAndUpdate(
+            {
+                _id: new Types.ObjectId(courseId),
+                instructorId: new Types.ObjectId(instructorId),
+                'sections._id': new Types.ObjectId(sectionId)
+            },
+            { $pull: { 'sections.$.lessons': { _id: new Types.ObjectId(lessonId) } } },
+            { new: true }
+        ).exec();
 
-        if (!section) throw new NotFoundException('Section not found');
+        if (!updated) throw new BadRequestException('Delete failed');
 
-        const newLesson = { ...dto };
-
-        section.lessons.push(newLesson);
-
-        course.totalLessons += 1;
-        course.totalVideos += 1;
-
-        await course.save();
-
-        return section.lessons;
-    }
-
-    // GET ALL LESSONS
-    async getLessons(courseId: string, sectionId: string) {
-        const course = await this.getCourse(courseId);
-
-        const section = (course.sections as any).id(sectionId);
-
-        if (!section) throw new NotFoundException('Section not found');
-
-        return section.lessons;
-    }
-
-    //  GET ONE LESSON
-    async getLesson(courseId: string, sectionId: string, lessonId: string) {
-        const course = await this.getCourse(courseId);
-
-        const section = (course.sections as any).id(sectionId);
-
-        if (!section) throw new NotFoundException('Section not found');
-
-        const lesson = section.lessons.id(lessonId);
-
-        if (!lesson) throw new NotFoundException('Lesson not found');
-
-        return lesson;
-    }
-
-    // UPDATE LESSON
-    async updateLesson(
-        courseId: string,
-        sectionId: string,
-        lessonId: string,
-        dto: Partial<CreateLessonDto>,
-    ) {
-        const course = await this.getCourse(courseId);
-
-        const section = (course.sections as any).id(sectionId);
-
-        if (!section) throw new NotFoundException('Section not found');
-
-        const lesson = section.lessons.id(lessonId);
-
-        if (!lesson) throw new NotFoundException('Lesson not found');
-
-        Object.assign(lesson, dto);
-
-        await course.save();
-
-        return lesson;
-    }
-
-    // DELETE LESSON
-    async deleteLesson(courseId: string, sectionId: string, lessonId: string) {
-        const course = await this.getCourse(courseId);
-
-        const section = (course.sections as any).id(sectionId);
-
-        if (!section) throw new NotFoundException('Section not found');
-
-        const lesson = section.lessons.id(lessonId);
-
-        if (!lesson) throw new NotFoundException('Lesson not found');
-
-        section.lessons.pull(lessonId);
-
-        course.totalLessons -= 1;
-        course.totalVideos -= 1;
-
-        await course.save();
-
-        return { message: 'Lesson deleted successfully' };
+        await this.coursesService.syncMetadata(courseId);
+        return { success: true, message: 'Lesson removed successfully' };
     }
 }

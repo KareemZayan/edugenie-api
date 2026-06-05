@@ -1,12 +1,21 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 import { Lesson, LessonSchema } from './lesson.schema';
 
-@Schema({ _id: true, timestamps: true })
+export type SectionDocument = HydratedDocument<Section>;
+
+@Schema({ timestamps: true })
 export class Section {
-    @Prop({ required: true, trim: true })
+
+
+    @Prop({ required: true, trim: true, index: true })
     title!: string;
 
-    @Prop({ required: true, minlength: 10 })
+    @Prop({
+        required: true,
+        trim: true,
+        minlength: 10,
+    })
     description!: string;
 
     @Prop({ type: [String], default: [] })
@@ -16,8 +25,7 @@ export class Section {
     isBasicSection!: boolean;
 
     @Prop({ type: [LessonSchema], default: [] })
-    lessons!: Lesson[];
-    id: any;
+    lessons!: Types.DocumentArray<Lesson>;
 }
 
 export const SectionSchema = SchemaFactory.createForClass(Section);
