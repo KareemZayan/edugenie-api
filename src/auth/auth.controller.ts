@@ -35,10 +35,22 @@ export class AuthController {
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 1 day expiration
     });
-    // 4. Return the user info (so Next.js knows what role they are for the redirect!)
     return {
       message: 'Login successful',
       user: userData,
+    };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.clearCookie('jwt', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+    });
+    return {
+      message: 'Logout successful',
     };
   }
 }

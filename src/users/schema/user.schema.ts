@@ -1,18 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
-export enum UserRole {
-  STUDENT = 'student',
-  INSTRUCTOR = 'instructor',
-  ADMIN = 'admin',
-  SUPERADMIN = 'superadmin',
-}
-
-export enum UserLevel {
-  BEGINNER = 'beginner',
-  INTERMEDIATE = 'intermediate',
-  ADVANCED = 'advanced',
-}
+import { UserRole } from '../../common/enums/user-role.enum';
+import { UserLevel } from '../enums/user-level.enum';
 
 @Schema({ timestamps: true })
 export class User extends Document {

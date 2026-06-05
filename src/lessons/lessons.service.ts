@@ -15,7 +15,7 @@ export class LessonsService {
   constructor(
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private coursesService: CoursesService,
-  ) {}
+  ) { }
 
   async addLesson(
     courseId: string,
@@ -31,7 +31,7 @@ export class LessonsService {
           'sections._id': new Types.ObjectId(sectionId),
         },
         { $push: { 'sections.$.lessons': createLessonDto } },
-        { new: true },
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
 
@@ -75,8 +75,8 @@ export class LessonsService {
             { 's._id': new Types.ObjectId(sectionId) },
             { 'l._id': new Types.ObjectId(lessonId) },
           ],
-          new: true,
-        },
+          returnDocument: 'after', runValidators: true
+        }
       )
       .exec();
 
@@ -107,7 +107,7 @@ export class LessonsService {
             'sections.$.lessons': { _id: new Types.ObjectId(lessonId) },
           },
         },
-        { new: true },
+        { returnDocument: 'after', runValidators: true }
       )
       .exec();
 

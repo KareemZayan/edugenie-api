@@ -7,39 +7,41 @@ import {
   Param,
   Delete,
   UseGuards,
-  Req,
+  Query,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/schema/user.schema';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.INSTRUCTOR)
 @Controller('courses')
 export class CoursesController {
   constructor(private readonly coursesService: CoursesService) {}
 
+  @Roles(UserRole.INSTRUCTOR)
   @Post()
   create(
     @Body() createCourseDto: CreateCourseDto,
-    @Req() req: { user: { userId: string } },
+    @CurrentUser() user: { userId: string },
   ) {
-    return this.coursesService.create(createCourseDto, req.user.userId);
+    return this.coursesService.create(createCourseDto, user.userId);
   }
 
+  @Roles(UserRole.INSTRUCTOR)
   @Get('my-courses')
-  async findInstructorCourses(@Req() req: { user: { userId: string } }) {
-    return this.coursesService.findInstructorCourses(req.user.userId);
+  async findInstructorCourses(@CurrentUser() user: { userId: string }) {
+    return this.coursesService.findInstructorCourses(user.userId);
   }
 
-  // @Get()
-  // findAll() {
-  //   return this.coursesService.findAll();
-  // }
+  @Get()
+  findAll(@Query('skip') skip?: number, @Query('limit') limit?: number) {
+    return this.coursesService.findAll(skip ? +skip : 0, limit ? +limit : 10);
+  }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -51,14 +53,14 @@ export class CoursesController {
   update(
     @Param('id') id: string,
     @Body() updateCourseDto: UpdateCourseDto,
-    @Req() req: { user: { userId: string } },
+    @CurrentUser() user: { userId: string },
   ) {
-    return this.coursesService.update(id, req.user.userId, updateCourseDto);
+    return this.coursesService.update(id, user.userId, updateCourseDto);
   }
 
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string, @Req() req: { user: { userId: string } }) {
-    return this.coursesService.remove(id, req.user.userId);
+  remove(@Param('id') id: string, @CurrentUser() user: { userId: string }) {
+    return this.coursesService.remove(id, user.userId);
   }
 }

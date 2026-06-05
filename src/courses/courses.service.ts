@@ -9,13 +9,13 @@ import { Model, Types } from 'mongoose';
 import { Course } from './schema/course.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
-import { CourseStatus } from '../shared/enums/status.enum';
+import { CourseStatus } from './enums/course-status.enum';
 
 @Injectable()
 export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
-  ) {}
+  ) { }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<Course> {
     if (!instructorId)
@@ -28,11 +28,23 @@ export class CoursesService {
     });
   }
 
-  async findAll() {
-    return await this.courseModel
-      .find({ courseStatus: CourseStatus.PUBLISHED })
-      .populate('instructorId', 'name avatar')
-      .exec();
+  async findAll(skip = 0, limit = 10) {
+    const [data, total] = await Promise.all([
+      this.courseModel
+        .find({ courseStatus: CourseStatus.PUBLISHED })
+        .skip(skip)
+        .limit(limit)
+        .populate('instructorId', 'name avatar')
+        .exec(),
+      this.courseModel.countDocuments({ courseStatus: CourseStatus.PUBLISHED }),
+    ]);
+
+    return {
+      data,
+      total,
+      skip,
+      limit,
+    };
   }
 
   async findInstructorCourses(instructorId: string) {
@@ -59,7 +71,7 @@ export class CoursesService {
     const updated = await this.courseModel.findOneAndUpdate(
       { _id: id, instructorId: new Types.ObjectId(instructorId) },
       { $set: dto },
-      { new: true },
+      { returnDocument: 'after', runValidators: true }
     );
     if (!updated) throw new ForbiddenException('Not authorized');
     return updated;

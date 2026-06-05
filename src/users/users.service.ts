@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User } from './schema/user.schema';
@@ -7,7 +11,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<User>) {}
+  constructor(@InjectModel(User.name) private userModel: Model<User>) { }
 
   async createUser(createUserDto: CreateUserDto): Promise<User> {
     const existingUser = await this.userModel.findOne({
@@ -27,7 +31,10 @@ export class UsersService {
   }
 
   async getProfile(userId: string) {
-    const user = await this.userModel.findById(userId).select('-password -passwordReset').exec();
+    const user = await this.userModel
+      .findById(userId)
+      .select('-password -passwordReset')
+      .exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -40,11 +47,14 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    const updatedUser = await this.userModel.findByIdAndUpdate(
-      userId,
-      { $set: updateUserDto },
-      { new: true, runValidators: true }
-    ).select('-password -passwordReset').exec();
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(
+        userId,
+        { $set: updateUserDto },
+        { returnDocument: 'after', runValidators: true }
+      )
+      .select('-password -passwordReset')
+      .exec();
 
     if (!updatedUser) {
       throw new NotFoundException('User not found');
