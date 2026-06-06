@@ -1,3 +1,4 @@
+import 'dotenv/config'; // Must be the very first line!
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import mongoose from 'mongoose';
@@ -8,8 +9,12 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { MongoExceptionFilter } from './common/filters/mongo-exception.filter';
+
+import { v2 as cloudinary } from 'cloudinary';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
 
   app.use(helmet());
   app.use(cookieParser());

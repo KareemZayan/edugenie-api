@@ -84,25 +84,35 @@ export class CoursesService {
   }
 
   async syncMetadata(courseId: string) {
-    const course = await this.courseModel.findById(courseId);
-    if (!course) return;
-    let lessonsCount = 0;
-    let totalSeconds = 0;
-    course.sections.forEach((s) => {
-      lessonsCount += s.lessons.length;
-      totalSeconds += s.lessons.reduce(
-        (acc, curr) => acc + curr.videoDuration,
-        0,
-      );
-    });
+    // Use MongoDB Aggregation to calculate totals entirely inside the database (Super fast, zero memory overhead)
+    const [stats] = await this.courseModel.aggregate([
+      { $match: { _id: new Types.ObjectId(courseId) } },
+      { $unwind: '$sections' },
+      { $unwind: { path: '$sections.lessons', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: '$_id',
+          totalLessons: { $sum: { $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0] } },
+          // IMPORTANT: Assuming you fixed lessons.service.ts to save `duration` in SECONDS
+          totalDurationSeconds: { $sum: '$sections.lessons.duration' },
+        },
+      },
+    ]);
+
+    if (!stats) return;
+
+    const totalHour = Math.round((stats.totalDurationSeconds || 0) / 3600);
+
+    // Update the course with the new metadata
     await this.courseModel.updateOne(
-      { _id: courseId },
+      { _id: new Types.ObjectId(courseId) },
       {
         $set: {
-          totalLessons: lessonsCount,
-          totalHour: Math.round(totalSeconds / 3600),
+          totalLessons: stats.totalLessons,
+          totalHour: totalHour,
         },
       },
     );
   }
+
 }

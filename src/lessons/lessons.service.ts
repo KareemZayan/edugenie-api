@@ -9,6 +9,9 @@ import { Course } from '../courses/schema/course.schema';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { CoursesService } from '../courses/courses.service';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
+import { v2 as cloudinary } from 'cloudinary';
+import * as fs from 'fs';
+import { getVideoDurationInSeconds } from 'get-video-duration';
 
 @Injectable()
 export class LessonsService {
@@ -115,5 +118,59 @@ export class LessonsService {
 
     await this.coursesService.syncMetadata(courseId);
     return { success: true, message: 'Lesson removed successfully' };
+  }
+
+  async addLessonWithVideo(
+    courseId: string,
+    sectionId: string,
+    instructorId: string,
+    createLessonDto: any,
+    localFilePath: string,
+  ) {
+    try {
+      // 1. Check Video Duration
+      const durationInSeconds = await getVideoDurationInSeconds(localFilePath);
+      const durationInMinutes = Math.floor(durationInSeconds / 60);
+      if (durationInMinutes > 20) {
+        fs.unlinkSync(localFilePath); // Delete local file
+        throw new BadRequestException('Video exceeds the 20-minute maximum limit.');
+      }
+      // 2. Upload to Cloudinary (It will automatically use CLOUDINARY_URL from your .env)
+      const cloudinaryResponse = await cloudinary.uploader.upload(localFilePath, {
+        resource_type: 'video',
+        folder: `edugenie/courses/${courseId}`,
+      });
+      // 3. Delete the local file to save space
+      fs.unlinkSync(localFilePath);
+      // 4. Attach Cloudinary URL and duration to the DTO
+      const newLesson = {
+        ...createLessonDto,
+        videoUrl: cloudinaryResponse.secure_url,
+        videoPublicId: cloudinaryResponse.public_id,
+        videoDuration: durationInSeconds,
+      };
+      // 5. Save to MongoDB
+      const updatedCourse = await this.courseModel
+        .findOneAndUpdate(
+          {
+            _id: new Types.ObjectId(courseId),
+            instructorId: new Types.ObjectId(instructorId),
+            'sections._id': new Types.ObjectId(sectionId),
+          },
+          { $push: { 'sections.$.lessons': newLesson } },
+          { returnDocument: 'after', runValidators: true },
+        )
+        .exec();
+      if (!updatedCourse) {
+        throw new NotFoundException('Course or Section not found, or Unauthorized');
+      }
+      await this.coursesService.syncMetadata(courseId);
+      return { success: true, message: 'Lesson created successfully!', data: newLesson };
+    } catch (error) {
+      if (fs.existsSync(localFilePath)) {
+        fs.unlinkSync(localFilePath);
+      }
+      throw error;
+    }
   }
 }

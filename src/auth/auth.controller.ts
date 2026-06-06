@@ -13,7 +13,7 @@ import { LoginDto } from './dto/login.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Post('register')
   register(@Body() createUserDto: CreateUserDto) {
@@ -33,6 +33,7 @@ export class AuthController {
       httpOnly: true, // Prevents JavaScript from reading it (XSS protection)
       secure: process.env.NODE_ENV === 'production', // Use HTTPS in production
       sameSite: 'none',
+      path: "/",
       maxAge: 24 * 60 * 60 * 1000, // 1 day expiration
     });
     return {
@@ -47,7 +48,8 @@ export class AuthController {
     response.clearCookie('jwt', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'none',
+      path: "/",
     });
     return {
       message: 'Logout successful',
