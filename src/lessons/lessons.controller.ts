@@ -77,7 +77,6 @@ export class LessonsController {
 
 
 
-
   @Post('video')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
@@ -105,6 +104,7 @@ export class LessonsController {
       },
     }),
   )
+
   async addLessonWithVideo(
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,

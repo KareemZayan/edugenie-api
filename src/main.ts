@@ -30,10 +30,13 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
   app.enableCors({
-    origin: ['https://edugenie-dashboard.vercel.app', 'http://localhost:4200'],
+    origin: [
+      'https://edugenie-dashboard.vercel.app',
+      'http://localhost:4200'
+    ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
-
   mongoose.connection.on('connected', () => {
     console.log('Successfully connected to MongoDB');
   });
