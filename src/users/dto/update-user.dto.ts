@@ -7,7 +7,7 @@ import {
   MaxLength,
   IsUrl,
 } from 'class-validator';
-import { UserLevel } from '../enums/user-level.enum';
+import { UserLevel } from '../../common/enums/user-level.enum';
 
 export class UpdateUserDto {
   @IsOptional()

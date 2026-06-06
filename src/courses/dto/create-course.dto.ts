@@ -11,8 +11,8 @@ import {
   IsUrl,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CourseLevel } from '../enums/course-level.enum';
-import { CourseStatus } from '../enums/course-status.enum';
+import { CourseLevel } from '../../common/enums/course-level.enum';
+import { CourseStatus } from '../../common/enums/course-status.enum';
 
 export class CreateCourseDto {
   @IsString()

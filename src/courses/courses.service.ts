@@ -9,7 +9,7 @@ import { Model, Types } from 'mongoose';
 import { Course } from './schema/course.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
-import { CourseStatus } from './enums/course-status.enum';
+import { CourseStatus } from '../common/enums/course-status.enum';
 
 @Injectable()
 export class CoursesService {

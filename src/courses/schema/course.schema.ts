@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { CourseLevel } from '../enums/course-level.enum';
-import { CourseStatus } from '../enums/course-status.enum';
+import { CourseLevel } from '../../common/enums/course-level.enum';
+import { CourseStatus } from '../../common/enums/course-status.enum';
 import { Section, SectionSchema } from '../../sections/schema/section.schema';
 
 export type CourseDocument = HydratedDocument<Course>;
