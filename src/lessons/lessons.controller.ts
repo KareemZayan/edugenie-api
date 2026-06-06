@@ -83,7 +83,7 @@ export class LessonsController {
   @UseInterceptors(
     FileInterceptor('video', {
       storage: diskStorage({
-        destination: './uploads/videos',
+        destination: '/tmp', // Vercel ONLY allows writing to the /tmp folder!
         filename: (req, file, cb) => {
           const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
           cb(null, `lesson-${uniqueSuffix}${extname(file.originalname)}`);
