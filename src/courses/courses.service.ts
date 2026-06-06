@@ -49,7 +49,6 @@ export class CoursesService {
 
   async findInstructorCourses(instructorId: string) {
     if (!instructorId) return [];
-
     return await this.courseModel
       .find({ instructorId: new Types.ObjectId(instructorId) })
       .sort({ createdAt: -1 })
