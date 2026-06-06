@@ -11,7 +11,7 @@ import { CoursesService } from '../courses/courses.service';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { v2 as cloudinary } from 'cloudinary';
 import * as fs from 'fs';
-import { getVideoDurationInSeconds } from 'get-video-duration';
+
 
 @Injectable()
 export class LessonsService {
@@ -128,13 +128,7 @@ export class LessonsService {
     localFilePath: string,
   ) {
     try {
-      // 1. Check Video Duration
-      const durationInSeconds = await getVideoDurationInSeconds(localFilePath);
-      const durationInMinutes = Math.floor(durationInSeconds / 60);
-      if (durationInMinutes > 20) {
-        fs.unlinkSync(localFilePath); // Delete local file
-        throw new BadRequestException('Video exceeds the 20-minute maximum limit.');
-      }
+      // 1. We will get the duration directly from Cloudinary after upload instead!
       // 2. Upload to Cloudinary (It will automatically use CLOUDINARY_URL from your .env)
       const cloudinaryResponse = await cloudinary.uploader.upload(localFilePath, {
         resource_type: 'video',
@@ -147,7 +141,7 @@ export class LessonsService {
         ...createLessonDto,
         videoUrl: cloudinaryResponse.secure_url,
         videoPublicId: cloudinaryResponse.public_id,
-        videoDuration: durationInSeconds,
+        videoDuration: cloudinaryResponse.duration, // Get duration directly from Cloudinary!
       };
       // 5. Save to MongoDB
       const updatedCourse = await this.courseModel
