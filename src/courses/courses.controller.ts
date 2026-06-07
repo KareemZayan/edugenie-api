@@ -38,6 +38,12 @@ export class CoursesController {
     return this.coursesService.findInstructorCourses(user.userId);
   }
 
+  @Roles(UserRole.INSTRUCTOR)
+  @Get('instructor-stats')
+  async getInstructorStats(@CurrentUser() user: { userId: string }) {
+    return this.coursesService.getInstructorStats(user.userId);
+  }
+
   @Get()
   findAll(@Query('skip') skip?: number, @Query('limit') limit?: number) {
     return this.coursesService.findAll(skip ? +skip : 0, limit ? +limit : 10);
