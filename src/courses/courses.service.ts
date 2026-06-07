@@ -82,6 +82,7 @@ export class CoursesService {
     return { success: true };
   }
 
+
   async syncMetadata(courseId: string) {
     // Use MongoDB Aggregation to calculate totals entirely inside the database (Super fast, zero memory overhead)
     const [stats] = await this.courseModel.aggregate([
@@ -112,6 +113,71 @@ export class CoursesService {
         },
       },
     );
+  }
+
+  async getInstructorStats(instructorId: string) {
+    const [result] = await this.courseModel.aggregate([
+      {
+        $match: { instructorId: new Types.ObjectId(instructorId) },
+      },
+      {
+        $facet: {
+          courseData: [
+            {
+              $group: {
+                _id: null,
+                totalCourses: { $sum: 1 },
+                publishedCourses: {
+                  $sum: { $cond: [{ $eq: ['$courseStatus', CourseStatus.PUBLISHED] }, 1, 0] },
+                },
+                // Since syncMetadata saves totalLessons at the root, we can just sum it here instantly!
+                totalLessons: { $sum: { $ifNull: ['$totalLessons', 0] } },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const courseStats = result?.courseData[0] || { totalCourses: 0, publishedCourses: 0, totalLessons: 0 };
+
+    // Return the EXACT interface required by your Angular UI
+    // We dynamically calculate courses/lessons, but mock the financial data until the Payment phase.
+    return {
+      stats: {
+        totalCourses: courseStats.totalCourses,
+        publishedCourses: courseStats.publishedCourses,
+        totalLessons: courseStats.totalLessons,
+        totalEarnings: 12450.00,
+        earningsGrowth: 14,
+        pendingPayouts: 1200.00,
+        nextPayoutDate: '2023-10-15T00:00:00.000Z',
+        totalStudents: 1420,
+        studentsGrowth: 52,
+      },
+      revenueChart: {
+        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+        data: [1200, 1900, 3000, 5000, 2000, 3000],
+      },
+      recentSales: [
+        {
+          id: '1',
+          studentName: 'John Doe',
+          courseTitle: 'Advanced Angular',
+          date: new Date().toISOString(),
+          price: 49.99,
+          status: 'COMPLETED',
+        },
+        {
+          id: '2',
+          studentName: 'Jane Smith',
+          courseTitle: 'NestJS Microservices',
+          date: new Date().toISOString(),
+          price: 99.99,
+          status: 'COMPLETED',
+        }
+      ],
+    };
   }
 
 }
