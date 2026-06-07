@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { CoursesModule } from './courses/courses.module';
 import { SectionsModule } from './sections/sections.module';
 import { LessonsModule } from './lessons/lessons.module';
+import { CategoriesModule } from './categories/categories.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { LessonsModule } from './lessons/lessons.module';
     CoursesModule,
     SectionsModule,
     LessonsModule,
+    CategoriesModule
   ],
   controllers: [AppController],
   providers: [AppService],
