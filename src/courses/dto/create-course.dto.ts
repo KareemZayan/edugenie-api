@@ -52,7 +52,8 @@ export class CreateCourseDto {
   @IsString({ each: true })
   requirements?: string[];
 
+  @IsOptional()
   @IsEnum(CourseStatus)
-  courseStatus!: CourseStatus;
+  courseStatus?: CourseStatus;
 
 }

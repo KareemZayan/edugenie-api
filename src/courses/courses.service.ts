@@ -180,4 +180,69 @@ export class CoursesService {
     };
   }
 
+
+  async submitForReview(courseId: string, instructorId: string) {
+    const course = await this.courseModel.findOne({
+      _id: new Types.ObjectId(courseId),
+      instructorId: new Types.ObjectId(instructorId),
+    }).exec();
+
+    if (!course) throw new NotFoundException('Course not found or unauthorized');
+
+    // 1. Validation: Details
+    if (!course.title || course.title.trim() === '') throw new BadRequestException('Course title is required before publishing.');
+    if (!course.description || course.description.trim() === '') throw new BadRequestException('Course description is required before publishing.');
+    if (course.price === undefined || course.price < 0) throw new BadRequestException('Course price must be set (can be 0 for free).');
+    if (!course.thumbnail || course.thumbnail.trim() === '') throw new BadRequestException('Course thumbnail is required.');
+
+    // 2. Validation: Content (Must have at least one section)
+    if (!course.sections || course.sections.length === 0) {
+      throw new BadRequestException('Course must have at least one section before publishing.');
+    }
+
+    // 3. Validation: Videos (Must have at least one lesson with a video)
+    let hasVideo = false;
+    for (const section of course.sections) {
+      if (section.lessons && section.lessons.length > 0) {
+        for (const lesson of section.lessons) {
+          if (lesson.videoUrl && lesson.videoUrl.trim() !== '') {
+            hasVideo = true;
+            break;
+          }
+        }
+      }
+      if (hasVideo) break;
+    }
+
+    if (!hasVideo) {
+      throw new BadRequestException('Course must contain at least one lesson with a valid video URL.');
+    }
+
+    // Pass: Change Status
+    course.courseStatus = CourseStatus.UNDER_REVIEW;
+    await course.save();
+
+    return { success: true, message: 'Course successfully submitted for Admin Review.', status: course.courseStatus };
+  }
+
+  async approveCourse(courseId: string) {
+    const course = await this.courseModel.findOneAndUpdate(
+      { _id: new Types.ObjectId(courseId), courseStatus: CourseStatus.UNDER_REVIEW },
+      { $set: { courseStatus: CourseStatus.PUBLISHED } },
+      { new: true }
+    );
+    if (!course) throw new NotFoundException('Course not found or not under review.');
+    return { success: true, message: 'Course has been approved and published.', status: course.courseStatus };
+  }
+
+  async rejectCourse(courseId: string) {
+    const course = await this.courseModel.findOneAndUpdate(
+      { _id: new Types.ObjectId(courseId), courseStatus: CourseStatus.UNDER_REVIEW },
+      { $set: { courseStatus: CourseStatus.REJECTED } },
+      { new: true }
+    );
+    if (!course) throw new NotFoundException('Course not found or not under review.');
+    return { success: true, message: 'Course has been rejected and returned to instructor.', status: course.courseStatus };
+  }
+
 }
