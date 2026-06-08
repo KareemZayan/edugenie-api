@@ -24,7 +24,11 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsUrl({}, { message: 'Avatar must be a valid URL' })
-  avatar?: string;
+  avatar?: string | null;
+
+  @IsOptional()
+  @IsString()
+  avatarPublicId?: string | null;
 
   @IsOptional()
   @IsEnum(UserLevel)
