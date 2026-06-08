@@ -24,6 +24,9 @@ export class User extends Document {
   @Prop()
   avatar?: string;
 
+  @Prop()
+  avatarPublicId?: string;
+
   @Prop({ enum: UserLevel })
   level?: UserLevel;
 
