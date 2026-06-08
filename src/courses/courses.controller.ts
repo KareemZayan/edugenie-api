@@ -23,6 +23,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class CoursesController {
   constructor(private readonly coursesService: CoursesService) { }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Post()
   create(
@@ -32,12 +33,14 @@ export class CoursesController {
     return this.coursesService.create(createCourseDto, user.userId);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Get('my-courses')
   async findInstructorCourses(@CurrentUser() user: { userId: string }) {
     return this.coursesService.findInstructorCourses(user.userId);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Get('instructor-stats')
   async getInstructorStats(@CurrentUser() user: { userId: string }) {
@@ -54,6 +57,7 @@ export class CoursesController {
     return this.coursesService.findOne(id);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Patch(':id')
   update(
@@ -64,6 +68,7 @@ export class CoursesController {
     return this.coursesService.update(id, user.userId, updateCourseDto);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: { userId: string }) {
