@@ -15,7 +15,7 @@ import { CourseStatus } from '../common/enums/course-status.enum';
 export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
-  ) { }
+  ) {}
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<Course> {
     if (!instructorId)
