@@ -16,7 +16,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @UseGuards(JwtAuthGuard)
 @Controller('courses/:courseId/sections/:sectionId/lessons')
 export class LessonsController {
-  constructor(private readonly lessonsService: LessonsService) { }
+  constructor(private readonly lessonsService: LessonsService) {}
 
   @Post()
   addLesson(
