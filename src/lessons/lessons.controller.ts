@@ -12,12 +12,16 @@ import { CreateLessonDto } from './dto/create-lesson.dto';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
 
-@UseGuards(JwtAuthGuard)
 @Controller('courses/:courseId/sections/:sectionId/lessons')
 export class LessonsController {
   constructor(private readonly lessonsService: LessonsService) {}
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
   @Post()
   addLesson(
     @Param('courseId') courseId: string,
@@ -35,9 +39,11 @@ export class LessonsController {
     );
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
   @Patch(':lessonId')
   updateLesson(
-    @Param('id') courseId: string,
+    @Param('courseId') courseId: string,
     @Param('sectionId') sectionId: string,
     @Param('lessonId') lessonId: string,
     @Body() updateLessonDto: UpdateLessonDto,
@@ -52,9 +58,11 @@ export class LessonsController {
     );
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
   @Delete(':lessonId')
   removeLesson(
-    @Param('id') courseId: string,
+    @Param('courseId') courseId: string,
     @Param('sectionId') sectionId: string,
     @Param('lessonId') lessonId: string,
     @CurrentUser() user: { userId: string },
