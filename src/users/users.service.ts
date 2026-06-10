@@ -12,7 +12,7 @@ import { v2 as cloudinary } from 'cloudinary';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<User>) { }
+  constructor(@InjectModel(User.name) private userModel: Model<User>) {}
 
   async createUser(createUserDto: CreateUserDto): Promise<User> {
     const existingUser = await this.userModel.findOne({
@@ -70,11 +70,14 @@ export class UsersService {
           }
         }
       }
-      
-      // If user is deleting avatar, ensure we also nullify avatarPublicId 
+
+      // If user is deleting avatar, ensure we also nullify avatarPublicId
       // just in case they didn't send it explicitly
-      if (updateUserDto.avatar === null && updateUserDto.avatarPublicId === undefined) {
-          updateUserDto.avatarPublicId = null;
+      if (
+        updateUserDto.avatar === null &&
+        updateUserDto.avatarPublicId === undefined
+      ) {
+        updateUserDto.avatarPublicId = null;
       }
     }
 
@@ -82,7 +85,7 @@ export class UsersService {
       .findByIdAndUpdate(
         userId,
         { $set: updateUserDto },
-        { returnDocument: 'after', runValidators: true }
+        { returnDocument: 'after', runValidators: true },
       )
       .select('-password -passwordReset')
       .exec();
