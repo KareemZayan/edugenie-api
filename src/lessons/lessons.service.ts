@@ -10,13 +10,12 @@ import { CreateLessonDto } from './dto/create-lesson.dto';
 import { CoursesService } from '../courses/courses.service';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 
-
 @Injectable()
 export class LessonsService {
   constructor(
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private coursesService: CoursesService,
-  ) { }
+  ) {}
 
   async addLesson(
     courseId: string,
@@ -76,8 +75,9 @@ export class LessonsService {
             { 's._id': new Types.ObjectId(sectionId) },
             { 'l._id': new Types.ObjectId(lessonId) },
           ],
-          returnDocument: 'after', runValidators: true
-        }
+          returnDocument: 'after',
+          runValidators: true,
+        },
       )
       .exec();
 
@@ -108,7 +108,7 @@ export class LessonsService {
             'sections.$.lessons': { _id: new Types.ObjectId(lessonId) },
           },
         },
-        { returnDocument: 'after', runValidators: true }
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
 
@@ -117,6 +117,4 @@ export class LessonsService {
     await this.coursesService.syncMetadata(courseId);
     return { success: true, message: 'Lesson removed successfully' };
   }
-
-
 }
