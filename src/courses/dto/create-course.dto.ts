@@ -55,5 +55,4 @@ export class CreateCourseDto {
   @IsOptional()
   @IsEnum(CourseStatus)
   courseStatus?: CourseStatus;
-
 }
