@@ -33,7 +33,7 @@ import { CategoriesModule } from './categories/categories.module';
     CoursesModule,
     SectionsModule,
     LessonsModule,
-    CategoriesModule
+    CategoriesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

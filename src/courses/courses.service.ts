@@ -70,7 +70,7 @@ export class CoursesService {
     const updated = await this.courseModel.findOneAndUpdate(
       { _id: id, instructorId: new Types.ObjectId(instructorId) },
       { $set: dto },
-      { returnDocument: 'after', runValidators: true }
+      { returnDocument: 'after', runValidators: true },
     );
     if (!updated) throw new ForbiddenException('Not authorized');
     return updated;
@@ -82,24 +82,37 @@ export class CoursesService {
     return { success: true };
   }
 
-
   async syncMetadata(courseId: string) {
     // Use MongoDB Aggregation to calculate totals entirely inside the database (Super fast, zero memory overhead)
-    const [stats] = await this.courseModel.aggregate([
+    const result = await this.courseModel.aggregate<{
+      _id: Types.ObjectId;
+      totalLessons: number;
+      totalDurationSeconds: number;
+    }>([
       { $match: { _id: new Types.ObjectId(courseId) } },
       { $unwind: '$sections' },
-      { $unwind: { path: '$sections.lessons', preserveNullAndEmptyArrays: true } },
+      {
+        $unwind: {
+          path: '$sections.lessons',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
       {
         $group: {
           _id: '$_id',
-          totalLessons: { $sum: { $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0] } },
+          totalLessons: {
+            $sum: {
+              $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0],
+            },
+          },
           // IMPORTANT: Assuming you fixed lessons.service.ts to save `duration` in SECONDS
           totalDurationSeconds: { $sum: '$sections.lessons.duration' },
         },
       },
     ]);
 
-    if (!stats) return;
+    if (!result || result.length === 0) return;
+    const stats = result[0];
 
     const totalHour = Math.round((stats.totalDurationSeconds || 0) / 3600);
 
@@ -116,7 +129,13 @@ export class CoursesService {
   }
 
   async getInstructorStats(instructorId: string) {
-    const [result] = await this.courseModel.aggregate([
+    const result = await this.courseModel.aggregate<{
+      courseData: {
+        totalCourses: number;
+        publishedCourses: number;
+        totalLessons: number;
+      }[];
+    }>([
       {
         $match: { instructorId: new Types.ObjectId(instructorId) },
       },
@@ -128,7 +147,13 @@ export class CoursesService {
                 _id: null,
                 totalCourses: { $sum: 1 },
                 publishedCourses: {
-                  $sum: { $cond: [{ $eq: ['$courseStatus', CourseStatus.PUBLISHED] }, 1, 0] },
+                  $sum: {
+                    $cond: [
+                      { $eq: ['$courseStatus', CourseStatus.PUBLISHED] },
+                      1,
+                      0,
+                    ],
+                  },
                 },
                 // Since syncMetadata saves totalLessons at the root, we can just sum it here instantly!
                 totalLessons: { $sum: { $ifNull: ['$totalLessons', 0] } },
@@ -139,7 +164,12 @@ export class CoursesService {
       },
     ]);
 
-    const courseStats = result?.courseData[0] || { totalCourses: 0, publishedCourses: 0, totalLessons: 0 };
+    const aggregateStats = result && result.length > 0 ? result[0] : null;
+    const courseStats = aggregateStats?.courseData?.[0] || {
+      totalCourses: 0,
+      publishedCourses: 0,
+      totalLessons: 0,
+    };
 
     // Return the EXACT interface required by your Angular UI
     // We dynamically calculate courses/lessons, but mock the financial data until the Payment phase.
@@ -148,9 +178,9 @@ export class CoursesService {
         totalCourses: courseStats.totalCourses,
         publishedCourses: courseStats.publishedCourses,
         totalLessons: courseStats.totalLessons,
-        totalEarnings: 12450.00,
+        totalEarnings: 12450.0,
         earningsGrowth: 14,
-        pendingPayouts: 1200.00,
+        pendingPayouts: 1200.0,
         nextPayoutDate: '2023-10-15T00:00:00.000Z',
         totalStudents: 1420,
         studentsGrowth: 52,
@@ -175,9 +205,109 @@ export class CoursesService {
           date: new Date().toISOString(),
           price: 99.99,
           status: 'COMPLETED',
-        }
+        },
       ],
     };
   }
 
+  async submitForReview(courseId: string, instructorId: string) {
+    const course = await this.courseModel
+      .findOne({
+        _id: new Types.ObjectId(courseId),
+        instructorId: new Types.ObjectId(instructorId),
+      })
+      .exec();
+
+    if (!course)
+      throw new NotFoundException('Course not found or unauthorized');
+
+    // 1. Validation: Details
+    if (!course.title || course.title.trim() === '')
+      throw new BadRequestException(
+        'Course title is required before publishing.',
+      );
+    if (!course.description || course.description.trim() === '')
+      throw new BadRequestException(
+        'Course description is required before publishing.',
+      );
+    if (course.price === undefined || course.price < 0)
+      throw new BadRequestException(
+        'Course price must be set (can be 0 for free).',
+      );
+    if (!course.thumbnail || course.thumbnail.trim() === '')
+      throw new BadRequestException('Course thumbnail is required.');
+
+    // 2. Validation: Content (Must have at least one section)
+    if (!course.sections || course.sections.length === 0) {
+      throw new BadRequestException(
+        'Course must have at least one section before publishing.',
+      );
+    }
+
+    // 3. Validation: Videos (Must have at least one lesson with a video)
+    let hasVideo = false;
+    for (const section of course.sections) {
+      if (section.lessons && section.lessons.length > 0) {
+        for (const lesson of section.lessons) {
+          if (lesson.videoUrl && lesson.videoUrl.trim() !== '') {
+            hasVideo = true;
+            break;
+          }
+        }
+      }
+      if (hasVideo) break;
+    }
+
+    if (!hasVideo) {
+      throw new BadRequestException(
+        'Course must contain at least one lesson with a valid video URL.',
+      );
+    }
+
+    // Pass: Change Status
+    course.courseStatus = CourseStatus.UNDER_REVIEW;
+    await course.save();
+
+    return {
+      success: true,
+      message: 'Course successfully submitted for Admin Review.',
+      status: course.courseStatus,
+    };
+  }
+
+  async approveCourse(courseId: string) {
+    const course = await this.courseModel.findOneAndUpdate(
+      {
+        _id: new Types.ObjectId(courseId),
+        courseStatus: CourseStatus.UNDER_REVIEW,
+      },
+      { $set: { courseStatus: CourseStatus.PUBLISHED } },
+      { new: true },
+    );
+    if (!course)
+      throw new NotFoundException('Course not found or not under review.');
+    return {
+      success: true,
+      message: 'Course has been approved and published.',
+      status: course.courseStatus,
+    };
+  }
+
+  async rejectCourse(courseId: string) {
+    const course = await this.courseModel.findOneAndUpdate(
+      {
+        _id: new Types.ObjectId(courseId),
+        courseStatus: CourseStatus.UNDER_REVIEW,
+      },
+      { $set: { courseStatus: CourseStatus.REJECTED } },
+      { new: true },
+    );
+    if (!course)
+      throw new NotFoundException('Course not found or not under review.');
+    return {
+      success: true,
+      message: 'Course has been rejected and returned to instructor.',
+      status: course.courseStatus,
+    };
+  }
 }

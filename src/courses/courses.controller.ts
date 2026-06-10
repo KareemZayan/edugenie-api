@@ -69,6 +69,30 @@ export class CoursesController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Patch(':id/submit-for-review')
+  submitForReview(
+    @Param('id') id: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.coursesService.submitForReview(id, user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @Patch(':id/approve')
+  approveCourse(@Param('id') id: string) {
+    return this.coursesService.approveCourse(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @Patch(':id/reject')
+  rejectCourse(@Param('id') id: string) {
+    return this.coursesService.rejectCourse(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
