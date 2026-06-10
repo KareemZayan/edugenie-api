@@ -8,7 +8,7 @@ import { CreateSectionDto } from './dto/create-section.dto';
 export class SectionsService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
-  ) { }
+  ) {}
 
   async addSection(
     courseId: string,
@@ -22,7 +22,7 @@ export class SectionsService {
           instructorId: new Types.ObjectId(instructorId),
         },
         { $push: { sections: { ...dto, lessons: [] } } },
-        { returnDocument: 'after', runValidators: true }
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
 
@@ -47,7 +47,7 @@ export class SectionsService {
         {
           $set: { 'sections.$.title': title },
         },
-        { returnDocument: 'after', runValidators: true }
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
 
@@ -72,7 +72,7 @@ export class SectionsService {
           instructorId: new Types.ObjectId(instructorId),
         },
         { $pull: { sections: { _id: new Types.ObjectId(sectionId) } } },
-        { returnDocument: 'after', runValidators: true }
+        { returnDocument: 'after', runValidators: true },
       )
       .exec();
 

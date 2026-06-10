@@ -8,10 +8,11 @@ import { Model } from 'mongoose';
 import { User } from './schema/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { v2 as cloudinary } from 'cloudinary';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<User>) { }
+  constructor(@InjectModel(User.name) private userModel: Model<User>) {}
 
   async createUser(createUserDto: CreateUserDto): Promise<User> {
     const existingUser = await this.userModel.findOne({
@@ -47,11 +48,44 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
+    // Avatar update and deletion flow
+    if (updateUserDto.avatar !== undefined) {
+      // Check if user already has an avatar public ID
+      if (user.avatarPublicId) {
+        const isAvatarDeleted = updateUserDto.avatar === null;
+        const isAvatarReplaced =
+          updateUserDto.avatar !== null && updateUserDto.avatar !== user.avatar;
+
+        // Delete the old image from Cloudinary if replacing or deleting
+        if (isAvatarDeleted || isAvatarReplaced) {
+          try {
+            await cloudinary.uploader.destroy(user.avatarPublicId);
+          } catch (error) {
+            // Gracefully handle Cloudinary deletion errors
+            // We don't fail the profile update if the image deletion fails
+            console.error(
+              `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
+              error,
+            );
+          }
+        }
+      }
+
+      // If user is deleting avatar, ensure we also nullify avatarPublicId
+      // just in case they didn't send it explicitly
+      if (
+        updateUserDto.avatar === null &&
+        updateUserDto.avatarPublicId === undefined
+      ) {
+        updateUserDto.avatarPublicId = null;
+      }
+    }
+
     const updatedUser = await this.userModel
       .findByIdAndUpdate(
         userId,
         { $set: updateUserDto },
-        { returnDocument: 'after', runValidators: true }
+        { returnDocument: 'after', runValidators: true },
       )
       .select('-password -passwordReset')
       .exec();
