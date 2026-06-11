@@ -21,7 +21,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 // @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses')
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) {}
+  constructor(private readonly coursesService: CoursesService) { }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
@@ -46,6 +46,7 @@ export class CoursesController {
   async getInstructorStats(@CurrentUser() user: { userId: string }) {
     return this.coursesService.getInstructorStats(user.userId);
   }
+
 
   @Get()
   findAll(@Query('skip') skip?: number, @Query('limit') limit?: number) {
