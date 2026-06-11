@@ -52,7 +52,7 @@ export class CoursesController {
   findAll(
     @Query('skip') skip?: number,
     @Query('limit') limit?: number,
-    @Query('categoryId') categoryId?: string,
+    @Query('categorySlug') categorySlug?: string,
     @Query('level') level?: string,
     @Query('search') search?: string,
     @Query('minPrice') minPrice?: number,
@@ -61,7 +61,7 @@ export class CoursesController {
     return this.coursesService.findAll({
       skip: skip ? +skip : 0,
       limit: limit ? +limit : 10,
-      categoryId,
+      categorySlug,
       level,
       search,
       minPrice: minPrice ? +minPrice : undefined,

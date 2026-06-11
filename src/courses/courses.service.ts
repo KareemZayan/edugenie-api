@@ -10,11 +10,13 @@ import { Course } from './schema/course.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseStatus } from '../common/enums/course-status.enum';
+import { Category } from '../categories/schema/category.schema';
 
 @Injectable()
 export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
+    @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
   ) {}
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<Course> {
@@ -31,18 +33,29 @@ export class CoursesService {
   async findAll(params: {
     skip: number;
     limit: number;
-    categoryId?: string;
+    categorySlug?: string;
     level?: string;
     search?: string;
     minPrice?: number;
     maxPrice?: number;
   }) {
-    const { skip, limit, categoryId, level, search, minPrice, maxPrice } = params;
+    const { skip, limit, categorySlug, level, search, minPrice, maxPrice } = params;
+
+    let categoryIdObj;
+    if (categorySlug) {
+      const category = await this.categoryModel.findOne({ slug: categorySlug }).exec();
+      if (category) {
+        categoryIdObj = category._id;
+      } else {
+        // If the category slug doesn't exist, return empty results early
+        return { data: [], total: 0, skip, limit };
+      }
+    }
 
     // Senior Level: Modern ES6 Conditional Object Spread
     const query: any = {
       courseStatus: CourseStatus.PUBLISHED,
-      ...(categoryId && Types.ObjectId.isValid(categoryId) && { categoryId: new Types.ObjectId(categoryId) }),
+      ...(categoryIdObj && { categoryId: categoryIdObj }),
       ...(level && { level }),
       ...(search && {
         $or: [
