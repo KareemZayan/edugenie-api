@@ -28,15 +28,45 @@ export class CoursesService {
     });
   }
 
-  async findAll(skip = 0, limit = 10) {
+  async findAll(params: {
+    skip: number;
+    limit: number;
+    categoryId?: string;
+    level?: string;
+    search?: string;
+    minPrice?: number;
+    maxPrice?: number;
+  }) {
+    const { skip, limit, categoryId, level, search, minPrice, maxPrice } = params;
+
+    // Senior Level: Modern ES6 Conditional Object Spread
+    const query: any = {
+      courseStatus: CourseStatus.PUBLISHED,
+      ...(categoryId && Types.ObjectId.isValid(categoryId) && { categoryId: new Types.ObjectId(categoryId) }),
+      ...(level && { level }),
+      ...(search && {
+        $or: [
+          { title: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+        ],
+      }),
+      ...((minPrice !== undefined || maxPrice !== undefined) && {
+        price: {
+          ...(minPrice !== undefined && { $gte: minPrice }),
+          ...(maxPrice !== undefined && { $lte: maxPrice }),
+        },
+      }),
+    };
+
     const [data, total] = await Promise.all([
       this.courseModel
-        .find({ courseStatus: CourseStatus.PUBLISHED })
+        .find(query)
         .skip(skip)
         .limit(limit)
-        .populate('instructorId', 'name avatar')
+        .populate('instructorId', 'firstName lastName')
+        .populate('categoryId', 'name slug iconUrl')
         .exec(),
-      this.courseModel.countDocuments({ courseStatus: CourseStatus.PUBLISHED }),
+      this.courseModel.countDocuments(query),
     ]);
 
     return {

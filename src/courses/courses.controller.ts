@@ -49,8 +49,24 @@ export class CoursesController {
 
 
   @Get()
-  findAll(@Query('skip') skip?: number, @Query('limit') limit?: number) {
-    return this.coursesService.findAll(skip ? +skip : 0, limit ? +limit : 10);
+  findAll(
+    @Query('skip') skip?: number,
+    @Query('limit') limit?: number,
+    @Query('categoryId') categoryId?: string,
+    @Query('level') level?: string,
+    @Query('search') search?: string,
+    @Query('minPrice') minPrice?: number,
+    @Query('maxPrice') maxPrice?: number,
+  ) {
+    return this.coursesService.findAll({
+      skip: skip ? +skip : 0,
+      limit: limit ? +limit : 10,
+      categoryId,
+      level,
+      search,
+      minPrice: minPrice ? +minPrice : undefined,
+      maxPrice: maxPrice ? +maxPrice : undefined,
+    });
   }
 
   @Get(':id')
