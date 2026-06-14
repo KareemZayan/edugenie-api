@@ -11,6 +11,8 @@ import { SectionsModule } from './sections/sections.module';
 import { LessonsModule } from './lessons/lessons.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
+import { OrdersModule } from './orders/orders.module';
+import { EnrollmentsModule } from './enrollments/enrollments.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -35,6 +37,8 @@ import { CartModule } from './cart/cart.module';
     LessonsModule,
     CategoriesModule,
     CartModule,
+    OrdersModule,
+    EnrollmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
