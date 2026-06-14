@@ -10,7 +10,7 @@ import { CoursesModule } from './courses/courses.module';
 import { SectionsModule } from './sections/sections.module';
 import { LessonsModule } from './lessons/lessons.module';
 import { CategoriesModule } from './categories/categories.module';
-
+import { CartModule } from './cart/cart.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -34,6 +34,7 @@ import { CategoriesModule } from './categories/categories.module';
     SectionsModule,
     LessonsModule,
     CategoriesModule,
+    CartModule,
   ],
   controllers: [AppController],
   providers: [AppService],

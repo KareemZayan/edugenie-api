@@ -325,7 +325,7 @@ export class CoursesService {
         courseStatus: CourseStatus.UNDER_REVIEW,
       },
       { $set: { courseStatus: CourseStatus.PUBLISHED } },
-      { new: true },
+      { returnDocument: 'after' },
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
@@ -343,7 +343,7 @@ export class CoursesService {
         courseStatus: CourseStatus.UNDER_REVIEW,
       },
       { $set: { courseStatus: CourseStatus.REJECTED } },
-      { new: true },
+      { returnDocument: 'after' },
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
