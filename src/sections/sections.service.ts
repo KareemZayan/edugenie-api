@@ -4,11 +4,13 @@ import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { CreateSectionDto } from './dto/create-section.dto';
 import { UpdateSectionDto } from './dto/update-section.dto';
+import { CoursesService } from '../courses/courses.service';
 
 @Injectable()
 export class SectionsService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
+    private readonly coursesService: CoursesService,
   ) { }
 
   async addSection(
@@ -29,6 +31,10 @@ export class SectionsService {
 
     if (!updated)
       throw new NotFoundException('Course not found or ownership mismatch');
+      
+    // Trigger metadata sync (recalculates course total price, hours, and lessons)
+    await this.coursesService.syncMetadata(courseId);
+    
     return updated.sections;
   }
 
@@ -64,6 +70,9 @@ export class SectionsService {
       );
     }
 
+    // Trigger metadata sync
+    await this.coursesService.syncMetadata(courseId);
+
     return updated.sections;
   }
 
@@ -85,6 +94,10 @@ export class SectionsService {
 
     if (!updated)
       throw new NotFoundException('Failed to remove section. Verify IDs');
+
+    // Trigger metadata sync
+    await this.coursesService.syncMetadata(courseId);
+
     return updated.sections;
   }
 }
