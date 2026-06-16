@@ -23,7 +23,7 @@ export class Course {
   description!: string;
 
   @Prop({
-    required: true,
+    default: 0,
     min: 0,
   })
   price!: number;
