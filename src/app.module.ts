@@ -13,6 +13,8 @@ import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -21,6 +23,9 @@ import { EnrollmentsModule } from './enrollments/enrollments.module';
         MONGO_URI: Joi.string().required(),
         JWT_SECRET: Joi.string().required(),
         PORT: Joi.number().default(3000),
+        CLOUDINARY_CLOUD_NAME: Joi.string().required(),
+        CLOUDINARY_API_KEY: Joi.string().required(),
+        CLOUDINARY_API_SECRET: Joi.string().required(),
       }),
     }),
     MongooseModule.forRootAsync({
@@ -39,6 +44,7 @@ import { EnrollmentsModule } from './enrollments/enrollments.module';
     CartModule,
     OrdersModule,
     EnrollmentsModule,
+    CloudinaryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
