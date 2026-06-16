@@ -77,9 +77,6 @@ export class Course {
   totalLessons!: number;
 
   @Prop({ default: 0, min: 0 })
-  totalVideos!: number;
-
-  @Prop({ default: 0, min: 0 })
   totalHours!: number;
 
   // Embedded subdocuments — Course is the aggregate root

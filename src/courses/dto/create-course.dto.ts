@@ -26,7 +26,6 @@ export class CreateCourseDto {
   description!: string;
 
 
-
   @IsString()
   @IsNotEmpty()
   @IsUrl()
@@ -52,6 +51,5 @@ export class CreateCourseDto {
   @IsOptional()
   @IsEnum(CourseStatus)
   courseStatus?: CourseStatus;
-
 
 }

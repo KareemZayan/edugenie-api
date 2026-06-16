@@ -108,7 +108,7 @@ export class CoursesService {
     const course = await this.courseModel
       .findById(id)
       .populate('instructorId', 'firstName lastName bio avatar')
-      .populate('categoryId', 'name slug iconUrl')
+      .populate('categoryId', 'name slug')
       .exec();
 
     if (!course) throw new NotFoundException('Course not found');
@@ -131,13 +131,14 @@ export class CoursesService {
     return { success: true };
   }
 
+
   async syncMetadata(courseId: string) {
     const result = await this.courseModel.aggregate([
       { $match: { _id: new Types.ObjectId(courseId) } },
-      
+
       // Step 1: Unwind the sections once so we can see them
       { $unwind: { path: '$sections', preserveNullAndEmptyArrays: true } },
-      
+
       // Step 2: Use $facet to run two separate calculations simultaneously!
       {
         $facet: {
@@ -150,7 +151,7 @@ export class CoursesService {
               }
             }
           ],
-          
+
           // Calculation B: Lessons and Hours (Requires unwinding lessons)
           videoData: [
             { $unwind: { path: '$sections.lessons', preserveNullAndEmptyArrays: true } },
