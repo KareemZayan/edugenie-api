@@ -22,6 +22,9 @@ export class Section {
   @Prop({ default: false })
   isBasicSection!: boolean;
 
+  @Prop({ required: true, min: 0 })
+  price!: number;
+
   @Prop({ type: [LessonSchema], default: [] })
   lessons!: Types.DocumentArray<Lesson>;
 }

@@ -3,12 +3,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { CreateSectionDto } from './dto/create-section.dto';
+import { UpdateSectionDto } from './dto/update-section.dto';
 
 @Injectable()
 export class SectionsService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
-  ) {}
+  ) { }
 
   async addSection(
     courseId: string,
@@ -35,8 +36,14 @@ export class SectionsService {
     courseId: string,
     sectionId: string,
     instructorId: string,
-    title: string,
+    dto: UpdateSectionDto,
   ) {
+    const updateFields: any = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        updateFields[`sections.$.${key}`] = value;
+      }
+    }
     const updated = await this.courseModel
       .findOneAndUpdate(
         {
@@ -45,7 +52,7 @@ export class SectionsService {
           'sections._id': new Types.ObjectId(sectionId),
         },
         {
-          $set: { 'sections.$.title': title },
+          $set: updateFields,
         },
         { returnDocument: 'after', runValidators: true },
       )
