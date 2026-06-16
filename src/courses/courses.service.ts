@@ -17,7 +17,7 @@ export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
-  ) {}
+  ) { }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<Course> {
     if (!instructorId)
@@ -101,10 +101,16 @@ export class CoursesService {
   async findOne(id: string) {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('Invalid ID');
+
+    // Dynamically calculate the latest totalHours and totalLessons
+    await this.syncMetadata(id);
+
     const course = await this.courseModel
       .findById(id)
-      .populate('instructorId', 'name bio')
+      .populate('instructorId', 'firstName lastName bio avatar')
+      .populate('categoryId', 'name slug iconUrl')
       .exec();
+
     if (!course) throw new NotFoundException('Course not found');
     return course;
   }
@@ -148,8 +154,8 @@ export class CoursesService {
               $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0],
             },
           },
-          // IMPORTANT: Assuming you fixed lessons.service.ts to save `duration` in SECONDS
-          totalDurationSeconds: { $sum: '$sections.lessons.duration' },
+          // Fixed: The lesson schema uses 'videoDuration', not 'duration'
+          totalDurationSeconds: { $sum: '$sections.lessons.videoDuration' },
         },
       },
     ]);
@@ -157,7 +163,8 @@ export class CoursesService {
     if (!result || result.length === 0) return;
     const stats = result[0];
 
-    const totalHour = Math.round((stats.totalDurationSeconds || 0) / 3600);
+    // Calculate hours with 2 decimal places (e.g. 1.5 hours) instead of rounding to 0
+    const totalHours = Number(((stats.totalDurationSeconds || 0) / 3600).toFixed(2));
 
     // Update the course with the new metadata
     await this.courseModel.updateOne(
@@ -165,7 +172,7 @@ export class CoursesService {
       {
         $set: {
           totalLessons: stats.totalLessons,
-          totalHour: totalHour,
+          totalHours: totalHours,
         },
       },
     );

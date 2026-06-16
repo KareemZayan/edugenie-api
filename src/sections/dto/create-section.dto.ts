@@ -27,9 +27,6 @@ export class CreateSectionDto {
   @ArrayMaxSize(20)
   expectedOutcomes?: string[];
 
-  @IsOptional()
-  @IsBoolean()
-  isBasicSection?: boolean;
 
   @IsOptional()
   @IsNumber()
