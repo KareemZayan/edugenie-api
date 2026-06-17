@@ -14,7 +14,7 @@ export class QuizAttempt {
   @Prop({ required: true, min: 0, max: 100 })
   score: number;
 
-  @Prop({ required: true })
+  @Prop({ required: true, default: false })
   isPassed: boolean;
 }
 
