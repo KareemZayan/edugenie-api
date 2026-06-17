@@ -17,7 +17,7 @@ export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
-  ) {}
+  ) { }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<Course> {
     if (!instructorId)
@@ -101,10 +101,16 @@ export class CoursesService {
   async findOne(id: string) {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('Invalid ID');
+
+    // Dynamically calculate the latest totalHours and totalLessons
+    await this.syncMetadata(id);
+
     const course = await this.courseModel
       .findById(id)
-      .populate('instructorId', 'name bio')
+      .populate('instructorId', 'firstName lastName bio avatar')
+      .populate('categoryId', 'name slug')
       .exec();
+
     if (!course) throw new NotFoundException('Course not found');
     return course;
   }
@@ -125,47 +131,60 @@ export class CoursesService {
     return { success: true };
   }
 
+
   async syncMetadata(courseId: string) {
-    // Use MongoDB Aggregation to calculate totals entirely inside the database (Super fast, zero memory overhead)
-    const result = await this.courseModel.aggregate<{
-      _id: Types.ObjectId;
-      totalLessons: number;
-      totalDurationSeconds: number;
-    }>([
+    const result = await this.courseModel.aggregate([
       { $match: { _id: new Types.ObjectId(courseId) } },
-      { $unwind: '$sections' },
+
+      // Step 1: Unwind the sections once so we can see them
+      { $unwind: { path: '$sections', preserveNullAndEmptyArrays: true } },
+
+      // Step 2: Use $facet to run two separate calculations simultaneously!
       {
-        $unwind: {
-          path: '$sections.lessons',
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
-        $group: {
-          _id: '$_id',
-          totalLessons: {
-            $sum: {
-              $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0],
-            },
-          },
-          // IMPORTANT: Assuming you fixed lessons.service.ts to save `duration` in SECONDS
-          totalDurationSeconds: { $sum: '$sections.lessons.duration' },
-        },
-      },
+        $facet: {
+          // Calculation A: Safe Price Summation (Sections only)
+          priceData: [
+            {
+              $group: {
+                _id: '$_id',
+                totalPrice: { $sum: { $ifNull: ['$sections.price', 0] } }
+              }
+            }
+          ],
+
+          // Calculation B: Lessons and Hours (Requires unwinding lessons)
+          videoData: [
+            { $unwind: { path: '$sections.lessons', preserveNullAndEmptyArrays: true } },
+            {
+              $group: {
+                _id: '$_id',
+                totalLessons: {
+                  $sum: { $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0] }
+                },
+                totalDurationSeconds: { $sum: { $ifNull: ['$sections.lessons.videoDuration', 0] } }
+              }
+            }
+          ]
+        }
+      }
     ]);
 
     if (!result || result.length === 0) return;
-    const stats = result[0];
 
-    const totalHour = Math.round((stats.totalDurationSeconds || 0) / 3600);
+    // Extract the calculated data
+    const priceStats = result[0].priceData[0] || { totalPrice: 0 };
+    const videoStats = result[0].videoData[0] || { totalLessons: 0, totalDurationSeconds: 0 };
 
-    // Update the course with the new metadata
+    const totalHours = Number(((videoStats.totalDurationSeconds || 0) / 3600).toFixed(2));
+
+    // Update the course with the new pricing and metadata
     await this.courseModel.updateOne(
       { _id: new Types.ObjectId(courseId) },
       {
         $set: {
-          totalLessons: stats.totalLessons,
-          totalHour: totalHour,
+          price: priceStats.totalPrice,
+          totalLessons: videoStats.totalLessons,
+          totalHours: totalHours,
         },
       },
     );

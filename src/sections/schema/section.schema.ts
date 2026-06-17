@@ -19,8 +19,9 @@ export class Section {
   @Prop({ type: [String], default: [] })
   expectedOutcomes!: string[];
 
-  @Prop({ default: false })
-  isBasicSection!: boolean;
+
+  @Prop({ required: true, min: 0 })
+  price!: number;
 
   @Prop({ type: [LessonSchema], default: [] })
   lessons!: Types.DocumentArray<Lesson>;

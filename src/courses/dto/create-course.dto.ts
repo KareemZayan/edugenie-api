@@ -25,10 +25,6 @@ export class CreateCourseDto {
   @MinLength(20)
   description!: string;
 
-  @IsNumber()
-  @Type(() => Number)
-  @Min(0)
-  price!: number;
 
   @IsString()
   @IsNotEmpty()
@@ -55,4 +51,5 @@ export class CreateCourseDto {
   @IsOptional()
   @IsEnum(CourseStatus)
   courseStatus?: CourseStatus;
+
 }

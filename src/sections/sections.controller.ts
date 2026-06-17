@@ -14,10 +14,11 @@ import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { UserRole } from 'src/common/enums/user-role.enum';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { UpdateSectionDto } from './dto/update-section.dto';
 
 @Controller('courses/:id/sections')
 export class SectionsController {
-  constructor(private readonly sectionsService: SectionsService) {}
+  constructor(private readonly sectionsService: SectionsService) { }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
@@ -37,7 +38,7 @@ export class SectionsController {
   updateSection(
     @Param('id') courseId: string,
     @Param('sectionId') sectionId: string,
-    @Body('title') title: string,
+    @Body() updateSection: UpdateSectionDto,
     @CurrentUser() user: { userId: string },
   ) {
     const instructorId = user?.userId;
@@ -45,7 +46,7 @@ export class SectionsController {
       courseId,
       sectionId,
       instructorId,
-      title,
+      updateSection,
     );
   }
 

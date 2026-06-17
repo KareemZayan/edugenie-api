@@ -6,6 +6,8 @@ import {
   IsNotEmpty,
   MinLength,
   ArrayMaxSize,
+  IsNumber,
+  Min,
 } from 'class-validator';
 
 export class CreateSectionDto {
@@ -25,7 +27,7 @@ export class CreateSectionDto {
   @ArrayMaxSize(20)
   expectedOutcomes?: string[];
 
-  @IsOptional()
-  @IsBoolean()
-  isBasicSection?: boolean;
+  @IsNumber()
+  @Min(0)
+  price: number;
 }

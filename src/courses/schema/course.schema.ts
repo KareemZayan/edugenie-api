@@ -23,7 +23,7 @@ export class Course {
   description!: string;
 
   @Prop({
-    required: true,
+    default: 0,
     min: 0,
   })
   price!: number;
@@ -75,9 +75,6 @@ export class Course {
 
   @Prop({ default: 0, min: 0 })
   totalLessons!: number;
-
-  @Prop({ default: 0, min: 0 })
-  totalVideos!: number;
 
   @Prop({ default: 0, min: 0 })
   totalHours!: number;
