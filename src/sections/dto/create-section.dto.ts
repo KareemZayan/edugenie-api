@@ -2,7 +2,6 @@ import {
   IsString,
   IsArray,
   IsOptional,
-  IsBoolean,
   IsNotEmpty,
   MinLength,
   ArrayMaxSize,

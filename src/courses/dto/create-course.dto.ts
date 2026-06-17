@@ -25,11 +25,14 @@ export class CreateCourseDto {
   @MinLength(20)
   description!: string;
 
-
   @IsString()
   @IsNotEmpty()
   @IsUrl()
   thumbnail!: string;
+
+  @IsOptional()
+  @IsString()
+  thumbnailPublicId?: string;
 
   @IsEnum(CourseLevel)
   level!: CourseLevel;
@@ -51,5 +54,4 @@ export class CreateCourseDto {
   @IsOptional()
   @IsEnum(CourseStatus)
   courseStatus?: CourseStatus;
-
 }
