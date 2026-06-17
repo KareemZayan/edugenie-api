@@ -31,6 +31,9 @@ export class Course {
   @Prop({ required: true })
   thumbnail!: string;
 
+  @Prop({ default: '' })
+  thumbnailPublicId!: string;
+
   @Prop({
     type: String,
     required: true,
