@@ -33,8 +33,8 @@ export class CloudinaryController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Post('sign')
-  signUploadRequest(@Body() signUploadDto: SignUploadDto) {
-    return this.cloudinaryService.generateSignature(signUploadDto.folder);
+  signUploadRequest(@Body() body: SignUploadDto) {
+    return this.cloudinaryService.generateSignature(body.folder, body.context);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

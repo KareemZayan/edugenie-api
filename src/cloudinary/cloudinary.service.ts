@@ -23,26 +23,30 @@ export class CloudinaryService {
     });
   }
 
-  generateSignature(folderPath: string) {
-    const timestamp = Math.round(new Date().getTime() / 1000);
+  generateSignature(folderPath: string, context?: string) {
+    const timestamp = Math.round(Date.now() / 1000);
+  
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
     const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-
+  
     const paramsToSign: Record<string, any> = {
       timestamp,
       folder: folderPath,
     };
-
+  
+    if (context) {
+      paramsToSign.context = context;
+    }
+  
     const signature = cloudinary.utils.api_sign_request(
       paramsToSign,
       apiSecret as string,
     );
-
+  
     return { signature, timestamp, apiKey, cloudName };
   }
 
-  //  NEW
   async deleteAsset(
     publicId: string,
     resourceType: 'image' | 'video' = 'image',
