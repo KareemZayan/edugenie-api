@@ -1,8 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { QuizGenerationStatus } from 'src/common/enums/questionsGenerationStatus.enum';
-import { QuestionType } from 'src/common/enums/questionsType.enum';
-import { QuizDifficulty } from 'src/common/enums/quizDifficulty.enum';
+import { QuizGenerationStatus } from '../../common/enums/questionsGenerationStatus.enum';
+import { QuestionType } from '../../common/enums/questionsType.enum';
+import { QuizDifficulty } from '../../common/enums/quizDifficulty.enum';
 
 export type QuizDocument = HydratedDocument<Quiz>;
 

@@ -1,6 +1,6 @@
 import { IsEnum, IsMongoId, IsNumber, Max, Min } from "class-validator";
-import { QuestionType } from "src/common/enums/questionsType.enum";
-import { QuizDifficulty } from "src/common/enums/quizDifficulty.enum";
+import { QuestionType } from "../../common/enums/questionsType.enum";
+import { QuizDifficulty } from "../../common/enums/quizDifficulty.enum";
 
 export class CreateQuizDto {
   @IsMongoId()

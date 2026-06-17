@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Quiz } from './schema/quiz.schema';
 import { CreateQuizDto } from './dto/create-quiz.dto';
-import { QuizGenerationStatus } from 'src/common/enums/questionsGenerationStatus.enum';
+import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.enum';
 
 @Injectable()
 export class QuizzesService {
