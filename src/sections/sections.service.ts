@@ -11,7 +11,7 @@ export class SectionsService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     private readonly coursesService: CoursesService,
-  ) { }
+  ) {}
 
   async addSection(
     courseId: string,
@@ -31,10 +31,10 @@ export class SectionsService {
 
     if (!updated)
       throw new NotFoundException('Course not found or ownership mismatch');
-      
+
     // Trigger metadata sync (recalculates course total price, hours, and lessons)
     await this.coursesService.syncMetadata(courseId);
-    
+
     return updated.sections;
   }
 
