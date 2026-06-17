@@ -13,6 +13,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { QuizzesModule } from './quizzes/quizzes.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 
 @Module({
@@ -44,6 +45,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     CartModule,
     OrdersModule,
     EnrollmentsModule,
+    QuizzesModule,
     CloudinaryModule,
   ],
   controllers: [AppController],
