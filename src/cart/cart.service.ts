@@ -6,6 +6,7 @@ import { Course } from '../courses/schema/course.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { AddToCartDto, CartItemType } from './dto/add-to-cart.dto';
 import { CourseStatus } from '../common/enums/course-status.enum';
+import { CartSerializer } from './serializers/cart.serializer';
 
 @Injectable()
 export class CartService {
@@ -26,7 +27,7 @@ export class CartService {
     if (!cart) {
       cart = await this.cartModel.create({ studentId: new Types.ObjectId(studentId), items: [] });
     }
-    return cart.toObject();
+    return new CartSerializer(cart.toObject() as any);
   }
 
   // 2. Add a course or section to the cart
@@ -125,7 +126,7 @@ export class CartService {
     ).populate('items.courseId', 'title price thumbnail');
 
     if (!cart) throw new NotFoundException('Cart not found');
-    return cart.toObject();
+    return new CartSerializer(cart.toObject() as any);
   }
 
   // 4. Validate cart before checkout

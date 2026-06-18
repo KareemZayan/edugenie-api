@@ -9,6 +9,7 @@ import { CourseDocument } from '../courses/schema/course.schema';
 import { PaymobService } from '../paymob/paymob.service';
 import { UsersService } from '../users/users.service';
 import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
+import { OrderSerializer } from './serializers/order.serializer';
 
 @Injectable()
 export class OrdersService {
@@ -122,13 +123,12 @@ export class OrdersService {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .lean()
       .exec();
 
     const total = await this.orderModel.countDocuments({ studentId: new Types.ObjectId(studentId) });
 
     return {
-      data,
+      data: data.map(d => new OrderSerializer(d.toObject() as any)),
       meta: {
         total,
         page,

@@ -183,6 +183,6 @@ export class SectionsService {
 
     await this.coursesService.syncMetadata(courseId);
 
-    return course.sections;
+    return course.sections.map((s) => new SectionSerializer(s.toObject() as any));
   }
 }

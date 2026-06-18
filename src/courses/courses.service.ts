@@ -15,11 +15,16 @@ import { Category } from '../categories/schema/category.schema';
 import { CourseSerializer } from './serializers/course.serializer';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 
+import { Enrollment } from '../enrollments/schema/enrollment.schema';
+import { Progress } from '../progress/schema/progress.schema';
+
 @Injectable()
 export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
+    @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
+    @InjectModel(Progress.name) private readonly progressModel: Model<Progress>,
   ) { }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<CourseSerializer> {
@@ -455,5 +460,67 @@ export class CoursesService {
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
     return new CourseSerializer(course.toObject());
+  }
+
+  async getResumePoint(courseId: string, studentId: string) {
+    const enrollment = await this.enrollmentModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+      courseId: new Types.ObjectId(courseId),
+    });
+
+    if (!enrollment) {
+      throw new ForbiddenException('You are not enrolled in this course');
+    }
+
+    const progress = await this.progressModel.findOne(
+      { studentId: new Types.ObjectId(studentId), courseId: new Types.ObjectId(courseId), isCompleted: false },
+      {},
+      { sort: { lastWatchedAt: -1 } }
+    ).exec();
+
+    if (progress) {
+      const lessonObjId = progress.lessonId;
+      const course = await this.courseModel.findOne(
+        { _id: new Types.ObjectId(courseId), 'sections.lessons._id': lessonObjId },
+        { 'sections.$': 1 }
+      );
+      let sectionId = '';
+      if (course && course.sections && course.sections.length > 0) {
+        sectionId = course.sections[0]._id.toString();
+      }
+
+      return {
+        lessonId: progress.lessonId.toString(),
+        sectionId: sectionId,
+        watchedDuration: progress.watchedDuration || 0,
+      };
+    }
+
+    // No progress record, find the first lesson of the first section
+    const course = await this.courseModel.findById(courseId).exec();
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    let firstSectionId = null;
+    let firstLessonId = null;
+
+    for (const section of course.sections) {
+      if (section.lessons && section.lessons.length > 0) {
+        firstSectionId = section._id.toString();
+        firstLessonId = section.lessons[0]._id.toString();
+        break;
+      }
+    }
+
+    if (!firstLessonId || !firstSectionId) {
+      throw new NotFoundException('Course has no lessons');
+    }
+
+    return {
+      lessonId: firstLessonId,
+      sectionId: firstSectionId,
+      watchedDuration: 0,
+    };
   }
 }

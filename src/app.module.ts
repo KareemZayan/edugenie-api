@@ -21,6 +21,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AiModule } from './ai/ai.module';
 import { PaymobModule } from './paymob/paymob.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { ProgressModule } from './progress/progress.module';
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -62,8 +64,10 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AiModule,
     PaymobModule,
     WebhooksModule,
+    ProgressModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

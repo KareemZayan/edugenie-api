@@ -334,3 +334,55 @@ export interface EarningResponse {
   createdAt: Date;
   updatedAt: Date;
 }
+
+// ── Progress ─────────────────────────────────────────────
+export interface TrackProgressRequest {
+  lessonId:        string;
+  watchedDuration: number;
+  isCompleted:     boolean;
+}
+
+export type LessonState = 'not_started' | 'in_progress' | 'completed';
+
+export interface ProgressResponse {
+  lessonState:        LessonState;
+  nextLessonUnlocked: boolean;
+  nextLesson: { _id: string; title: string } | null;
+  sectionCompleted:   boolean;
+  quizRequired:       boolean;
+  quizSectionId:      string | null;
+}
+
+// ── Lesson detail ─────────────────────────────────────────
+export interface LessonDetailResponse {
+  _id:           string;
+  title:         string;
+  videoUrl:      string;
+  videoDuration: number;
+  transcript:    string | null;
+  sectionId:     string;
+}
+
+// ── Resume ────────────────────────────────────────────────
+export interface ResumeResponse {
+  lessonId:        string;
+  sectionId:       string;
+  watchedDuration: number;
+}
+
+// ── Notes ─────────────────────────────────────────────────
+export interface NoteResponse {
+  _id:       string;
+  content:   string;
+  timestamp: number;
+  createdAt: Date;
+}
+
+export interface CreateNoteRequest {
+  content:   string;
+  timestamp: number;
+}
+
+export interface NotesListResponse {
+  notes: NoteResponse[];
+}
