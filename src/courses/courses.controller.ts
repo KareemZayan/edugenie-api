@@ -49,6 +49,20 @@ export class CoursesController {
   }
 
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @Get('pending-review')
+  getPendingReview() {
+    return this.coursesService.getPendingReview();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @Get('admin/stats')
+  getAdminStats() {
+    return this.coursesService.getAdminStats();
+  }
+
   @Get()
   findAll(
     @Query('skip') skip?: number,
@@ -106,8 +120,11 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Patch(':id/reject')
-  rejectCourse(@Param('id') id: string) {
-    return this.coursesService.rejectCourse(id);
+  rejectCourse(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+  ) {
+    return this.coursesService.rejectCourse(id, body?.reason);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
