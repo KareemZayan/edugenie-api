@@ -26,7 +26,8 @@ export class CreateSectionDto {
   @ArrayMaxSize(20)
   expectedOutcomes?: string[];
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  price: number;
+  price?: number | null;
 }

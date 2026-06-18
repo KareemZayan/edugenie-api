@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -9,12 +10,13 @@ import { User } from './schema/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { v2 as cloudinary } from 'cloudinary';
+import { UserSerializer } from './serializers/user.serializer';
 
 @Injectable()
 export class UsersService {
   constructor(@InjectModel(User.name) private userModel: Model<User>) {}
 
-  async createUser(createUserDto: CreateUserDto): Promise<User> {
+  async createUser(createUserDto: CreateUserDto): Promise<UserSerializer> {
     const existingUser = await this.userModel.findOne({
       email: createUserDto.email,
     });
@@ -24,25 +26,23 @@ export class UsersService {
     }
 
     const newUser = new this.userModel(createUserDto);
-    return newUser.save();
+    const savedUser = await newUser.save();
+    return new UserSerializer(savedUser.toObject());
   }
 
   async findByEmail(email: string): Promise<User | null> {
     return this.userModel.findOne({ email }).exec();
   }
 
-  async getProfile(userId: string) {
-    const user = await this.userModel
-      .findById(userId)
-      .select('-password -passwordReset')
-      .exec();
+  async getProfile(userId: string): Promise<UserSerializer> {
+    const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return user;
+    return new UserSerializer(user.toObject());
   }
 
-  async updateProfile(userId: string, updateUserDto: UpdateUserDto) {
+  async updateProfile(userId: string, updateUserDto: UpdateUserDto): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -61,18 +61,15 @@ export class UsersService {
           try {
             await cloudinary.uploader.destroy(user.avatarPublicId);
           } catch (error) {
-            // Gracefully handle Cloudinary deletion errors
-            // We don't fail the profile update if the image deletion fails
-            console.error(
+            Logger.error(
               `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
-              error,
+              error instanceof Error ? error.stack : 'Unknown error',
+              'UsersService'
             );
           }
         }
       }
 
-      // If user is deleting avatar, ensure we also nullify avatarPublicId
-      // just in case they didn't send it explicitly
       if (
         updateUserDto.avatar === null &&
         updateUserDto.avatarPublicId === undefined
@@ -87,13 +84,12 @@ export class UsersService {
         { $set: updateUserDto },
         { returnDocument: 'after', runValidators: true },
       )
-      .select('-password -passwordReset')
       .exec();
 
     if (!updatedUser) {
       throw new NotFoundException('User not found');
     }
 
-    return updatedUser;
+    return new UserSerializer(updatedUser.toObject());
   }
 }

@@ -52,7 +52,7 @@ export class CloudinaryController {
   async handleWebhook(
     @Headers('x-cld-signature') signature: string,
     @Headers('x-cld-timestamp') timestamp: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
   ) {
     if (!signature || !timestamp) {
       throw new UnauthorizedException('Missing Cloudinary signatures');

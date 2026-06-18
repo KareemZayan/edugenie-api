@@ -1,10 +1,11 @@
-import { Controller, Post, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, UseGuards, Query } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.STUDENT)
@@ -18,7 +19,10 @@ export class OrdersController {
   }
 
   @Get('history')
-  getMyOrders(@CurrentUser() user: { userId: string }) {
-    return this.ordersService.getMyOrders(user.userId);
+  getMyOrders(
+    @CurrentUser() user: { userId: string },
+    @Query() query: PaginateQueryDto
+  ) {
+    return this.ordersService.getMyOrders(user.userId, query);
   }
 }

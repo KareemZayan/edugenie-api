@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -15,6 +16,11 @@ import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { QuizzesModule } from './quizzes/quizzes.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AiModule } from './ai/ai.module';
+import { PaymobModule } from './paymob/paymob.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -36,6 +42,10 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
       }),
       inject: [ConfigService],
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // 1 minute
+      limit: 100, // global limit
+    }]),
     AuthModule,
     UsersModule,
     CoursesModule,
@@ -47,6 +57,11 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     EnrollmentsModule,
     QuizzesModule,
     CloudinaryModule,
+    ReviewsModule,
+    NotificationsModule,
+    AiModule,
+    PaymobModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

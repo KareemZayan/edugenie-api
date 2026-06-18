@@ -11,6 +11,17 @@ export class Enrollment {
   @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
   courseId: Types.ObjectId;
 
+  @Prop({
+    type: String,
+    enum: ['full_course', 'sections'],
+    default: 'full_course',
+    required: true,
+  })
+  type: string;
+
+  @Prop([{ type: Types.ObjectId }]) // Removed ref: 'Section' because it's embedded
+  sectionIds: Types.ObjectId[];
+
   // Track progress percentage (0 to 100)
   @Prop({ default: 0, min: 0, max: 100 })
   progressPercentage: number;

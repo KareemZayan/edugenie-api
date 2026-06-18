@@ -6,45 +6,58 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import type { Response } from 'express';
+import * as express from 'express';
 import { LoginDto } from './dto/login.dto';
+import type { ApiResponse } from '../common/interfaces/api-response.interface';
+import type { AuthResponse } from './interfaces/auth-response.interface';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 
 @Controller('auth')
+@UseGuards(ThrottlerGuard)
+@Throttle({ default: { limit: 5, ttl: 900000 } }) // 5 requests per 15 mins
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Post('register')
-  register(@Body() createUserDto: CreateUserDto) {
-    return this.authService.register(createUserDto);
+  async register(@Body() createUserDto: CreateUserDto): Promise<ApiResponse<AuthResponse>> {
+    const result = await this.authService.register(createUserDto);
+    return {
+      success: true,
+      data: { message: result.message }
+    };
   }
 
   @HttpCode(HttpStatus.OK)
   @Post('login')
   async login(
     @Body() loginDto: LoginDto,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    // 1. Verify credentials and Generate Token
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse>> {
     const { token, user: userData } = await this.authService.login(loginDto);
-    // 3. Set the JWT in an HttpOnly cookie
+
     response.cookie('jwt', token, {
-      httpOnly: true, // Prevents JavaScript from reading it (XSS protection)
-      secure: process.env.NODE_ENV === 'production', // Use HTTPS in production
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       path: '/',
-      maxAge: 24 * 60 * 60 * 1000, // 1 day expiration
+      maxAge: 24 * 60 * 60 * 1000,
     });
+
     return {
-      message: 'Login successful',
-      user: userData,
+      success: true,
+      data: {
+        message: 'Login successful',
+        user: userData,
+      }
     };
   }
 
   @HttpCode(HttpStatus.OK)
   @Post('logout')
-  logout(@Res({ passthrough: true }) response: Response) {
+  logout(@Res({ passthrough: true }) response: any): ApiResponse<AuthResponse> {
     response.clearCookie('jwt', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -52,7 +65,10 @@ export class AuthController {
       path: '/',
     });
     return {
-      message: 'Logout successful',
+      success: true,
+      data: {
+        message: 'Logout successful',
+      }
     };
   }
 }

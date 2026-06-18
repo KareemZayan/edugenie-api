@@ -23,14 +23,14 @@ export class CartController {
     @Body() addToCartDto: AddToCartDto,
     @CurrentUser() user: { userId: string }
   ) {
-    return this.cartService.addToCart(user.userId, addToCartDto.courseId);
+    return this.cartService.addToCart(user.userId, addToCartDto);
   }
 
-  @Delete(':courseId')
+  @Delete(':itemId')
   removeFromCart(
-    @Param('courseId') courseId: string,
+    @Param('itemId') itemId: string,
     @CurrentUser() user: { userId: string }
   ) {
-    return this.cartService.removeFromCart(user.userId, courseId);
+    return this.cartService.removeFromCart(user.userId, itemId);
   }
 }

@@ -1,10 +1,12 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { QuizzesService } from './quizzes.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CreateQuizDto } from './dto/create-quiz.dto';
+import { SubmitQuizDto } from './dto/submit-quiz.dto';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('quizzes')
@@ -15,5 +17,16 @@ export class QuizzesController {
   @Post('generate')
   generateQuizConfig(@Body() dto: CreateQuizDto) {
     return this.quizzesService.saveQuizConfig(dto);
+  }
+
+  @Roles(UserRole.STUDENT)
+  @Post(':id/attempts')
+  async submitQuizAttempt(
+    @Param('id') id: string,
+    @Body() dto: SubmitQuizDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const result = await this.quizzesService.submitQuizAttempt(id, user.userId, dto);
+    return { success: true, data: result };
   }
 }

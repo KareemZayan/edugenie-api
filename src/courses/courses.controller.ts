@@ -8,7 +8,9 @@ import {
   Delete,
   UseGuards,
   Query,
+  UseInterceptors,
 } from '@nestjs/common';
+import { CacheInterceptor } from '@nestjs/cache-manager';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
@@ -17,8 +19,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ApiResponse } from '../common/interfaces/api-response.interface';
+import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
+import { CourseResponse } from './interfaces/course-response.interface';
 
-// @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses')
 export class CoursesController {
   constructor(private readonly coursesService: CoursesService) { }
@@ -26,30 +30,33 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Post()
-  create(
+  async create(
     @Body() createCourseDto: CreateCourseDto,
     @CurrentUser() user: { userId: string },
-  ) {
-    return this.coursesService.create(createCourseDto, user.userId);
+  ): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.create(createCourseDto, user.userId);
+    return { success: true, data: course };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Get('my-courses')
-  async findInstructorCourses(@CurrentUser() user: { userId: string }) {
-    return this.coursesService.findInstructorCourses(user.userId);
+  async findInstructorCourses(@CurrentUser() user: { userId: string }): Promise<ApiResponse<CourseResponse[]>> {
+    const courses = await this.coursesService.findInstructorCourses(user.userId);
+    return { success: true, data: courses };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Get('instructor-stats')
-  async getInstructorStats(@CurrentUser() user: { userId: string }) {
-    return this.coursesService.getInstructorStats(user.userId);
+  async getInstructorStats(@CurrentUser() user: { userId: string }): Promise<ApiResponse<any>> {
+    const stats = await this.coursesService.getInstructorStats(user.userId);
+    return { success: true, data: stats };
   }
 
-
   @Get()
-  findAll(
+  @UseInterceptors(CacheInterceptor)
+  async findAll(
     @Query('skip') skip?: number,
     @Query('limit') limit?: number,
     @Query('categorySlug') categorySlug?: string,
@@ -57,8 +64,8 @@ export class CoursesController {
     @Query('search') search?: string,
     @Query('minPrice') minPrice?: number,
     @Query('maxPrice') maxPrice?: number,
-  ) {
-    return this.coursesService.findAll({
+  ): Promise<ApiResponse<PaginatedResponse<CourseResponse>>> {
+    const result = await this.coursesService.findAll({
       skip: skip ? +skip : 0,
       limit: limit ? +limit : 10,
       categorySlug,
@@ -67,52 +74,59 @@ export class CoursesController {
       minPrice: minPrice ? +minPrice : undefined,
       maxPrice: maxPrice ? +maxPrice : undefined,
     });
+    return { success: true, data: result };
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.coursesService.findOne(id);
+  async findOne(@Param('id') id: string): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.findOne(id);
+    return { success: true, data: course };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Patch(':id')
-  update(
+  async update(
     @Param('id') id: string,
     @Body() updateCourseDto: UpdateCourseDto,
     @CurrentUser() user: { userId: string },
-  ) {
-    return this.coursesService.update(id, user.userId, updateCourseDto);
+  ): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.update(id, user.userId, updateCourseDto);
+    return { success: true, data: course };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Patch(':id/submit-for-review')
-  submitForReview(
+  async submitForReview(
     @Param('id') id: string,
     @CurrentUser() user: { userId: string },
-  ) {
-    return this.coursesService.submitForReview(id, user.userId);
+  ): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.submitForReview(id, user.userId);
+    return { success: true, data: course };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Patch(':id/approve')
-  approveCourse(@Param('id') id: string) {
-    return this.coursesService.approveCourse(id);
+  async approveCourse(@Param('id') id: string): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.approveCourse(id);
+    return { success: true, data: course };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Patch(':id/reject')
-  rejectCourse(@Param('id') id: string) {
-    return this.coursesService.rejectCourse(id);
+  async rejectCourse(@Param('id') id: string): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.rejectCourse(id);
+    return { success: true, data: course };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.coursesService.remove(id);
+  async remove(@Param('id') id: string): Promise<ApiResponse<{ message: string }>> {
+    const result = await this.coursesService.remove(id);
+    return { success: true, data: result };
   }
 }

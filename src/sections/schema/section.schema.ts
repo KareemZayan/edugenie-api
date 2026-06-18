@@ -20,8 +20,8 @@ export class Section {
   expectedOutcomes!: string[];
 
 
-  @Prop({ required: true, min: 0 })
-  price!: number;
+  @Prop({ type: Number, default: null, min: 0 })
+  price!: number | null;
 
   @Prop({ type: [LessonSchema], default: [] })
   lessons!: Types.DocumentArray<Lesson>;
