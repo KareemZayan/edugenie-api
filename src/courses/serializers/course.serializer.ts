@@ -11,6 +11,8 @@ export class CourseSerializer implements CourseResponse {
   @Expose() courseStatus: string;
   @Expose() instructor: any;
   @Expose() category: any;
+  @Expose() sections: any[];
+  @Expose() thumbnailPublicId: string;
   @Expose() goals: string[];
   @Expose() requirements: string[];
   @Expose() ratingAverage: number;
@@ -24,17 +26,56 @@ export class CourseSerializer implements CourseResponse {
 
   constructor(partial: Partial<CourseSerializer>) {
     Object.assign(this, partial);
+    
     if ((partial as any)._id) {
       this.id = (partial as any)._id.toString();
       delete (this as any)._id;
     }
+
     if ((partial as any).instructorId) {
-       this.instructor = (partial as any).instructorId.toString();
+       const inst = (partial as any).instructorId;
+       if (inst && typeof inst === 'object' && inst._id) {
+         this.instructor = Object.assign({}, inst);
+         this.instructor.id = inst._id.toString();
+         delete this.instructor._id;
+       } else {
+         this.instructor = inst?.toString() || inst;
+       }
        delete (this as any).instructorId;
     }
+
     if ((partial as any).categoryId) {
-       this.category = (partial as any).categoryId.toString();
+       const cat = (partial as any).categoryId;
+       if (cat && typeof cat === 'object' && cat._id) {
+         this.category = Object.assign({}, cat);
+         this.category.id = cat._id.toString();
+         delete this.category._id;
+       } else {
+         this.category = cat?.toString() || cat;
+       }
        delete (this as any).categoryId;
+    }
+
+    if (this.sections && Array.isArray(this.sections)) {
+       this.sections = this.sections.map((section: any) => {
+         const secObj = typeof section.toObject === 'function' ? section.toObject() : section;
+         if (secObj._id) {
+           secObj.id = secObj._id.toString();
+           delete secObj._id;
+         }
+         
+         if (secObj.lessons && Array.isArray(secObj.lessons)) {
+           secObj.lessons = secObj.lessons.map((lesson: any) => {
+             const lesObj = typeof lesson.toObject === 'function' ? lesson.toObject() : lesson;
+             if (lesObj._id) {
+               lesObj.id = lesObj._id.toString();
+               delete lesObj._id;
+             }
+             return lesObj;
+           });
+         }
+         return secObj;
+       });
     }
   }
 }

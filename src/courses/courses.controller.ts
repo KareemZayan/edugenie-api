@@ -22,7 +22,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiResponse } from '../common/interfaces/api-response.interface';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 import { CourseResponse } from './interfaces/course-response.interface';
-import { InstructorAnalyticsResponse } from './interface/IinstructorAnalyticsResponse';
+import { InstructorAnalyticsResponse } from './interfaces/IinstructorAnalyticsResponse';
+
 
 @Controller('courses')
 export class CoursesController {
@@ -70,6 +71,7 @@ export class CoursesController {
     const stats = await this.coursesService.getAdminStats();
     return { success: true, data: stats };
   }
+
   @Get()
   @UseInterceptors(CacheInterceptor)
   async findAll(
