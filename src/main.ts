@@ -25,8 +25,6 @@ async function bootstrap() {
     }),
   );
 
-  
-
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
   app.enableCors({

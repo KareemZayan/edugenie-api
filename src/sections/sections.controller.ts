@@ -15,10 +15,11 @@ import { UserRole } from 'src/common/enums/user-role.enum';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UpdateSectionDto } from './dto/update-section.dto';
+import { ReorderSectionsDto } from './dto/reorder-section.dto';
 
 @Controller('courses/:id/sections')
 export class SectionsController {
-  constructor(private readonly sectionsService: SectionsService) { }
+  constructor(private readonly sectionsService: SectionsService) {}
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
@@ -30,6 +31,21 @@ export class SectionsController {
   ) {
     const instructorId = user?.userId;
     return this.sectionsService.addSection(id, instructorId, createSectionDto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Patch('reorder')
+  reorderSections(
+    @Param('id') courseId: string,
+    @Body() dto: ReorderSectionsDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.sectionsService.reorderSections(
+      courseId,
+      user.userId,
+      dto.sectionIds,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

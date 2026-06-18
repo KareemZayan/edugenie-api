@@ -7,9 +7,7 @@ import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.
 
 @Injectable()
 export class QuizzesService {
-  constructor(
-    @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
-  ) {}
+  constructor(@InjectModel(Quiz.name) private quizModel: Model<Quiz>) {}
 
   async saveQuizConfig(dto: CreateQuizDto) {
     // Save the configuration to the database so the AI worker can pick it up later
