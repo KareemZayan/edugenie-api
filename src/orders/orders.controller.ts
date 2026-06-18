@@ -6,6 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
+import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.STUDENT)
@@ -14,15 +15,15 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) { }
 
   @Post('checkout')
-  processCheckout(@CurrentUser() user: { userId: string }) {
+  async processCheckout(@CurrentUser() user: { userId: string }): Promise<{ success: boolean; message: string; clientSecret: string }> {
     return this.ordersService.processCheckout(user.userId);
   }
 
   @Get('history')
-  getMyOrders(
+  async getMyOrders(
     @CurrentUser() user: { userId: string },
     @Query() query: PaginateQueryDto
-  ) {
+  ): Promise<PaginatedResponse<any>> {
     return this.ordersService.getMyOrders(user.userId, query);
   }
 }

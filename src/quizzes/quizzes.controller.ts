@@ -7,6 +7,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { CreateQuizDto } from './dto/create-quiz.dto';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ApiResponse } from '../common/interfaces/api-response.interface';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('quizzes')
@@ -15,7 +16,7 @@ export class QuizzesController {
 
   @Roles(UserRole.INSTRUCTOR)
   @Post('generate')
-  generateQuizConfig(@Body() dto: CreateQuizDto) {
+  async generateQuizConfig(@Body() dto: CreateQuizDto): Promise<{ message: string; quiz: any }> {
     return this.quizzesService.saveQuizConfig(dto);
   }
 
@@ -25,7 +26,7 @@ export class QuizzesController {
     @Param('id') id: string,
     @Body() dto: SubmitQuizDto,
     @CurrentUser() user: { userId: string },
-  ) {
+  ): Promise<ApiResponse<any>> {
     const result = await this.quizzesService.submitQuizAttempt(id, user.userId, dto);
     return { success: true, data: result };
   }

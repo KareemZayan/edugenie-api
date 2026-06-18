@@ -22,6 +22,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiResponse } from '../common/interfaces/api-response.interface';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 import { CourseResponse } from './interfaces/course-response.interface';
+import { InstructorAnalyticsResponse } from './interface/IinstructorAnalyticsResponse';
 
 @Controller('courses')
 export class CoursesController {
@@ -49,7 +50,7 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Get('instructor-stats')
-  async getInstructorStats(@CurrentUser() user: { userId: string }): Promise<ApiResponse<any>> {
+  async getInstructorStats(@CurrentUser() user: { userId: string }): Promise<ApiResponse<InstructorAnalyticsResponse>> {
     const stats = await this.coursesService.getInstructorStats(user.userId);
     return { success: true, data: stats };
   }
@@ -57,15 +58,17 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Get('pending-review')
-  getPendingReview() {
-    return this.coursesService.getPendingReview();
+  async getPendingReview(): Promise<ApiResponse<any[]>> {
+    const courses = await this.coursesService.getPendingReview();
+    return { success: true, data: courses };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Get('admin/stats')
-  getAdminStats() {
-    return this.coursesService.getAdminStats();
+  async getAdminStats(): Promise<ApiResponse<{ totalCourses: number; underReview: number; published: number; rejected: number; draft: number }>> {
+    const stats = await this.coursesService.getAdminStats();
+    return { success: true, data: stats };
   }
   @Get()
   @UseInterceptors(CacheInterceptor)
