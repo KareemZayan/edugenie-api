@@ -11,6 +11,8 @@ import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.enum';
 
+import { QuizSerializer } from './serializers/quiz.serializer';
+
 @Injectable()
 export class QuizzesService {
   constructor(
@@ -34,7 +36,7 @@ export class QuizzesService {
 
     return {
       message: 'Quiz configuration saved! AI generation is now pending.',
-      quiz,
+      quiz: new QuizSerializer(quiz.toObject() as any),
     };
   }
 

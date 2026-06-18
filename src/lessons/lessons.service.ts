@@ -13,6 +13,8 @@ import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { Progress } from '../progress/schema/progress.schema';
 import { ForbiddenException } from '@nestjs/common';
+import { SectionSerializer } from '../sections/serializers/section.serializer';
+import { LessonSerializer } from './serializers/lesson.serializer';
 
 @Injectable()
 export class LessonsService {
@@ -45,7 +47,7 @@ export class LessonsService {
       throw new NotFoundException('Invalid Course, Section, or Ownership');
 
     await this.coursesService.syncMetadata(courseId);
-    return updated.toObject().sections;
+    return updated.toObject().sections.map((sec: any) => new SectionSerializer(sec));
   }
 
   async getLessonById(
@@ -66,7 +68,7 @@ export class LessonsService {
       throw new NotFoundException('Invalid Course, Section, or Lesson');
 
     const found = lesson.sections[0].lessons.find((l) => l._id.toString() === lessonId);
-    return found ? found.toObject() : null;
+    return found ? new LessonSerializer(found.toObject() as any) : null;
   }
 
   async findOneForStudent(lessonId: string, studentId: string) {
@@ -157,7 +159,7 @@ export class LessonsService {
       );
 
     await this.coursesService.syncMetadata(courseId);
-    return updated.toObject().sections;
+    return updated.toObject().sections.map((sec: any) => new SectionSerializer(sec));
   }
 
   async removeLesson(
@@ -233,6 +235,6 @@ export class LessonsService {
     course.markModified('sections');
     await course.save();
 
-    return course.toObject().sections;
+    return course.toObject().sections.map((sec: any) => new SectionSerializer(sec));
   }
 }
