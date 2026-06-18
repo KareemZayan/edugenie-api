@@ -49,8 +49,6 @@ export class LessonsController {
     @Body() dto: ReorderLessonsDto,
     @CurrentUser() user: { userId: string },
   ) {
-    console.log('🔥 REORDER HIT');
-    console.log('BODY:', dto);
     return this.lessonsService.reorderLessons(
       courseId,
       sectionId,
