@@ -20,7 +20,7 @@ export class QuizzesService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private enrollmentsService: EnrollmentsService,
-  ) {}
+  ) { }
 
   async saveQuizConfig(dto: CreateQuizDto) {
     const quiz = await this.quizModel.create({
@@ -82,8 +82,8 @@ export class QuizzesService {
       const correctSorted = [...question.correctAnswers].sort();
       const submittedSorted = [...submittedAnswers].sort();
 
-      const isCorrect = correctSorted.length === submittedSorted.length && 
-                        correctSorted.every((val, index) => val === submittedSorted[index]);
+      const isCorrect = correctSorted.length === submittedSorted.length &&
+        correctSorted.every((val, index) => val === submittedSorted[index]);
 
       if (isCorrect) {
         correctAnswersCount++;

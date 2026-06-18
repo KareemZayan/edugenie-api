@@ -358,6 +358,72 @@ export class CoursesService {
     return new CourseSerializer(course.toObject());
   }
 
+  async getPendingReview() {
+    const courses = await this.courseModel
+      .find({ courseStatus: CourseStatus.UNDER_REVIEW })
+      .populate('instructorId', 'firstName lastName avatar email')
+      .populate('categoryId', 'name slug')
+      .lean()
+      .exec();
+
+    return courses.map((course: any) => ({
+      _id: course._id.toString(),
+      title: course.title,
+      description: course.description,
+      thumbnail: course.thumbnail,
+      level: course.level,
+      price: course.price,
+      courseStatus: course.courseStatus,
+      totalHours: course.totalHours,
+      totalLessons: course.totalLessons,
+      sectionsCount: course.sections ? course.sections.length : 0,
+      goals: course.goals,
+      requirements: course.requirements,
+      createdAt: course.createdAt,
+      category: course.categoryId ? {
+        _id: course.categoryId._id?.toString() || course.categoryId.toString(),
+        name: course.categoryId.name,
+        slug: course.categoryId.slug
+      } : null,
+      instructor: course.instructorId ? {
+        _id: course.instructorId._id?.toString() || course.instructorId.toString(),
+        firstName: course.instructorId.firstName,
+        lastName: course.instructorId.lastName,
+        avatar: course.instructorId.avatar,
+        email: course.instructorId.email
+      } : null
+    }));
+  }
+
+  async getAdminStats() {
+    const stats = await this.courseModel.aggregate([
+      {
+        $group: {
+          _id: '$courseStatus',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const result = {
+      totalCourses: 0,
+      underReview: 0,
+      published: 0,
+      rejected: 0,
+      draft: 0
+    };
+
+    stats.forEach(stat => {
+      result.totalCourses += stat.count;
+      if (stat._id === CourseStatus.UNDER_REVIEW) result.underReview = stat.count;
+      else if (stat._id === CourseStatus.PUBLISHED) result.published = stat.count;
+      else if (stat._id === CourseStatus.REJECTED) result.rejected = stat.count;
+      else if (stat._id === CourseStatus.DRAFT) result.draft = stat.count;
+    });
+
+    return result;
+  }
+
   async approveCourse(courseId: string) {
     const course = await this.courseModel.findOneAndUpdate(
       {
@@ -365,21 +431,26 @@ export class CoursesService {
         courseStatus: CourseStatus.UNDER_REVIEW,
       },
       { $set: { courseStatus: CourseStatus.PUBLISHED } },
-      { returnDocument: 'after' },
+      { returnDocument: 'after', runValidators: true },
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
     return new CourseSerializer(course.toObject());
   }
 
-  async rejectCourse(courseId: string) {
+  async rejectCourse(courseId: string, reason?: string) {
     const course = await this.courseModel.findOneAndUpdate(
       {
         _id: new Types.ObjectId(courseId),
         courseStatus: CourseStatus.UNDER_REVIEW,
       },
-      { $set: { courseStatus: CourseStatus.REJECTED } },
-      { returnDocument: 'after' },
+      { 
+        $set: { 
+          courseStatus: CourseStatus.REJECTED,
+          ...(reason && { rejectionReason: reason })
+        } 
+      },
+      { returnDocument: 'after', runValidators: true },
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');

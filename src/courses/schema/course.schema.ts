@@ -48,6 +48,9 @@ export class Course {
   })
   courseStatus!: CourseStatus;
 
+  @Prop()
+  rejectionReason?: string;
+
   @Prop({
     type: Types.ObjectId,
     ref: 'User',

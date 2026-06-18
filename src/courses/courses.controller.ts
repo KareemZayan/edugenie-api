@@ -54,6 +54,19 @@ export class CoursesController {
     return { success: true, data: stats };
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @Get('pending-review')
+  getPendingReview() {
+    return this.coursesService.getPendingReview();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @Get('admin/stats')
+  getAdminStats() {
+    return this.coursesService.getAdminStats();
+  }
   @Get()
   @UseInterceptors(CacheInterceptor)
   async findAll(
@@ -117,8 +130,11 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Patch(':id/reject')
-  async rejectCourse(@Param('id') id: string): Promise<ApiResponse<CourseResponse>> {
-    const course = await this.coursesService.rejectCourse(id);
+  async rejectCourse(
+    @Param('id') id: string,
+    @Body() body?: { reason: string },
+  ): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.rejectCourse(id, body?.reason);
     return { success: true, data: course };
   }
 

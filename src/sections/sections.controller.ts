@@ -18,6 +18,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UpdateSectionDto } from './dto/update-section.dto';
 import { ApiResponse } from '../common/interfaces/api-response.interface';
 import { SectionResponse } from './interfaces/section-response.interface';
+import { ReorderSectionsDto } from './dto/reorder-section.dto';
 
 @Controller('courses/:id/sections')
 export class SectionsController {
@@ -34,6 +35,21 @@ export class SectionsController {
     const instructorId = user?.userId;
     const sections = await this.sectionsService.addSection(id, instructorId, createSectionDto);
     return { success: true, data: sections };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Patch('reorder')
+  reorderSections(
+    @Param('id') courseId: string,
+    @Body() dto: ReorderSectionsDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.sectionsService.reorderSections(
+      courseId,
+      user.userId,
+      dto.sectionIds,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

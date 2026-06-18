@@ -23,35 +23,30 @@ export class CloudinaryService {
     });
   }
 
-  generateSignature(folderPath: string) {
-    const timestamp = Math.round(new Date().getTime() / 1000);
+  generateSignature(folderPath: string, context?: string) {
+    const timestamp = Math.round(Date.now() / 1000);
+  
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
     const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-
-    const folder = folderPath.startsWith('courses/')
-      ? folderPath                      
-      : `${folderPath}`;                
-
+  
     const paramsToSign: Record<string, any> = {
       timestamp,
-      folder,
+      folder: folderPath,
     };
-
-   
-    if (folderPath.startsWith('courses/')) {
-      paramsToSign['resource_type'] = 'video';
+  
+    if (context) {
+      paramsToSign.context = context;
     }
-
+  
     const signature = cloudinary.utils.api_sign_request(
       paramsToSign,
       apiSecret as string,
     );
-
+  
     return { signature, timestamp, apiKey, cloudName };
   }
 
-  //  NEW 
   async deleteAsset(
     publicId: string,
     resourceType: 'image' | 'video' = 'image',
@@ -67,7 +62,6 @@ export class CloudinaryService {
       return { success: false };
     }
   }
-  
 
   verifyWebhookSignature(
     body: Record<string, unknown>,
@@ -104,33 +98,25 @@ export class CloudinaryService {
     const public_id = payload.public_id as string | undefined;
     const secure_url = payload.secure_url as string | undefined;
     const duration = payload.duration as number | undefined;
+    const context = payload.context as Record<string, string> | undefined;
     if (!public_id) return;
 
-    const pathParts = public_id.split('/');
-    const courseIndex   = pathParts.indexOf('courses');
-    const sectionsIndex = pathParts.indexOf('sections');
-    const lessonsIndex  = pathParts.indexOf('lessons');
+    // ✅ NEW: get IDs from context instead of parsing
+    const courseId = context?.courseId;
+    const sectionId = context?.sectionId;
+    const lessonId = context?.lessonId;
 
-    if (
-      courseIndex === -1 ||
-      sectionsIndex === -1 ||
-      lessonsIndex === -1 ||
-      lessonsIndex + 1 >= pathParts.length
-    ) {
-      this.logger.warn(`Could not extract IDs from public_id: ${public_id}`);
+    if (!courseId || !sectionId || !lessonId) {
+      this.logger.warn(`Missing context in Cloudinary webhook`);
       return;
     }
-
-    const courseId  = pathParts[courseIndex + 1];
-    const sectionId = pathParts[sectionsIndex + 1];
-    const lessonId  = pathParts[lessonsIndex + 1];
 
     if (
       !Types.ObjectId.isValid(courseId) ||
       !Types.ObjectId.isValid(sectionId) ||
       !Types.ObjectId.isValid(lessonId)
     ) {
-      this.logger.warn(`Invalid ObjectIds from public_id: ${public_id}`);
+      this.logger.warn(`Invalid ObjectIds in webhook context`);
       return;
     }
 
@@ -139,9 +125,9 @@ export class CloudinaryService {
         { _id: new Types.ObjectId(courseId) },
         {
           $set: {
-            'sections.$[s].lessons.$[l].videoUrl':       secure_url,
-            'sections.$[s].lessons.$[l].videoPublicId':  public_id,
-            'sections.$[s].lessons.$[l].videoDuration':  duration || 0,
+            'sections.$[s].lessons.$[l].videoUrl': secure_url,
+            'sections.$[s].lessons.$[l].videoPublicId': public_id,
+            'sections.$[s].lessons.$[l].videoDuration': duration || 0,
           },
         },
         {
@@ -153,13 +139,13 @@ export class CloudinaryService {
       );
 
       if (updated.modifiedCount > 0) {
-        this.logger.log(`Updated lesson ${lessonId} with video ${public_id}`);
+        this.logger.log(`Updated lesson ${lessonId}`);
         await this.coursesService.syncMetadata(courseId);
       } else {
-        this.logger.warn(`No lesson found to update for ${lessonId}`);
+        this.logger.warn(`No lesson found for ${lessonId}`);
       }
     } catch (error) {
-      this.logger.error(`Failed to update lesson media for ${lessonId}`, error);
+      this.logger.error(`Webhook update failed`, error);
     }
   }
 }

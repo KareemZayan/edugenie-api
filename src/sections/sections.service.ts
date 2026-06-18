@@ -35,7 +35,7 @@ export class SectionsService {
 
     if (!updated)
       throw new NotFoundException('Course not found or ownership mismatch');
-      
+
     // Trigger metadata sync (recalculates course total price, hours, and lessons)
     await this.coursesService.syncMetadata(courseId);
     return updated.sections.map((s) => new SectionSerializer(s.toObject() as any));
@@ -145,5 +145,44 @@ export class SectionsService {
     }
 
     return { success: true, message: 'Section price updated successfully' };
+  }
+
+  async reorderSections(
+    courseId: string,
+    instructorId: string,
+    sectionIds: string[],
+  ) {
+    const course = await this.courseModel.findOne({
+      _id: new Types.ObjectId(courseId),
+      instructorId: new Types.ObjectId(instructorId),
+    });
+
+    if (!course)
+      throw new NotFoundException('Course not found or unauthorized');
+
+    const sectionMap = new Map(
+      course.sections.map((s) => [s._id.toString(), s]),
+    );
+
+    if (sectionIds.length !== sectionMap.size) {
+      throw new BadRequestException(
+        'sectionIds count does not match course sections',
+      );
+    }
+
+    const reordered = sectionIds.map((id) => {
+      const section = sectionMap.get(id);
+      if (!section)
+        throw new BadRequestException(`Section ${id} not found in this course`);
+      return section;
+    });
+
+    course.sections.splice(0, course.sections.length, ...reordered);
+    course.markModified('sections');
+    await course.save();
+
+    await this.coursesService.syncMetadata(courseId);
+
+    return course.sections;
   }
 }
