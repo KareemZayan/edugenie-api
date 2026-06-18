@@ -64,7 +64,7 @@ export class CloudinaryService {
   }
 
   verifyWebhookSignature(
-    body: any,
+    body: Record<string, unknown>,
     signature: string,
     timestamp: string,
   ): boolean {
@@ -94,9 +94,11 @@ export class CloudinaryService {
     return expectedSignature === signature;
   }
 
-  async processUploadWebhook(payload: any) {
-    const { public_id, secure_url, duration, context } = payload;
-
+  async processUploadWebhook(payload: Record<string, unknown>) {
+    const public_id = payload.public_id as string | undefined;
+    const secure_url = payload.secure_url as string | undefined;
+    const duration = payload.duration as number | undefined;
+    const context = payload.context as Record<string, string> | undefined;
     if (!public_id) return;
 
     // ✅ NEW: get IDs from context instead of parsing

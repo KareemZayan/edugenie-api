@@ -6,6 +6,13 @@ import { QuizDifficulty } from '../../common/enums/quizDifficulty.enum';
 
 export type QuizDocument = HydratedDocument<Quiz>;
 
+export interface QuizQuestion {
+  questionText: string;
+  type: QuestionType;
+  options: string[];
+  correctAnswers: string[];
+}
+
 @Schema({ timestamps: true })
 export class Quiz {
   @Prop({ type: Types.ObjectId, ref: 'Section', required: true })
@@ -25,7 +32,7 @@ export class Quiz {
     options: { type: [String], required: true }, // e.g. ["True", "False"]
     correctAnswers: { type: [String], required: true } // Handles multi-choice!
   }])
-  questions: any[];
+  questions: QuizQuestion[];
 }
 
 export const QuizSchema = SchemaFactory.createForClass(Quiz);

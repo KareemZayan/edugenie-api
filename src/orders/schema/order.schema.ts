@@ -10,10 +10,13 @@ export class Order {
 
   // We embed the specific courseId and the price they paid
   @Prop([{
+    itemType: { type: String, enum: ['course', 'section'], required: true, default: 'course' },
     courseId: { type: Types.ObjectId, ref: 'Course', required: true },
+    sectionId: { type: Types.ObjectId, default: null },
+    instructorId: { type: Types.ObjectId, ref: 'User', required: true },
     price: { type: Number, required: true }
   }])
-  items: { courseId: Types.ObjectId; price: number }[];
+  items: { itemType: string; courseId: Types.ObjectId; sectionId: Types.ObjectId | null; instructorId: Types.ObjectId; price: number }[];
 
   @Prop({ required: true, min: 0 })
   totalAmount: number;

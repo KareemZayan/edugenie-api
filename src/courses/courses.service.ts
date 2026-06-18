@@ -1,9 +1,10 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ForbiddenException,
-  BadRequestException,
 } from '@nestjs/common';
+import * as mongoose from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course } from './schema/course.schema';
@@ -11,6 +12,8 @@ import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseStatus } from '../common/enums/course-status.enum';
 import { Category } from '../categories/schema/category.schema';
+import { CourseSerializer } from './serializers/course.serializer';
+import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 
 @Injectable()
 export class CoursesService {
@@ -19,18 +22,22 @@ export class CoursesService {
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
   ) { }
 
-  async create(dto: CreateCourseDto, instructorId: string): Promise<Course> {
+  async create(dto: CreateCourseDto, instructorId: string): Promise<CourseSerializer> {
     if (!instructorId)
       throw new BadRequestException('Instructor ID is required');
 
-    return await this.courseModel.create({
+    const createdCourse = await this.courseModel.create({
       ...dto,
       instructorId: new Types.ObjectId(instructorId),
       courseStatus: CourseStatus.DRAFT,
+      ratingAverage: 0,
+      totalEnrollments: 0,
     });
+
+    return new CourseSerializer(createdCourse.toObject());
   }
 
-  async findAll(params: {
+  async findAll(filterDto: {
     skip: number;
     limit: number;
     categorySlug?: string;
@@ -38,8 +45,16 @@ export class CoursesService {
     search?: string;
     minPrice?: number;
     maxPrice?: number;
-  }) {
-    const { skip, limit, categorySlug, level, search, minPrice, maxPrice } = params;
+  }): Promise<PaginatedResponse<CourseSerializer>> {
+    const {
+      skip,
+      limit,
+      categorySlug,
+      level,
+      search,
+      minPrice,
+      maxPrice,
+    } = filterDto;
 
     let categoryIdObj;
     if (categorySlug) {
@@ -47,13 +62,11 @@ export class CoursesService {
       if (category) {
         categoryIdObj = category._id;
       } else {
-        // If the category slug doesn't exist, return empty results early
-        return { data: [], total: 0, skip, limit };
+        return { data: [], meta: { total: 0, page: 1, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
       }
     }
 
-    // Senior Level: Modern ES6 Conditional Object Spread
-    const query: any = {
+    const query: Record<string, unknown> = {
       courseStatus: CourseStatus.PUBLISHED,
       ...(categoryIdObj && { categoryId: categoryIdObj }),
       ...(level && { level }),
@@ -82,23 +95,32 @@ export class CoursesService {
       this.courseModel.countDocuments(query),
     ]);
 
+    const page = Math.floor(skip / limit) + 1;
+    const totalPages = Math.ceil(total / limit);
+
     return {
-      data,
-      total,
-      skip,
-      limit,
+      data: data.map((d) => new CourseSerializer(d.toObject())),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      }
     };
   }
 
-  async findInstructorCourses(instructorId: string) {
+  async findInstructorCourses(instructorId: string): Promise<CourseSerializer[]> {
     if (!instructorId) return [];
-    return await this.courseModel
+    const courses = await this.courseModel
       .find({ instructorId: new Types.ObjectId(instructorId) })
       .sort({ createdAt: -1 })
       .exec();
+    return courses.map((c) => new CourseSerializer(c.toObject()));
   }
 
-  async findOne(id: string) {
+  async findOne(id: string): Promise<CourseSerializer> {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('Invalid ID');
 
@@ -112,23 +134,23 @@ export class CoursesService {
       .exec();
 
     if (!course) throw new NotFoundException('Course not found');
-    return course;
+    return new CourseSerializer(course.toObject());
   }
 
-  async update(id: string, instructorId: string, dto: UpdateCourseDto) {
+  async update(id: string, instructorId: string, dto: UpdateCourseDto): Promise<CourseSerializer> {
     const updated = await this.courseModel.findOneAndUpdate(
       { _id: id, instructorId: new Types.ObjectId(instructorId) },
       { $set: dto },
       { returnDocument: 'after', runValidators: true },
     );
     if (!updated) throw new ForbiddenException('Not authorized');
-    return updated;
+    return new CourseSerializer(updated.toObject());
   }
 
-  async remove(id: string) {
+  async remove(id: string): Promise<{ message: string }> {
     const result = await this.courseModel.findByIdAndDelete(id);
     if (!result) throw new NotFoundException('Course not found');
-    return { success: true };
+    return { message: 'Course successfully deleted' };
   }
 
 
@@ -256,6 +278,7 @@ export class CoursesService {
           id: '1',
           studentName: 'John Doe',
           courseTitle: 'Advanced Angular',
+          itemType: 'course',
           date: new Date().toISOString(),
           price: 49.99,
           status: 'COMPLETED',
@@ -264,8 +287,10 @@ export class CoursesService {
           id: '2',
           studentName: 'Jane Smith',
           courseTitle: 'NestJS Microservices',
+          itemType: 'section',
+          sectionTitle: 'Building GraphQL APIs',
           date: new Date().toISOString(),
-          price: 99.99,
+          price: 19.99,
           status: 'COMPLETED',
         },
       ],
@@ -330,11 +355,7 @@ export class CoursesService {
     course.courseStatus = CourseStatus.UNDER_REVIEW;
     await course.save();
 
-    return {
-      success: true,
-      message: 'Course successfully submitted for Admin Review.',
-      status: course.courseStatus,
-    };
+    return new CourseSerializer(course.toObject());
   }
 
   async getPendingReview() {
@@ -414,11 +435,7 @@ export class CoursesService {
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
-    return {
-      success: true,
-      message: 'Course has been approved and published.',
-      status: course.courseStatus,
-    };
+    return new CourseSerializer(course.toObject());
   }
 
   async rejectCourse(courseId: string, reason?: string) {
@@ -437,10 +454,6 @@ export class CoursesService {
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
-    return {
-      success: true,
-      message: 'Course has been rejected and returned to instructor.',
-      status: course.courseStatus,
-    };
+    return new CourseSerializer(course.toObject());
   }
 }

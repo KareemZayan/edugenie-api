@@ -2,6 +2,8 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 
 import { CategoriesService } from './categories.service';
 import { createCategoryDto } from './dto/create-category.dto';
+import { ApiResponse } from '../common/interfaces/api-response.interface';
+import { CategoryResponse } from './interfaces/category-response.interface';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -12,15 +14,16 @@ import { UserRole } from '../common/enums/user-role.enum';
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) { }
 
-
   @Post()
-  createCategory(@Body() createCategoryDto: createCategoryDto) {
-    return this.categoriesService.createCategory(createCategoryDto);
+  async createCategory(@Body() createCategoryDto: createCategoryDto): Promise<ApiResponse<CategoryResponse>> {
+    const category = await this.categoriesService.createCategory(createCategoryDto);
+    return { success: true, data: category };
   }
 
   @Get()
-  findAll() {
-    return this.categoriesService.findAll();
+  async findAll(): Promise<ApiResponse<CategoryResponse[]>> {
+    const categories = await this.categoriesService.findAll();
+    return { success: true, data: categories };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
