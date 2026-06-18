@@ -20,9 +20,11 @@ export class SectionSerializer implements SectionResponse {
     const doc = partial as Record<string, unknown>;
     if (doc._id) {
       this.id = doc._id.toString();
+      delete (this as any)._id;
     }
     if (doc.courseId) {
        this.courseId = doc.courseId.toString();
+       delete (this as any).courseId;
     }
   }
 }

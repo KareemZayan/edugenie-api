@@ -18,6 +18,7 @@ export class CategorySerializer implements CategoryResponse {
     Object.assign(this, partial);
     if ((partial as any)._id) {
       this.id = (partial as any)._id.toString();
+      delete (this as any)._id;
     }
   }
 }
