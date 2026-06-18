@@ -4,7 +4,7 @@ import { Model, Types } from 'mongoose';
 
 import { Cart } from '../cart/schema/cart.schema';
 import { Order } from './schema/order.schema';
-import { Enrollment } from 'src/enrollments/schema/enrollment.schema';
+import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { CourseDocument } from '../courses/schema/course.schema';
 import { PaymobService } from '../paymob/paymob.service';
 import { UsersService } from '../users/users.service';

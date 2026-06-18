@@ -6,7 +6,7 @@ import { Course } from '../courses/schema/course.schema';
 import { Quiz } from '../quizzes/schema/quiz.schema';
 import { TrackProgressDto } from './dto/track-progress.dto';
 import { ProgressResponse } from './interfaces/progress-response.interface';
-import { progressStateEnum } from 'src/common/enums/progress.enum';
+import { progressStateEnum } from '../common/enums/progress.enum';
 
 @Injectable()
 export class ProgressService {

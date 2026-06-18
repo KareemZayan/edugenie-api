@@ -6,7 +6,7 @@ import { OrdersController } from './orders.controller';
 import { Cart, CartSchema } from '../cart/schema/cart.schema';
 import { Order, OrderSchema } from './schema/order.schema';
 import { Earning, EarningSchema } from './schema/earning.schema';
-import { Enrollment, EnrollmentSchema } from 'src/enrollments/schema/enrollment.schema';
+import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
 import { PaymobModule } from '../paymob/paymob.module';
 import { UsersModule } from '../users/users.module';
 
