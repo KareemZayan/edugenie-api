@@ -17,7 +17,7 @@ import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 
 @Controller('auth')
 @UseGuards(ThrottlerGuard)
-@Throttle({ default: { limit: 5, ttl: 900000 } }) // 5 requests per 15 mins
+@Throttle({ default: { limit: 20, ttl: 60000 } }) // 5 requests per 15 mins
 export class AuthController {
   constructor(private authService: AuthService) { }
 
