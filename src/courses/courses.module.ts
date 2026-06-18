@@ -7,6 +7,8 @@ import { CoursesController } from './courses.controller';
 
 import { Course, CourseSchema } from './schema/course.schema';
 import { Category, CategorySchema } from '../categories/schema/category.schema';
+import { ProgressModule } from '../progress/progress.module';
+import { EnrollmentsModule } from '../enrollments/enrollments.module';
 
 @Module({
   imports: [
@@ -18,9 +20,11 @@ import { Category, CategorySchema } from '../categories/schema/category.schema';
       ttl: 60000, // cache for 1 minute
       max: 100, // maximum number of items in cache
     }),
+    ProgressModule,
+    EnrollmentsModule,
   ],
   controllers: [CoursesController],
   providers: [CoursesService],
   exports: [CoursesService],
 })
-export class CoursesModule {}
+export class CoursesModule { }

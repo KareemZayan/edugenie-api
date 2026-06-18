@@ -97,13 +97,12 @@ export class EnrollmentsService {
       .sort({ updatedAt: -1 }) // Show recently watched courses first
       .skip(skip)
       .limit(limit)
-      .lean()
       .exec();
 
     const total = await this.enrollmentModel.countDocuments({ studentId: new Types.ObjectId(studentId) });
 
     return {
-      data,
+      data: data.map(d => d.toObject()),
       meta: {
         total,
         page,
@@ -121,7 +120,7 @@ export class EnrollmentsService {
     }).exec();
 
     if (!enrollment) throw new ForbiddenException('You are not enrolled in this course.');
-    return enrollment;
+    return enrollment.toObject();
   }
 
   // 3. The Core Feature: Mark a video as complete and calculate the new %

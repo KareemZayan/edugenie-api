@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   Patch,
@@ -37,6 +38,23 @@ export class LessonsController {
       sectionId,
       instructorId,
       createLessonDto,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Get(':lessonId')
+  getLesson(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.lessonsService.getLessonById(
+      courseId,
+      sectionId,
+      lessonId,
+      user.userId,
     );
   }
 

@@ -23,7 +23,7 @@ import { ApiResponse } from '../common/interfaces/api-response.interface';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 import { CourseResponse } from './interfaces/course-response.interface';
 import { InstructorAnalyticsResponse } from './interfaces/IinstructorAnalyticsResponse';
-
+import { ResumeResponse } from './interfaces/resume-response.interface';
 
 @Controller('courses')
 export class CoursesController {
@@ -99,6 +99,16 @@ export class CoursesController {
   async findOne(@Param('id') id: string): Promise<ApiResponse<CourseResponse>> {
     const course = await this.coursesService.findOne(id);
     return { success: true, data: course };
+  }
+
+  @Get(':courseId/resume')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.STUDENT)
+  async resume(
+    @Param('courseId') courseId: string,
+    @CurrentUser() user: { userId: string },
+  ): Promise<ResumeResponse> {
+    return this.coursesService.getResumePoint(courseId, user.userId);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

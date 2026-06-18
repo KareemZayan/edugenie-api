@@ -31,7 +31,7 @@ export class CategoriesService {
     return categories.map(c => new CategorySerializer(c.toObject()));
   }
 
-  async updateCategory(id: string, updateCategoryDto: any): Promise<Category> {
+  async updateCategory(id: string, updateCategoryDto: any): Promise<CategorySerializer> {
     const updatedCategory = await this.categoryModel.findByIdAndUpdate(
       id,
       updateCategoryDto,
@@ -42,7 +42,7 @@ export class CategoriesService {
       throw new ConflictException('Category not found');
     }
 
-    return updatedCategory;
+    return new CategorySerializer(updatedCategory.toObject());
   }
 
   async removeCategory(id: string): Promise<any> {
