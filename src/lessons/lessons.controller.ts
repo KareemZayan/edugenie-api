@@ -15,6 +15,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums/user-role.enum';
+import { ReorderLessonsDto } from './dto/reorder-lessons.dto';
 
 @Controller('courses/:courseId/sections/:sectionId/lessons')
 export class LessonsController {
@@ -36,6 +37,25 @@ export class LessonsController {
       sectionId,
       instructorId,
       createLessonDto,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Patch('reorder')
+  reorderLessons(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() dto: ReorderLessonsDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    console.log('🔥 REORDER HIT');
+    console.log('BODY:', dto);
+    return this.lessonsService.reorderLessons(
+      courseId,
+      sectionId,
+      user.userId,
+      dto.lessonIds,
     );
   }
 
