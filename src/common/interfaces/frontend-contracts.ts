@@ -119,6 +119,20 @@ export interface UserResponse {
   createdAt: Date;
   updatedAt: Date;
 }
+export interface ChangeUserRoleRequest {
+  newRole: 'student' | 'instructor' | 'admin' | 'superadmin';
+  confirmSuperAdminChange?: boolean;
+}
+export interface ChangeRoleResponse {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  oldRole: string;
+  newRole: string;
+  changedAt: Date;
+  changedBy: string;
+}
 
 // ── 5. Categories Module ────────────────────────────────────
 export interface CategoryResponse {
