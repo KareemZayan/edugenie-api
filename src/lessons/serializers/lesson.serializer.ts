@@ -21,9 +21,11 @@ export class LessonSerializer implements LessonResponse {
     Object.assign(this, partial);
     if ((partial as any)._id) {
       this.id = (partial as any)._id.toString();
+      delete (this as any)._id;
     }
     if ((partial as any).courseId) {
        this.courseId = (partial as any).courseId.toString();
+       delete (this as any).courseId;
     }
   }
 }

@@ -16,8 +16,14 @@ export class ReviewSerializer {
   constructor(partial: Partial<ReviewSerializer>) {
     Object.assign(this, partial);
     const doc = partial as Record<string, unknown>;
-    if (doc._id) this.id = doc._id.toString();
-    if (doc.courseId) this.courseId = doc.courseId.toString();
+    if (doc._id) {
+      this.id = doc._id.toString();
+      delete (this as any)._id;
+    }
+    if (doc.courseId) {
+      this.courseId = doc.courseId.toString();
+      delete (this as any).courseId;
+    }
     if (doc.studentId) {
       if (typeof doc.studentId === 'object' && doc.studentId !== null && '_id' in doc.studentId) {
         const student = doc.studentId as Record<string, unknown>;
@@ -27,6 +33,7 @@ export class ReviewSerializer {
       } else {
         this.studentId = doc.studentId.toString();
       }
+      delete (this as any).studentId;
     }
   }
 }

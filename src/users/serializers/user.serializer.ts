@@ -28,6 +28,7 @@ export class UserSerializer implements UserResponse {
     const doc = partial as Record<string, unknown>;
     if (doc._id) {
       this.id = doc._id.toString();
+      delete (this as any)._id;
     }
   }
 }

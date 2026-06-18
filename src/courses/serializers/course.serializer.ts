@@ -26,12 +26,15 @@ export class CourseSerializer implements CourseResponse {
     Object.assign(this, partial);
     if ((partial as any)._id) {
       this.id = (partial as any)._id.toString();
+      delete (this as any)._id;
     }
     if ((partial as any).instructorId) {
        this.instructor = (partial as any).instructorId.toString();
+       delete (this as any).instructorId;
     }
     if ((partial as any).categoryId) {
        this.category = (partial as any).categoryId.toString();
+       delete (this as any).categoryId;
     }
   }
 }

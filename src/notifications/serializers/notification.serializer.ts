@@ -15,7 +15,13 @@ export class NotificationSerializer {
   constructor(partial: Partial<NotificationSerializer>) {
     Object.assign(this, partial);
     const doc = partial as Record<string, unknown>;
-    if (doc._id) this.id = doc._id.toString();
-    if (doc.userId) this.userId = doc.userId.toString();
+    if (doc._id) {
+      this.id = doc._id.toString();
+      delete (this as any)._id;
+    }
+    if (doc.userId) {
+      this.userId = doc.userId.toString();
+      delete (this as any).userId;
+    }
   }
 }
