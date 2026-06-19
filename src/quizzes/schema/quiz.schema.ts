@@ -17,14 +17,20 @@ export interface QuizQuestion {
 export class Quiz {
   @Prop({ type: Types.ObjectId, ref: 'Section', required: true })
   sectionId: Types.ObjectId;
-  @Prop({ enum: QuizDifficulty, required: true })
+  @Prop({ type: String, enum: QuizDifficulty, required: true })
   difficulty: QuizDifficulty;
   @Prop({ required: true, min: 1, max: 50 })
   numberOfQuestions: number;
-  @Prop({ enum: QuestionType, required: true })
+  @Prop({ type: String, enum: QuestionType, required: true })
   questionType: QuestionType;
-  @Prop({ enum: QuizGenerationStatus, default: QuizGenerationStatus.PENDING })
+  @Prop({ type: String, enum: QuizGenerationStatus, default: QuizGenerationStatus.PENDING })
   generationStatus: QuizGenerationStatus;
+  @Prop({ required: true, default: 600 })
+  timeLimit: number;
+  @Prop({ required: true, min: 0, max: 100, default: 70 })
+  passingScore: number;
+  @Prop({ required: true, default: 3 })
+  maxAttempts: number;
   // The AI-Generated Output (Initially Empty!)
   @Prop([{
     questionText: { type: String, required: true },

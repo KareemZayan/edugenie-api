@@ -76,8 +76,8 @@ export class EnrollmentsService {
     return {
       courseId,
       accessType: enrollment.type,
-      accessibleSections: enrollment.type === 'full_course' 
-        ? course.sections.map(s => s._id.toString()) 
+      accessibleSections: enrollment.type === 'full_course'
+        ? course.sections.map(s => s._id.toString())
         : enrollment.sectionIds.map(id => id.toString()),
       totalSections: course.sections.length,
       enrolledAt: (enrollment as any).createdAt,

@@ -8,26 +8,16 @@ import { CreateQuizDto } from './dto/create-quiz.dto';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiResponse } from '../common/interfaces/api-response.interface';
+import { QuizSerializer } from './serializers/quiz.serializer';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('quizzes')
 export class QuizzesController {
-  constructor(private readonly quizzesService: QuizzesService) {}
+  constructor(private readonly quizzesService: QuizzesService) { }
 
   @Roles(UserRole.INSTRUCTOR)
   @Post('generate')
-  async generateQuizConfig(@Body() dto: CreateQuizDto): Promise<{ message: string; quiz: any }> {
+  async generateQuizConfig(@Body() dto: CreateQuizDto): Promise<{ message: string; quiz: QuizSerializer }> {
     return this.quizzesService.saveQuizConfig(dto);
-  }
-
-  @Roles(UserRole.STUDENT)
-  @Post(':id/attempts')
-  async submitQuizAttempt(
-    @Param('id') id: string,
-    @Body() dto: SubmitQuizDto,
-    @CurrentUser() user: { userId: string },
-  ): Promise<ApiResponse<any>> {
-    const result = await this.quizzesService.submitQuizAttempt(id, user.userId, dto);
-    return { success: true, data: result };
   }
 }

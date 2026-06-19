@@ -327,13 +327,64 @@ export interface NotificationResponse {
 }
 
 // ── 14. Quizzes Extended Module ─────────────────────────────
-export interface SubmitQuizResponse {
-  message: string;
-  score: number;
-  isPassed: boolean;
+export interface SubmitAnswerRequest {
+  questionId:       string;
+  selectedOptionIds: string[];
+}
+
+export interface SubmitQuizRequest {
   attemptId: string;
-  correctAnswersCount: number;
-  totalQuestions: number;
+  answers:   SubmitAnswerRequest[];
+}
+
+export interface QuizOption {
+  optionId: string;
+  text:     string;
+}
+
+export interface QuizQuestionForStudent {
+  questionId: string;
+  text:       string;
+  options:    QuizOption[];
+}
+
+export interface QuizForStudentResponse {
+  quizId:             string;
+  timeLimit:           number;
+  passingScore:        number;
+  attemptNumber:       number;
+  maxAttempts:         number;
+  attemptsRemaining:   number;
+  questions:           QuizQuestionForStudent[];
+}
+
+export interface QuizStartResponse {
+  attemptId: string;
+  startedAt: Date;
+  timeLimit: number;
+}
+
+export interface QuizSubmitResponse {
+  passed:              boolean;
+  score:                number;
+  correctAnswers:       number;
+  totalQuestions:       number;
+  attemptNumber:        number;
+  remainingAttempts:    number;
+  progressReset:        boolean;
+  nextSectionUnlocked:  boolean;
+}
+
+export interface QuizAttemptSummary {
+  attemptNumber: number;
+  score:         number | null;
+  passed:        boolean | null;
+  submittedAt:   Date | null;
+}
+
+export interface QuizAttemptsHistoryResponse {
+  attempts:  QuizAttemptSummary[];
+  canRetry:  boolean;
 }
 
 // ── 15. Earnings Module ──────────────────────────────────────

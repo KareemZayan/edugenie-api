@@ -5,6 +5,7 @@ import { ProgressService } from './progress.service';
 import { Progress, ProgressSchema } from './schema/progress.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
+import { QuizAttempt, QuizAttemptSchema } from '../quizzes/schema/quiz-attempt.schema';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
       { name: Progress.name, schema: ProgressSchema },
       { name: Course.name, schema: CourseSchema },
       { name: Quiz.name, schema: QuizSchema },
+      { name: QuizAttempt.name, schema: QuizAttemptSchema },
     ])
   ],
   controllers: [ProgressController],
