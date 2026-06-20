@@ -135,6 +135,18 @@ export interface ChangeRoleResponse {
 }
 
 // ── 5. Categories Module ────────────────────────────────────
+export interface CreateCategoryRequest {
+  name: string;
+  slug: string;
+  description?: string;
+}
+
+export interface UpdateCategoryRequest {
+  name?: string;
+  slug?: string;
+  description?: string;
+}
+
 export interface CategoryResponse {
   id: string;
   name: string;
@@ -143,6 +155,7 @@ export interface CategoryResponse {
   imageUrl?: string;
   icon?: string;
   isActive: boolean;
+  courseCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -563,4 +576,132 @@ export interface QuizApproveResponse {
   quizId: string;
   status: string;
   approvedAt: Date;
+}
+
+// ── 17. Admin Dashboard Module ───────────────────────────────
+export interface RejectCourseRequest {
+  rejectionReason: string;
+}
+
+export interface DeactivateUserRequest {
+  reason: string;
+}
+
+export interface ResolveReportRequest {
+  resolution: string;
+  action: 'content_removed' | 'no_action' | 'user_warned';
+}
+
+export interface AdminDashboardOverviewResponse {
+  pendingApprovals: number;
+  newSignupsToday: number;
+  openReports: number;
+  platformRevenue: number;
+}
+
+export interface PendingCourseListItem {
+  courseId: string;
+  title: string;
+  instructorId: string;
+  instructorName: string;
+  submittedAt: Date;
+  totalSections: number;
+  totalLessons: number;
+}
+
+export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> {}
+
+export interface CourseReviewDetailResponse {
+  courseId: string;
+  title: string;
+  description: string;
+  price: number;
+  instructor: { id: string; name: string; email: string };
+  sections: Array<{
+    sectionId: string;
+    title: string;
+    lessons: Array<{
+      lessonId: string;
+      title: string;
+      videoDuration: number;
+      videoUrl: string;
+    }>;
+  }>;
+  submittedAt: Date;
+}
+
+export interface CourseApprovalResponse {
+  courseId: string;
+  status: string;
+  approvedBy: string;
+  approvedAt: Date;
+}
+
+export interface CourseRejectionResponse {
+  courseId: string;
+  status: string;
+  rejectionReason: string;
+  rejectedBy: string;
+  rejectedAt: Date;
+}
+
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  status: string;
+  createdAt: Date;
+}
+
+export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> {}
+
+export interface UserStatusChangeResponse {
+  userId: string;
+  status: string;
+  deactivatedBy?: string;
+  deactivatedAt?: Date;
+  reactivatedAt?: Date;
+}
+
+export interface ReportListItem {
+  reportId: string;
+  type: string;
+  targetId: string;
+  reason: string;
+  reportedBy?: string;
+  status: string;
+  createdAt: Date;
+}
+
+export interface ReportListResponse extends PaginatedResponse<ReportListItem> {}
+
+export interface ReportResolutionResponse {
+  reportId: string;
+  status: string;
+  resolution: string;
+  resolvedBy: string;
+  resolvedAt: Date;
+}
+
+export interface PlatformAnalyticsResponse {
+  totalUsers: number;
+  totalInstructors: number;
+  totalStudents: number;
+  totalCourses: number;
+  totalRevenue: number;
+  revenueGrowthPercent: number;
+  topCourses: Array<{
+    courseId: string;
+    title: string;
+    enrollments: number;
+    revenue: number;
+  }>;
+  topInstructors: Array<{
+    instructorId: string;
+    name: string;
+    totalRevenue: number;
+    totalStudents: number;
+  }>;
 }

@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
 import { Category } from './schema/category.schema';
-import { createCategoryDto } from './dto/create-category.dto';
+import { CreateCategoryDto } from './dto/create-category.dto';
 import { CategorySerializer } from './serializers/category.serializer';
 
 @Injectable()
@@ -13,7 +13,7 @@ export class CategoriesService {
     private readonly categoryModel: Model<Category>,
   ) { }
 
-  async createCategory(createCategoryDto: createCategoryDto): Promise<CategorySerializer> {
+  async createCategory(createCategoryDto: CreateCategoryDto): Promise<CategorySerializer> {
 
     const existingCategory = await this.categoryModel.findOne({ name: createCategoryDto.name }).exec();
 

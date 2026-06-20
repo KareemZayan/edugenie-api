@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 
 import { CategoriesService } from './categories.service';
-import { createCategoryDto } from './dto/create-category.dto';
+import { CreateCategoryDto } from './dto/create-category.dto';
 import { ApiResponse } from '../common/interfaces/api-response.interface';
 import { CategoryResponse } from './interfaces/category-response.interface';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -15,7 +15,7 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) { }
 
   @Post()
-  async createCategory(@Body() createCategoryDto: createCategoryDto): Promise<ApiResponse<CategoryResponse>> {
+  async createCategory(@Body() createCategoryDto: CreateCategoryDto): Promise<ApiResponse<CategoryResponse>> {
     const category = await this.categoriesService.createCategory(createCategoryDto);
     return { success: true, data: category };
   }
