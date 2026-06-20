@@ -8,6 +8,7 @@ import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.s
 import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import { Lesson, LessonSchema } from '../lessons/schema/lesson.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
+import { WebhookFailureLog, WebhookFailureLogSchema } from '../superadmin/schema/webhook-failure-log.schema';
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { Course, CourseSchema } from '../courses/schema/course.schema';
       { name: Enrollment.name, schema: EnrollmentSchema },
       { name: Earning.name, schema: EarningSchema },
       { name: Lesson.name, schema: LessonSchema },
-      { name: Course.name, schema: CourseSchema }
+      { name: Course.name, schema: CourseSchema },
+      { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema }
     ]),
     PaymobModule
   ],
