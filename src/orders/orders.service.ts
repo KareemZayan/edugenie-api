@@ -4,6 +4,8 @@ import { Model, Types } from 'mongoose';
 import * as crypto from 'crypto';
 
 import { Order } from './schema/order.schema';
+import { Enrollment } from '../enrollments/schema/enrollment.schema';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { CartService } from '../cart/cart.service';
 import { PaymobService } from '../paymob/paymob.service';
 import { CheckoutResponse, OrderDetailResponse, OrderHistoryResponse } from '../frontend-contracts';
@@ -13,6 +15,7 @@ import { OrderStatus } from '../common/enums/order-status.enum';
 export class OrdersService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<Order>,
+    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     private cartService: CartService,
     private paymobService: PaymobService,
   ) { }
@@ -52,6 +55,14 @@ export class OrdersService {
     });
 
     if (existingOrder) {
+      if (existingOrder.totalAmount === 0) {
+        return {
+          clientSecret: '',
+          orderId: existingOrder._id.toString(),
+          amount: 0,
+          currency: 'EGP'
+        };
+      }
       const paymentData = await this.paymobService.createPaymentUrl(existingOrder.totalAmount, existingOrder._id.toString());
       return {
         clientSecret: paymentData.clientSecret,
@@ -84,10 +95,49 @@ export class OrdersService {
       studentId: new Types.ObjectId(studentId),
       items: orderItems,
       totalAmount,
-      status: OrderStatus.PENDING,
-      cartSnapshotHash
+      status: totalAmount === 0 ? OrderStatus.COMPLETED : OrderStatus.PENDING,
+      cartSnapshotHash,
+      paidAt: totalAmount === 0 ? new Date() : undefined
     });
     await order.save();
+
+    if (totalAmount === 0) {
+      // Free order fulfillment
+      for (const item of orderItems) {
+        let enrollment = await this.enrollmentModel.findOne({
+          studentId: order.studentId,
+          courseId: item.courseId
+        });
+
+        if (!enrollment) {
+          enrollment = new this.enrollmentModel({
+            studentId: order.studentId,
+            courseId: item.courseId,
+            type: item.itemType,
+            sectionIds: item.itemType === PurchaseType.SECTION ? [item.sectionId] : []
+          });
+        } else {
+          if (item.itemType === PurchaseType.FULL_COURSE) {
+            enrollment.type = PurchaseType.FULL_COURSE;
+          } else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
+            if (!enrollment.sectionIds.some(id => id.toString() === item.sectionId!.toString())) {
+              enrollment.sectionIds.push(item.sectionId);
+            }
+          }
+        }
+        await enrollment.save();
+      }
+
+      // Automatically clean the cart since items are now owned
+      await this.cartService.validateCart(studentId).catch(() => {});
+
+      return {
+        clientSecret: '',
+        orderId: order._id.toString(),
+        amount: 0,
+        currency: 'EGP'
+      };
+    }
 
     // 5. CALL PAYMOB
     try {
