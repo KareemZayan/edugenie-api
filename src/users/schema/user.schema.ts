@@ -18,7 +18,7 @@ export class User extends Document {
   @Prop({ required: true })
   password!: string;
 
-  @Prop({ required: true, enum: UserRole })
+  @Prop({ type: String, required: true, enum: UserRole })
   role!: UserRole;
 
   @Prop()
@@ -27,7 +27,7 @@ export class User extends Document {
   @Prop()
   avatarPublicId?: string;
 
-  @Prop({ enum: UserLevel })
+  @Prop({ type: String, enum: UserLevel })
   level?: UserLevel;
 
   @Prop({ type: [String], default: [] })

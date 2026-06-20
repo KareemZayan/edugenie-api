@@ -1,90 +1,153 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import * as crypto from 'crypto';
 
-import { Cart } from '../cart/schema/cart.schema';
 import { Order } from './schema/order.schema';
-import { Enrollment } from 'src/enrollments/schema/enrollment.schema';
+import { CartService } from '../cart/cart.service';
+import { PaymobService } from '../paymob/paymob.service';
+import { CheckoutResponse, OrderDetailResponse, OrderHistoryResponse } from '../frontend-contracts';
+import { OrderStatus } from '../common/enums/order-status.enum';
 
 @Injectable()
 export class OrdersService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<Order>,
-    @InjectModel(Cart.name) private cartModel: Model<Cart>,
-    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
+    private cartService: CartService,
+    private paymobService: PaymobService,
   ) { }
 
-  // Triggered when a student clicks "Checkout" in their cart
-  async processCheckout(studentId: string) {
-    const session = await this.orderModel.db.startSession();
-    session.startTransaction();
+  async processCheckout(studentId: string): Promise<CheckoutResponse> {
+    // 1 & 3. RE-VALIDATE THE CART
+    // validateCart throws if prices changed or items are already owned.
+    const validatedCart: any = await this.cartService.validateCart(studentId);
+    
+    if (!validatedCart || !validatedCart.items || validatedCart.items.length === 0) {
+      throw new BadRequestException('Your cart is empty');
+    }
 
-    try {
-      // 1. Get the cart and calculate the total amount
-      const cart = await this.cartModel
-        .findOne({ studentId: new Types.ObjectId(studentId) })
-        .populate('items')
-        .session(session);
+    // Fetch the full populated cart to get titles
+    const cartResponse = await this.cartService.getCart(studentId);
+    if (cartResponse.items.length === 0) {
+      throw new BadRequestException('Your cart is empty');
+    }
 
-      if (!cart || cart.items.length === 0) {
-        throw new BadRequestException('Your cart is empty.');
-      }
+    // 2. IDEMPOTENCY CHECK
+    const cartItemsData = validatedCart.items.map((i: any) => ({
+      itemType: i.itemType,
+      courseId: i.courseId.toString(),
+      sectionId: i.sectionId ? i.sectionId.toString() : null,
+      price: i.price
+    }));
+    cartItemsData.sort((a: any, b: any) => a.courseId.localeCompare(b.courseId));
+    const cartSnapshotString = JSON.stringify(cartItemsData);
+    const cartSnapshotHash = crypto.createHash('sha256').update(cartSnapshotString).digest('hex');
 
-      let totalAmount = 0;
-      const orderItems = cart.items.map((course: any) => {
-        totalAmount += course.price;
-        return { courseId: course._id, price: course.price };
-      });
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const existingOrder = await this.orderModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+      status: OrderStatus.PENDING,
+      cartSnapshotHash: cartSnapshotHash,
+      createdAt: { $gte: thirtyMinutesAgo }
+    });
 
-      // 2. Create the Order
-      const newOrder = await this.orderModel.create([{
-        studentId: new Types.ObjectId(studentId),
-        items: orderItems,
-        totalAmount,
-        status: 'COMPLETED', // We will set this to PENDING when we add Stripe later
-      }], { session });
-
-      // 3. Create Enrollments so the student gets instant access to the videos
-      const enrollments = orderItems.map(item => ({
-        studentId: new Types.ObjectId(studentId),
-        courseId: item.courseId,
-        progressPercentage: 0,
-      }));
-      await this.enrollmentModel.insertMany(enrollments, { session });
-
-      // 4. Empty the Cart now that the purchase is successful
-      await this.cartModel.updateOne(
-        { studentId: new Types.ObjectId(studentId) },
-        { $set: { items: [] } },
-        { session }
-      );
-
-      // 5. Commit the transaction safely
-      await session.commitTransaction();
-      session.endSession();
-
+    if (existingOrder) {
+      const paymentData = await this.paymobService.createPaymentUrl(existingOrder.totalAmount, existingOrder._id.toString());
       return {
-        success: true,
-        message: 'Checkout complete! You are now enrolled in your courses.',
-        orderId: newOrder[0]._id
+        clientSecret: paymentData.clientSecret,
+        orderId: existingOrder._id.toString(),
+        amount: existingOrder.totalAmount,
+        currency: 'EGP'
       };
+    }
+    
+    let totalAmount = 0;
+    const orderItems = [];
 
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      if (error.code === 11000) {
-        throw new BadRequestException('You are already enrolled in one of these courses!');
-      }
-      throw error;
+    for (const item of cartResponse.items) {
+      totalAmount += item.price;
+      orderItems.push({
+        itemType: item.type,
+        courseId: new Types.ObjectId(item.courseId),
+        sectionId: item.sectionId ? new Types.ObjectId(item.sectionId) : undefined,
+        courseTitle: item.courseTitle + (item.sectionTitle ? ` - ${item.sectionTitle}` : ''),
+        price: item.price
+      });
+    }
+
+    // 4. CREATE THE ORDER AS PENDING FIRST
+    // REASONING: We do not use a MongoDB transaction here because if the Paymob call fails,
+    // we WANT to keep the Order document in the database and mark it as FAILED for audit trailing.
+    // If we wrapped this in a transaction and aborted it, the Order would be erased completely,
+    // which violates the requirement to retain failed attempts.
+    const order = new this.orderModel({
+      studentId: new Types.ObjectId(studentId),
+      items: orderItems,
+      totalAmount,
+      status: OrderStatus.PENDING,
+      cartSnapshotHash
+    });
+    await order.save();
+
+    // 5. CALL PAYMOB
+    try {
+      const paymentData = await this.paymobService.createPaymentUrl(totalAmount, order._id.toString());
+      order.paymobOrderId = `paymob_${order._id}`; // Store external ID
+      await order.save();
+      
+      return {
+        clientSecret: paymentData.clientSecret,
+        orderId: order._id.toString(),
+        amount: totalAmount,
+        currency: 'EGP'
+      };
+    } catch (e) {
+      order.status = OrderStatus.FAILED;
+      await order.save();
+      throw new ServiceUnavailableException('Payment service is currently unavailable. Please try again later.');
     }
   }
 
-  // Allow a student to view their past orders
-  async getMyOrders(studentId: string) {
-    return this.orderModel
+  async getOrderById(studentId: string, orderId: string): Promise<OrderDetailResponse> {
+    if (!Types.ObjectId.isValid(orderId)) throw new NotFoundException('Order not found');
+    const order = await this.orderModel.findById(orderId);
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.studentId.toString() !== studentId) {
+      throw new ForbiddenException('You do not have permission to view this order');
+    }
+
+    return {
+      orderId: order._id.toString(),
+      status: order.status,
+      items: order.items.map(i => ({
+        courseTitle: i.courseTitle,
+        type: i.itemType,
+        price: i.price
+      })),
+      total: order.totalAmount,
+      paidAt: order.paidAt
+    };
+  }
+
+  async getMyOrders(studentId: string): Promise<OrderHistoryResponse> {
+    const orders = await this.orderModel
       .find({ studentId: new Types.ObjectId(studentId) })
-      .populate('items.courseId', 'title thumbnail')
       .sort({ createdAt: -1 })
       .exec();
+
+    return {
+      orders: orders.map(order => ({
+        orderId: order._id.toString(),
+        status: order.status,
+        total: order.totalAmount,
+        createdAt: (order as any).createdAt,
+        items: order.items.map(i => ({
+          courseTitle: i.courseTitle,
+          type: i.itemType,
+          price: i.price
+        }))
+      }))
+    };
   }
 }

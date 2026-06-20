@@ -1,4 +1,4 @@
-import { Controller, Post, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, UseGuards, Param } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -13,12 +13,23 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) { }
 
   @Post('checkout')
-  processCheckout(@CurrentUser() user: { userId: string }) {
-    return this.ordersService.processCheckout(user.userId);
+  async processCheckout(@CurrentUser() user: { userId: string }) {
+    const response = await this.ordersService.processCheckout(user.userId);
+    return { success: true, message: 'Checkout initiated successfully', data: response };
   }
 
-  @Get('history')
-  getMyOrders(@CurrentUser() user: { userId: string }) {
-    return this.ordersService.getMyOrders(user.userId);
+  @Get('my')
+  async getMyOrders(@CurrentUser() user: { userId: string }) {
+    const response = await this.ordersService.getMyOrders(user.userId);
+    return { success: true, message: 'Orders retrieved successfully', data: response };
+  }
+
+  @Get(':orderId')
+  async getOrderById(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: { userId: string }
+  ) {
+    const response = await this.ordersService.getOrderById(user.userId, orderId);
+    return { success: true, message: 'Order details retrieved successfully', data: response };
   }
 }

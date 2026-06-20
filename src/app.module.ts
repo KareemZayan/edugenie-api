@@ -13,6 +13,10 @@ import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { PaymobModule } from './paymob/paymob.module';
+import { EarningsModule } from './earnings/earnings.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -39,6 +43,9 @@ import { EnrollmentsModule } from './enrollments/enrollments.module';
     CartModule,
     OrdersModule,
     EnrollmentsModule,
+    WebhooksModule,
+    PaymobModule,
+    EarningsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

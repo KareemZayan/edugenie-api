@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Enrollment } from './schema/enrollment.schema';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { Course } from '../courses/schema/course.schema';
 
 @Injectable()
@@ -11,6 +12,29 @@ export class EnrollmentsService {
     // We need the Course model to check how many total lessons exist!
     @InjectModel(Course.name) private courseModel: Model<Course>,
   ) { }
+
+  async hasDuplicate(studentId: string, itemType: string, courseId: string, sectionId?: string): Promise<boolean> {
+    const enrollment = await this.enrollmentModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+      courseId: new Types.ObjectId(courseId)
+    });
+
+    if (!enrollment) return false;
+
+    if (enrollment.type === PurchaseType.FULL_COURSE) {
+      return true; // Already owns full course
+    }
+
+    if (itemType === PurchaseType.FULL_COURSE) {
+      return false; // Can upgrade to full course
+    }
+
+    if (sectionId && enrollment.sectionIds.some(id => id.toString() === sectionId)) {
+      return true; // Already owns this section
+    }
+
+    return false;
+  }
 
   // 1. "My Learning" Dashboard: Get all courses the student owns
   async getMyEnrollments(studentId: string) {

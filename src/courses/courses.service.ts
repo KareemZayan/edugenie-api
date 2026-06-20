@@ -103,7 +103,7 @@ export class CoursesService {
       throw new BadRequestException('Invalid ID');
     const course = await this.courseModel
       .findById(id)
-      .populate('instructorId', 'name bio')
+      .populate('instructorId', 'firstName lastName bio')
       .exec();
     if (!course) throw new NotFoundException('Course not found');
     return course;
