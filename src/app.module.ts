@@ -25,7 +25,8 @@ import { ProgressModule } from './progress/progress.module';
 import { NotesModule } from './notes/notes.module';
 import { InstructorModule } from './instructor/instructor.module';
 import { EarningsModule } from './earnings/earnings.module';
-
+import { AdminModule } from './admin/admin.module';
+import { ReportsModule } from './reports/reports.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -70,6 +71,8 @@ import { EarningsModule } from './earnings/earnings.module';
     NotesModule,
     InstructorModule,
     EarningsModule,
+    ReportsModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -16,6 +16,12 @@ export class Review {
 
   @Prop({ required: true })
   comment: string;
+
+  @Prop({ default: false })
+  isFlagged: boolean;
+
+  @Prop({ type: String, default: null })
+  flagReason?: string | null;
 }
 
 export const ReviewSchema = SchemaFactory.createForClass(Review);

@@ -1,8 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 import { UserRole } from '../../common/enums/user-role.enum';
 import { UserLevel } from '../../common/enums/user-level.enum';
+import { UserStatus } from '../../common/enums/user-status.enum';
 
 @Schema({ timestamps: true })
 export class User extends Document {
@@ -59,6 +60,18 @@ export class User extends Document {
 
   @Prop({ required: true, default: false })
   isVerified!: boolean;
+
+  @Prop({ type: String, enum: UserStatus, default: UserStatus.ACTIVE })
+  status!: UserStatus;
+
+  @Prop({ type: String, default: null })
+  deactivatedReason?: string | null;
+
+  @Prop({ type: Date, default: null })
+  deactivatedAt?: Date | null;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  deactivatedBy?: Types.ObjectId | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
