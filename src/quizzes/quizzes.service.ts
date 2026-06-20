@@ -62,6 +62,10 @@ export class QuizzesService {
       throw new BadRequestException('Quiz is not ready yet');
     }
 
+    if (quiz.status !== 'approved') {
+      throw new BadRequestException('Quiz is currently pending instructor review');
+    }
+
     const attemptCount = await this.quizAttemptModel.countDocuments({
       studentId: new Types.ObjectId(studentId),
       quizId: quiz._id,
@@ -112,6 +116,10 @@ export class QuizzesService {
       throw new BadRequestException('Quiz is not ready yet');
     }
 
+    if (quiz.status !== 'approved') {
+      throw new BadRequestException('Quiz is currently pending instructor review');
+    }
+
     const existing = await this.quizAttemptModel.findOne({
       studentId: new Types.ObjectId(studentId),
       quizId: quiz._id,
@@ -148,8 +156,9 @@ export class QuizzesService {
         totalQuestions: quiz.questions.length,
         status: 'in_progress',
       });
-    } catch (error: any) {
-      if (error.code === 11000) {
+    } catch (error: unknown) {
+      const err = error as { code?: number };
+      if (err.code === 11000) {
         // Race condition: another request just created this attempt
         const concurrentAttempt = await this.quizAttemptModel.findOne({
           studentId: new Types.ObjectId(studentId),
@@ -353,4 +362,96 @@ export class QuizzesService {
       canRetry,
     };
   }
+
+  async findPendingReviewForInstructor(instructorId: string) {
+    const courses = await this.courseModel.find({ instructorId: new Types.ObjectId(instructorId) }).select('sections title').exec();
+    
+    const sectionIds: Types.ObjectId[] = [];
+    const sectionToCourseMap = new Map<string, string>();
+    const sectionToTitleMap = new Map<string, string>();
+
+    courses.forEach(c => {
+      if (c.sections) {
+        c.sections.forEach(s => {
+          sectionIds.push(s._id);
+          sectionToCourseMap.set(s._id.toString(), c.title);
+          sectionToTitleMap.set(s._id.toString(), s.title);
+        });
+      }
+    });
+
+    const pendingQuizzes = await this.quizModel.find({ 
+      sectionId: { $in: sectionIds }, 
+      status: 'pending_review' 
+    }).exec();
+
+    const data = pendingQuizzes.map(q => ({
+      quizId: q._id.toString(),
+      sectionId: q.sectionId.toString(),
+      sectionTitle: sectionToTitleMap.get(q.sectionId.toString()) || 'Unknown',
+      courseTitle: sectionToCourseMap.get(q.sectionId.toString()) || 'Unknown',
+      questionCount: q.questions ? q.questions.length : 0,
+      generatedAt: (q as unknown as { updatedAt?: Date; createdAt?: Date }).updatedAt || (q as unknown as { createdAt?: Date }).createdAt || new Date(), // generation updates the document
+    }));
+
+    return { data };
+  }
+
+  async findOneForInstructor(quizId: string, instructorId: string) {
+    const quiz = await this.quizModel.findById(quizId).exec();
+    if (!quiz) throw new NotFoundException('Quiz not found');
+
+    const course = await this.courseModel.findOne({ 'sections._id': quiz.sectionId }).select('instructorId').exec();
+    if (!course) throw new NotFoundException('Course for this quiz not found');
+
+    // OWNERSHIP CHECK ENFORCED
+    if (course.instructorId.toString() !== instructorId) {
+      throw new ForbiddenException('You do not own this quiz');
+    }
+
+    return {
+      quizId: quiz._id.toString(),
+      sectionId: quiz.sectionId.toString(),
+      questions: quiz.questions.map((q, index: number) => {
+        const questionObj = q as unknown as { _id?: Types.ObjectId; questionText: string; options: string[]; correctAnswers: string[] };
+        return {
+          questionId: questionObj._id ? questionObj._id.toString() : index.toString(),
+          text: questionObj.questionText,
+          options: questionObj.options.map((opt: string) => ({
+            optionId: opt,
+            text: opt,
+          })),
+          correctAnswers: questionObj.correctAnswers,
+        };
+      }),
+    };
+  }
+
+  async approveQuiz(quizId: string, instructorId: string, dto: Record<string, unknown>) {
+    const quiz = await this.quizModel.findById(quizId).exec();
+    if (!quiz) throw new NotFoundException('Quiz not found');
+
+    const course = await this.courseModel.findOne({ 'sections._id': quiz.sectionId }).select('instructorId').exec();
+    if (!course) throw new NotFoundException('Course for this quiz not found');
+
+    // OWNERSHIP CHECK ENFORCED
+    if (course.instructorId.toString() !== instructorId) {
+      throw new ForbiddenException('You do not own this quiz');
+    }
+
+    const editedQuestions = dto.editedQuestions as Array<{ questionText: string; type: string; options: string[]; correctAnswers: string[] }> | undefined;
+    if (editedQuestions && editedQuestions.length > 0) {
+      quiz.questions = editedQuestions as unknown as typeof quiz.questions;
+    }
+
+    quiz.status = 'approved';
+    await quiz.save();
+
+    return {
+      quizId: quiz._id.toString(),
+      status: quiz.status,
+      approvedAt: new Date(),
+    };
+  }
 }
+

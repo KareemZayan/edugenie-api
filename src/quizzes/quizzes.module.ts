@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { QuizzesController } from './quizzes.controller';
 import { SectionQuizzesController } from './section-quizzes.controller';
+import { InstructorQuizzesController } from './instructor-quizzes.controller';
 import { QuizzesService } from './quizzes.service';
 import { Quiz, QuizSchema } from './schema/quiz.schema';
 import { QuizAttempt, QuizAttemptSchema } from './schema/quiz-attempt.schema';
@@ -24,7 +25,7 @@ import { ProgressModule } from '../progress/progress.module';
     EnrollmentsModule,
     forwardRef(() => ProgressModule),
   ],
-  controllers: [QuizzesController, SectionQuizzesController],
+  controllers: [QuizzesController, SectionQuizzesController, InstructorQuizzesController],
   providers: [QuizzesService],
   exports: [QuizzesService, MongooseModule]
 })

@@ -25,6 +25,8 @@ export class Quiz {
   questionType: QuestionType;
   @Prop({ type: String, enum: QuizGenerationStatus, default: QuizGenerationStatus.PENDING })
   generationStatus: QuizGenerationStatus;
+  @Prop({ type: String, enum: ['pending_review', 'approved'], default: 'pending_review' })
+  status: string;
   @Prop({ required: true, default: 600 })
   timeLimit: number;
   @Prop({ required: true, min: 0, max: 100, default: 70 })
