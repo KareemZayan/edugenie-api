@@ -206,17 +206,13 @@ export class CoursesService {
       status: course.courseStatus,
       rejectionReason: course.rejectionReason || 'No reason provided',
       rejectedBy: rejectedBy ? `${rejectedBy.firstName} ${rejectedBy.lastName}` : 'System',
-      rejectedAt: course.rejectedAt || new Date(),
+      rejectedAt: (course as any).rejectedAt || new Date(),
     };
   }
 
-
-  async findOne(id: string): Promise<CourseSerializer> {
+  async findCourseDocument(id: string) {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('Invalid ID');
-
-    // Dynamically calculate the latest totalHours and totalLessons
-    await this.syncMetadata(id);
 
     const course = await this.courseModel
       .findById(id)
@@ -225,6 +221,17 @@ export class CoursesService {
       .exec();
 
     if (!course) throw new NotFoundException('Course not found');
+    return course;
+  }
+
+  async findOne(id: string): Promise<CourseSerializer> {
+    if (!Types.ObjectId.isValid(id))
+      throw new BadRequestException('Invalid ID');
+
+    // Dynamically calculate the latest totalHours and totalLessons
+    await this.syncMetadata(id);
+
+    const course = await this.findCourseDocument(id);
     return new CourseSerializer(course.toObject());
   }
 

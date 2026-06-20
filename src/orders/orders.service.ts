@@ -1,208 +1,153 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import * as crypto from 'crypto';
 
-import { Cart } from '../cart/schema/cart.schema';
 import { Order } from './schema/order.schema';
-import { Enrollment } from '../enrollments/schema/enrollment.schema';
-import { CourseDocument } from '../courses/schema/course.schema';
+import { CartService } from '../cart/cart.service';
 import { PaymobService } from '../paymob/paymob.service';
-import { UsersService } from '../users/users.service';
-import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
-import { OrderSerializer } from './serializers/order.serializer';
+import { CheckoutResponse, OrderDetailResponse, OrderHistoryResponse } from '../frontend-contracts';
+import { OrderStatus } from '../common/enums/order-status.enum';
 
 @Injectable()
 export class OrdersService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<Order>,
-    @InjectModel(Cart.name) private cartModel: Model<Cart>,
-    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
-    @InjectModel('Earning') private earningModel: Model<unknown>,
-    @InjectModel('Course') private courseModel: Model<unknown>,
-    private readonly paymobService: PaymobService,
-    private readonly usersService: UsersService,
+    private cartService: CartService,
+    private paymobService: PaymobService,
   ) { }
 
-  // Triggered when a student clicks "Checkout" in their cart
-  async processCheckout(studentId: string) {
-    const session = await this.orderModel.db.startSession();
-    session.startTransaction();
+  async processCheckout(studentId: string): Promise<CheckoutResponse> {
+    // 1 & 3. RE-VALIDATE THE CART
+    // validateCart throws if prices changed or items are already owned.
+    const validatedCart: any = await this.cartService.validateCart(studentId);
+    
+    if (!validatedCart || !validatedCart.items || validatedCart.items.length === 0) {
+      throw new BadRequestException('Your cart is empty');
+    }
 
-    try {
-      // 1. Get the cart and calculate the total amount
-      const cart = await this.cartModel
-        .findOne({ studentId: new Types.ObjectId(studentId) })
-        .populate('items.courseId')
-        .session(session);
+    // Fetch the full populated cart to get titles
+    const cartResponse = await this.cartService.getCart(studentId);
+    if (cartResponse.items.length === 0) {
+      throw new BadRequestException('Your cart is empty');
+    }
 
-      if (!cart || cart.items.length === 0) {
-        throw new BadRequestException('Your cart is empty.');
-      }
+    // 2. IDEMPOTENCY CHECK
+    const cartItemsData = validatedCart.items.map((i: any) => ({
+      itemType: i.itemType,
+      courseId: i.courseId.toString(),
+      sectionId: i.sectionId ? i.sectionId.toString() : null,
+      price: i.price
+    }));
+    cartItemsData.sort((a: any, b: any) => a.courseId.localeCompare(b.courseId));
+    const cartSnapshotString = JSON.stringify(cartItemsData);
+    const cartSnapshotHash = crypto.createHash('sha256').update(cartSnapshotString).digest('hex');
 
-      let totalAmount = 0;
-      const orderItems = cart.items.map((item: unknown) => {
-        const itemData = item as { courseId: { _id: string, instructorId: string }, itemType: string, sectionId: string, price: number };
-        const c = itemData.courseId;
-        totalAmount += itemData.price;
-        return { 
-          itemType: itemData.itemType,
-          courseId: c._id, 
-          sectionId: itemData.sectionId,
-          instructorId: c.instructorId,
-          price: itemData.price
-        };
-      });
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const existingOrder = await this.orderModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+      status: OrderStatus.PENDING,
+      cartSnapshotHash: cartSnapshotHash,
+      createdAt: { $gte: thirtyMinutesAgo }
+    });
 
-      // 2. Create the Order
-      const newOrder = await this.orderModel.create([{
-        studentId: new Types.ObjectId(studentId),
-        items: orderItems,
-        totalAmount,
-        status: 'PENDING',
-      }], { session });
-
-      // 3. Get user details for Paymob billing
-      const user = await this.usersService.getProfile(studentId);
-      const billingData = {
-        apartment: "NA",
-        email: user.email,
-        floor: "NA",
-        first_name: user.firstName,
-        street: "NA",
-        building: "NA",
-        phone_number: "+201000000000",
-        shipping_method: "NA",
-        postal_code: "NA",
-        city: "NA",
-        country: "NA",
-        last_name: user.lastName,
-        state: "NA"
-      };
-
-      // 4. Generate Paymob Intention client_secret
-      const clientSecret = await this.paymobService.createPaymentUrl(
-        totalAmount * 100,
-        newOrder[0]._id.toString(),
-        billingData
-      );
-
-      // 5. Empty the Cart now that the purchase intent is created
-      await this.cartModel.updateOne(
-        { studentId: new Types.ObjectId(studentId) },
-        { $set: { items: [] } },
-        { session }
-      );
-
-      // 6. Commit the transaction safely
-      await session.commitTransaction();
-      session.endSession();
-
+    if (existingOrder) {
+      const paymentData = await this.paymobService.createPaymentUrl(existingOrder.totalAmount, existingOrder._id.toString());
       return {
-        success: true,
-        message: 'Checkout initiated. Please complete the payment using the provided client_secret.',
-        clientSecret: clientSecret
+        clientSecret: paymentData.clientSecret,
+        orderId: existingOrder._id.toString(),
+        amount: existingOrder.totalAmount,
+        currency: 'EGP'
       };
+    }
+    
+    let totalAmount = 0;
+    const orderItems = [];
 
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      if (error.code === 11000) {
-        throw new BadRequestException('You are already enrolled in one of these courses!');
-      }
-      throw error;
+    for (const item of cartResponse.items) {
+      totalAmount += item.price;
+      orderItems.push({
+        itemType: item.type,
+        courseId: new Types.ObjectId(item.courseId),
+        sectionId: item.sectionId ? new Types.ObjectId(item.sectionId) : undefined,
+        courseTitle: item.courseTitle + (item.sectionTitle ? ` - ${item.sectionTitle}` : ''),
+        price: item.price
+      });
+    }
+
+    // 4. CREATE THE ORDER AS PENDING FIRST
+    // REASONING: We do not use a MongoDB transaction here because if the Paymob call fails,
+    // we WANT to keep the Order document in the database and mark it as FAILED for audit trailing.
+    // If we wrapped this in a transaction and aborted it, the Order would be erased completely,
+    // which violates the requirement to retain failed attempts.
+    const order = new this.orderModel({
+      studentId: new Types.ObjectId(studentId),
+      items: orderItems,
+      totalAmount,
+      status: OrderStatus.PENDING,
+      cartSnapshotHash
+    });
+    await order.save();
+
+    // 5. CALL PAYMOB
+    try {
+      const paymentData = await this.paymobService.createPaymentUrl(totalAmount, order._id.toString());
+      order.paymobOrderId = `paymob_${order._id}`; // Store external ID
+      await order.save();
+      
+      return {
+        clientSecret: paymentData.clientSecret,
+        orderId: order._id.toString(),
+        amount: totalAmount,
+        currency: 'EGP'
+      };
+    } catch (e) {
+      order.status = OrderStatus.FAILED;
+      await order.save();
+      throw new ServiceUnavailableException('Payment service is currently unavailable. Please try again later.');
     }
   }
 
-  // Allow a student to view their past orders
-  async getMyOrders(studentId: string, query: PaginateQueryDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 10;
-    const skip = (page - 1) * limit;
+  async getOrderById(studentId: string, orderId: string): Promise<OrderDetailResponse> {
+    if (!Types.ObjectId.isValid(orderId)) throw new NotFoundException('Order not found');
+    const order = await this.orderModel.findById(orderId);
+    if (!order) throw new NotFoundException('Order not found');
 
-    const data = await this.orderModel
-      .find({ studentId: new Types.ObjectId(studentId) })
-      .populate('items.courseId', 'title thumbnail')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .exec();
-
-    const total = await this.orderModel.countDocuments({ studentId: new Types.ObjectId(studentId) });
+    if (order.studentId.toString() !== studentId) {
+      throw new ForbiddenException('You do not have permission to view this order');
+    }
 
     return {
-      data: data.map(d => new OrderSerializer(((d.toObject ? d.toObject() : d) as unknown) as Record<string, unknown>)),
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1,
-      }
+      orderId: order._id.toString(),
+      status: order.status,
+      items: order.items.map(i => ({
+        courseTitle: i.courseTitle,
+        type: i.itemType,
+        price: i.price
+      })),
+      total: order.totalAmount,
+      paidAt: order.paidAt
     };
   }
 
-  async getMyPayouts(instructorId: string) {
-    const instructorObjId = new Types.ObjectId(instructorId);
-
-    const earnings = await this.earningModel.find({ instructorId: instructorObjId }).exec() as unknown as Array<{ amount: number; status: string; sectionId?: Types.ObjectId; courseId?: Types.ObjectId; createdAt: Date; orderId?: Types.ObjectId }>;
-
-    let totalEarned = 0;
-    let pendingPayout = 0;
-    let fromFullCourses = 0;
-    let fromSections = 0;
-
-    const historyPromises = earnings.map(async (e) => {
-      totalEarned += e.amount;
-      if (e.status === 'PENDING') {
-        pendingPayout += e.amount;
-      }
-
-      const type = e.sectionId ? 'section' : 'full_course';
-      if (type === 'section') {
-        fromSections += e.amount;
-      } else {
-        fromFullCourses += e.amount;
-      }
-
-      // Fetch course and section title
-      let courseTitle = 'Unknown Course';
-      let sectionTitle = null;
-
-      if (e.courseId) {
-        const course = await this.courseModel.findById(e.courseId).select('title sections').exec() as unknown as { title: string; sections: Array<{ _id: Types.ObjectId; title: string }> } | null;
-        if (course) {
-          courseTitle = course.title;
-          if (e.sectionId && course.sections) {
-            const section = course.sections.find((s) => s._id.toString() === e.sectionId?.toString());
-            if (section) {
-              sectionTitle = section.title;
-            }
-          }
-        }
-      }
-
-      return {
-        date: e.createdAt,
-        amount: e.amount,
-        type: type as 'section' | 'full_course',
-        courseTitle,
-        sectionTitle,
-        orderId: e.orderId ? e.orderId.toString() : 'Unknown',
-      };
-    });
-
-    const history = await Promise.all(historyPromises);
-    history.sort((a, b) => b.date.getTime() - a.date.getTime());
+  async getMyOrders(studentId: string): Promise<OrderHistoryResponse> {
+    const orders = await this.orderModel
+      .find({ studentId: new Types.ObjectId(studentId) })
+      .sort({ createdAt: -1 })
+      .exec();
 
     return {
-      totalEarned,
-      pendingPayout,
-      breakdown: {
-        fromFullCourses,
-        fromSections,
-      },
-      history,
+      orders: orders.map(order => ({
+        orderId: order._id.toString(),
+        status: order.status,
+        total: order.totalAmount,
+        createdAt: (order as any).createdAt,
+        items: order.items.map(i => ({
+          courseTitle: i.courseTitle,
+          type: i.itemType,
+          price: i.price
+        }))
+      }))
     };
   }
 }

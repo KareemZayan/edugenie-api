@@ -24,6 +24,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { ProgressModule } from './progress/progress.module';
 import { NotesModule } from './notes/notes.module';
 import { InstructorModule } from './instructor/instructor.module';
+import { EarningsModule } from './earnings/earnings.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { InstructorModule } from './instructor/instructor.module';
     ProgressModule,
     NotesModule,
     InstructorModule,
+    EarningsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

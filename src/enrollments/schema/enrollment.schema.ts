@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { PurchaseType } from '../../common/enums/purchase-type.enum';
 
 export type EnrollmentDocument = HydratedDocument<Enrollment>;
 
@@ -11,15 +12,10 @@ export class Enrollment {
   @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
   courseId: Types.ObjectId;
 
-  @Prop({
-    type: String,
-    enum: ['full_course', 'sections'],
-    default: 'full_course',
-    required: true,
-  })
-  type: string;
+  @Prop({ type: String, enum: PurchaseType, required: true, default: PurchaseType.FULL_COURSE })
+  type: PurchaseType;
 
-  @Prop([{ type: Types.ObjectId }]) // Removed ref: 'Section' because it's embedded
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Section' }], default: [] })
   sectionIds: Types.ObjectId[];
 
   // Track progress percentage (0 to 100)
