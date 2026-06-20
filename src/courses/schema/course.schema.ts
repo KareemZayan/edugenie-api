@@ -54,6 +54,16 @@ export class Course {
   @Prop({
     type: Types.ObjectId,
     ref: 'User',
+    default: null,
+  })
+  rejectedBy?: Types.ObjectId;
+
+  @Prop({ type: Date, default: null })
+  rejectedAt?: Date;
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
     required: true,
     index: true,
   })

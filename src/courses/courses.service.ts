@@ -12,6 +12,7 @@ import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseStatus } from '../common/enums/course-status.enum';
 import { Category } from '../categories/schema/category.schema';
+import { Earning } from '../orders/schema/earning.schema';
 import { CourseSerializer } from './serializers/course.serializer';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 
@@ -25,6 +26,7 @@ export class CoursesService {
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
     @InjectModel(Progress.name) private readonly progressModel: Model<Progress>,
+    @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
   ) { }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<CourseSerializer> {
@@ -124,6 +126,90 @@ export class CoursesService {
       .exec();
     return courses.map((c) => new CourseSerializer(c.toObject()));
   }
+
+  async findByInstructor(instructorId: string, filterDto: Record<string, unknown>) {
+    const status = filterDto.status as string | undefined;
+    const page = (filterDto.page as number) || 1;
+    const limit = (filterDto.limit as number) || 10;
+    const query: Record<string, unknown> = { instructorId: new Types.ObjectId(instructorId) };
+    if (status) query.courseStatus = status;
+
+    const skip = (page - 1) * limit;
+
+    const [courses, total] = await Promise.all([
+      this.courseModel.find(query).skip(skip).limit(limit).sort({ createdAt: -1 }).exec(),
+      this.courseModel.countDocuments(query),
+    ]);
+
+    const data = await Promise.all(
+      courses.map(async (c) => {
+        const courseObjId = c._id;
+
+        const totalStudentsResult = await this.enrollmentModel.distinct('studentId', { courseId: courseObjId });
+        const totalStudents = totalStudentsResult.length;
+
+        const revenueResult = await this.earningModel.aggregate([
+          { $match: { courseId: courseObjId } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+        const totalRevenue = revenueResult[0]?.total || 0;
+
+        const completedCount = await this.enrollmentModel.countDocuments({ courseId: courseObjId, isCourseCompleted: true });
+        const completionRate = totalStudents > 0 ? Math.round((completedCount / totalStudents) * 100) : 0;
+
+        return {
+          id: c._id.toString(),
+          title: c.title,
+          thumbnail: c.thumbnail,
+          status: c.courseStatus,
+          totalStudents,
+          totalRevenue,
+          rating: c.ratingAverage || 0,
+          completionRate,
+        };
+      })
+    );
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  async getRejectionReason(courseId: string, instructorId: string) {
+    const course = await this.courseModel.findById(courseId).populate('rejectedBy', 'firstName lastName').exec();
+    if (!course) throw new NotFoundException('Course not found');
+    
+    // OWNERSHIP CHECK ENFORCED: verifies course belongs to the requesting instructor
+    if (course.instructorId.toString() !== instructorId) {
+      throw new ForbiddenException('You do not own this course');
+    }
+
+    if (course.courseStatus !== 'rejected') {
+      throw new BadRequestException('This course is not in rejected status');
+    }
+
+    const rejectedBy = course.rejectedBy as unknown as { firstName: string; lastName: string };
+
+    return {
+      courseId: course._id.toString(),
+      courseTitle: course.title,
+      status: course.courseStatus,
+      rejectionReason: course.rejectionReason || 'No reason provided',
+      rejectedBy: rejectedBy ? `${rejectedBy.firstName} ${rejectedBy.lastName}` : 'System',
+      rejectedAt: course.rejectedAt || new Date(),
+    };
+  }
+
 
   async findOne(id: string): Promise<CourseSerializer> {
     if (!Types.ObjectId.isValid(id))
@@ -370,34 +456,36 @@ export class CoursesService {
       .populate('categoryId', 'name slug')
       .lean()
       .exec();
-
-    return courses.map((course: any) => ({
-      _id: course._id.toString(),
-      title: course.title,
-      description: course.description,
-      thumbnail: course.thumbnail,
-      level: course.level,
-      price: course.price,
-      courseStatus: course.courseStatus,
-      totalHours: course.totalHours,
-      totalLessons: course.totalLessons,
-      sectionsCount: course.sections ? course.sections.length : 0,
-      goals: course.goals,
-      requirements: course.requirements,
-      createdAt: course.createdAt,
-      category: course.categoryId ? {
-        _id: course.categoryId._id?.toString() || course.categoryId.toString(),
-        name: course.categoryId.name,
-        slug: course.categoryId.slug
-      } : null,
-      instructor: course.instructorId ? {
-        _id: course.instructorId._id?.toString() || course.instructorId.toString(),
-        firstName: course.instructorId.firstName,
-        lastName: course.instructorId.lastName,
-        avatar: course.instructorId.avatar,
-        email: course.instructorId.email
+    return courses.map((course: unknown) => {
+      const c = course as any;
+      return {
+        _id: c._id.toString(),
+        title: c.title,
+        description: c.description,
+        thumbnail: c.thumbnail,
+        level: c.level,
+        price: c.price,
+        courseStatus: c.courseStatus,
+        totalHours: c.totalHours,
+        totalLessons: c.totalLessons,
+        sectionsCount: c.sections ? c.sections.length : 0,
+        goals: c.goals,
+        requirements: c.requirements,
+        createdAt: c.createdAt,
+        category: c.categoryId ? {
+          _id: c.categoryId._id?.toString() || c.categoryId.toString(),
+          name: c.categoryId.name,
+          slug: c.categoryId.slug
+        } : null,
+      instructor: c.instructorId ? {
+        _id: c.instructorId._id?.toString() || c.instructorId.toString(),
+        firstName: c.instructorId.firstName,
+        lastName: c.instructorId.lastName,
+        avatar: c.instructorId.avatar,
+        email: c.instructorId.email
       } : null
-    }));
+      };
+    });
   }
 
   async getAdminStats() {

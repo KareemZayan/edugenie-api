@@ -20,7 +20,7 @@ export class WebhooksController {
     @InjectModel('Earning') private earningModel: Model<any>,
     @InjectModel(Lesson.name) private lessonModel: Model<Lesson>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
-  ) {}
+  ) { }
 
   @Post('paymob')
   async handlePaymobWebhook(@Req() req: Request, @Res() res: Response) {
@@ -133,7 +133,7 @@ export class WebhooksController {
 
           } else if (item.itemType === 'section') {
             let enrollment = await this.enrollmentModel.findOne({ studentId: order.studentId, courseId: item.courseId }).session(session);
-            
+
             if (enrollment) {
               if (enrollment.type === 'sections') {
                 if (!enrollment.sectionIds.some(id => id.toString() === item.sectionId?.toString())) {
@@ -199,10 +199,10 @@ export class WebhooksController {
       // Find the course that contains this lesson via publicId and update it
       // Cloudinary doesn't give us lesson ID directly, so we search by videoPublicId
       const course = await this.courseModel.findOne({ 'sections.lessons.videoPublicId': publicId });
-      
+
       if (course) {
         let durationDiff = 0;
-        
+
         // Update the specific lesson within the nested array
         course.sections.forEach(section => {
           section.lessons.forEach(lesson => {
@@ -218,7 +218,7 @@ export class WebhooksController {
           // Update course totalHours (simplified logic: adding duration in seconds, though it's called totalHours)
           // Adjust logic based on how totalHours is calculated in the app. Let's assume it's actually totalSeconds for now.
           course.totalHours += (durationDiff / 3600); // Assuming totalHours is in hours
-          
+
           await course.save();
         }
       }

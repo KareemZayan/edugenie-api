@@ -48,7 +48,7 @@ export class ReviewsService {
     }
 
     return {
-      data: data.map(d => new ReviewSerializer(d.toObject() as any)),
+      data: data.map(d => new ReviewSerializer(((d.toObject ? d.toObject() : d) as unknown) as Record<string, unknown>)),
       meta: {
         total,
         page,
@@ -98,7 +98,7 @@ export class ReviewsService {
     await this.updateCourseRating(dto.courseId);
 
     const populatedReview = await newReview.populate('studentId', 'firstName lastName avatar');
-    return new ReviewSerializer(populatedReview.toObject() as any);
+    return new ReviewSerializer(((populatedReview.toObject ? populatedReview.toObject() : populatedReview) as unknown) as Record<string, unknown>);
   }
 
   private async updateCourseRating(courseId: string) {
@@ -119,4 +119,78 @@ export class ReviewsService {
       { $set: { ratingAverage: averageRating } }
     );
   }
+
+  async findByInstructor(instructorId: string, filterDto: Record<string, unknown>) {
+    const courseId = filterDto.courseId as string | undefined;
+    const rating = filterDto.rating as number[] | undefined;
+    const page = (filterDto.page as number) || 1;
+    const limit = (filterDto.limit as number) || 10;
+    
+    let filterCourseIds: Types.ObjectId[] = [];
+
+    if (courseId) {
+      const course = await this.courseModel.findById(courseId).select('instructorId').exec();
+      if (!course) throw new NotFoundException('Course not found');
+      // OWNERSHIP CHECK ENFORCED
+      if (course.instructorId.toString() !== instructorId) {
+        throw new ForbiddenException('You do not own this course');
+      }
+      filterCourseIds.push(new Types.ObjectId(courseId));
+    } else {
+      const courses = await this.courseModel.find({ instructorId: new Types.ObjectId(instructorId) }).select('_id').exec();
+      filterCourseIds = courses.map(c => c._id);
+    }
+
+    if (filterCourseIds.length === 0) {
+      return { data: [], meta: { total: 0, page, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
+    }
+
+    const query: Record<string, unknown> = { courseId: { $in: filterCourseIds } };
+    if (rating && rating.length > 0) {
+      query.rating = { $in: rating };
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [reviews, total] = await Promise.all([
+      this.reviewModel
+        .find(query)
+        .populate('studentId', 'firstName lastName')
+        .populate('courseId', 'title')
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 })
+        .exec(),
+      this.reviewModel.countDocuments(query),
+    ]);
+
+    const data = reviews.map((r) => {
+      const reviewDoc = r as unknown as { _id: Types.ObjectId; courseId: { _id: Types.ObjectId; title: string }; studentId?: { firstName: string; lastName: string }; rating: number; comment: string; createdAt: Date };
+      const studentName = reviewDoc.studentId ? `${reviewDoc.studentId.firstName} ${reviewDoc.studentId.lastName.charAt(0)}.` : 'Unknown Student';
+      return {
+        reviewId: reviewDoc._id.toString(),
+        courseId: reviewDoc.courseId._id.toString(),
+        courseTitle: reviewDoc.courseId.title,
+        studentName,
+        rating: reviewDoc.rating,
+        comment: reviewDoc.comment,
+        createdAt: reviewDoc.createdAt || new Date(),
+      };
+    });
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
 }
+

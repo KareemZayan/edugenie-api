@@ -192,7 +192,7 @@ export interface SectionResponse {
   description?: string;
   price?: number | null;
   isPublished: boolean;
-  lessons: LessonResponse[]; 
+  lessons: LessonResponse[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -328,34 +328,34 @@ export interface NotificationResponse {
 
 // ── 14. Quizzes Extended Module ─────────────────────────────
 export interface SubmitAnswerRequest {
-  questionId:       string;
+  questionId: string;
   selectedOptionIds: string[];
 }
 
 export interface SubmitQuizRequest {
   attemptId: string;
-  answers:   SubmitAnswerRequest[];
+  answers: SubmitAnswerRequest[];
 }
 
 export interface QuizOption {
   optionId: string;
-  text:     string;
+  text: string;
 }
 
 export interface QuizQuestionForStudent {
   questionId: string;
-  text:       string;
-  options:    QuizOption[];
+  text: string;
+  options: QuizOption[];
 }
 
 export interface QuizForStudentResponse {
-  quizId:             string;
-  timeLimit:           number;
-  passingScore:        number;
-  attemptNumber:       number;
-  maxAttempts:         number;
-  attemptsRemaining:   number;
-  questions:           QuizQuestionForStudent[];
+  quizId: string;
+  timeLimit: number;
+  passingScore: number;
+  attemptNumber: number;
+  maxAttempts: number;
+  attemptsRemaining: number;
+  questions: QuizQuestionForStudent[];
 }
 
 export interface QuizStartResponse {
@@ -365,26 +365,26 @@ export interface QuizStartResponse {
 }
 
 export interface QuizSubmitResponse {
-  passed:              boolean;
-  score:                number;
-  correctAnswers:       number;
-  totalQuestions:       number;
-  attemptNumber:        number;
-  remainingAttempts:    number;
-  progressReset:        boolean;
-  nextSectionUnlocked:  boolean;
+  passed: boolean;
+  score: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  attemptNumber: number;
+  remainingAttempts: number;
+  progressReset: boolean;
+  nextSectionUnlocked: boolean;
 }
 
 export interface QuizAttemptSummary {
   attemptNumber: number;
-  score:         number | null;
-  passed:        boolean | null;
-  submittedAt:   Date | null;
+  score: number | null;
+  passed: boolean | null;
+  submittedAt: Date | null;
 }
 
 export interface QuizAttemptsHistoryResponse {
-  attempts:  QuizAttemptSummary[];
-  canRetry:  boolean;
+  attempts: QuizAttemptSummary[];
+  canRetry: boolean;
 }
 
 // ── 15. Earnings Module ──────────────────────────────────────
@@ -402,52 +402,165 @@ export interface EarningResponse {
 
 // ── Progress ─────────────────────────────────────────────
 export interface TrackProgressRequest {
-  lessonId:        string;
+  lessonId: string;
   watchedDuration: number;
-  isCompleted:     boolean;
+  isCompleted: boolean;
 }
 
 export type LessonState = 'not_started' | 'in_progress' | 'completed';
 
 export interface ProgressResponse {
-  lessonState:        LessonState;
+  lessonState: LessonState;
   nextLessonUnlocked: boolean;
   nextLesson: { _id: string; title: string } | null;
-  sectionCompleted:   boolean;
-  quizRequired:       boolean;
-  quizSectionId:      string | null;
+  sectionCompleted: boolean;
+  quizRequired: boolean;
+  quizSectionId: string | null;
 }
 
 // ── Lesson detail ─────────────────────────────────────────
 export interface LessonDetailResponse {
-  _id:           string;
-  title:         string;
-  videoUrl:      string;
+  _id: string;
+  title: string;
+  videoUrl: string;
   videoDuration: number;
-  transcript:    string | null;
-  sectionId:     string;
+  transcript: string | null;
+  sectionId: string;
 }
 
 // ── Resume ────────────────────────────────────────────────
 export interface ResumeResponse {
-  lessonId:        string;
-  sectionId:       string;
+  lessonId: string;
+  sectionId: string;
   watchedDuration: number;
 }
 
 // ── Notes ─────────────────────────────────────────────────
 export interface NoteResponse {
-  _id:       string;
-  content:   string;
+  _id: string;
+  content: string;
   timestamp: number;
   createdAt: Date;
 }
 
 export interface CreateNoteRequest {
-  content:   string;
+  content: string;
   timestamp: number;
 }
 
 export interface NotesListResponse {
   notes: NoteResponse[];
+}
+
+// ── 16. Instructor Dashboard Module ──────────────────────────
+export interface DashboardOverviewResponse {
+  totalEarnings: number;
+  earningsChangePercent: number;
+  totalStudents: number;
+  newStudentsThisWeek: number;
+  averageRating: number;
+  totalCourses: number;
+  pendingPayout: number;
+  nextPayoutDate: Date;
+}
+
+export type AttentionItemType = 'course_rejected' | 'low_review' | 'quiz_pending_review';
+
+export interface AttentionItem {
+  type: AttentionItemType;
+  courseId?: string;
+  courseTitle: string;
+  rejectionReason?: string;
+  rating?: number;
+  reviewId?: string;
+  sectionId?: string;
+  createdAt: Date;
+}
+
+export interface AttentionItemsResponse {
+  items: AttentionItem[];
+}
+
+export interface InstructorCourseListItem {
+  id: string;
+  title: string;
+  thumbnail: string;
+  status: CourseStatus;
+  totalStudents: number;
+  totalRevenue: number;
+  rating: number;
+  completionRate: number;
+}
+
+export interface RejectionReasonResponse {
+  courseId: string;
+  courseTitle: string;
+  status: string;
+  rejectionReason: string;
+  rejectedBy: string;
+  rejectedAt: Date;
+}
+
+export interface InstructorStudentListItem {
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  courseId: string;
+  accessType: 'full_course' | 'sections';
+  accessibleSections: string[];
+  progressPercent: number;
+  enrolledAt: Date;
+}
+
+export interface EarningsPayoutResponse {
+  totalEarned: number;
+  pendingPayout: number;
+  breakdown: {
+    fromFullCourses: number;
+    fromSections: number;
+  };
+  history: Array<{
+    date: Date;
+    amount: number;
+    type: 'full_course' | 'section';
+    courseTitle: string;
+    sectionTitle: string | null;
+    orderId: string;
+  }>;
+}
+
+export interface InstructorReviewListItem {
+  reviewId: string;
+  courseId: string;
+  courseTitle: string;
+  studentName: string;
+  rating: number;
+  comment: string;
+  createdAt: Date;
+}
+
+export interface PendingQuizListItem {
+  quizId: string;
+  sectionId: string;
+  sectionTitle: string;
+  courseTitle: string;
+  questionCount: number;
+  generatedAt: Date;
+}
+
+export interface QuizDetailForInstructorResponse {
+  quizId: string;
+  sectionId: string;
+  questions: Array<{
+    questionId: string;
+    text: string;
+    options: Array<{ optionId: string; text: string }>;
+    correctAnswers: string[];
+  }>;
+}
+
+export interface QuizApproveResponse {
+  quizId: string;
+  status: string;
+  approvedAt: Date;
 }
