@@ -14,6 +14,6 @@ import { Course, CourseSchema } from '../courses/schema/course.schema'; // Add t
   ],
   controllers: [EnrollmentsController],
   providers: [EnrollmentsService],
-  exports: [EnrollmentsService, MongooseModule],
+  exports: [EnrollmentsService, MongooseModule]
 })
 export class EnrollmentsModule { }

@@ -1,189 +1,152 @@
-import { Controller, Post, Req, Res, Headers, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Req, Res, Headers, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import * as crypto from 'crypto';
+
 import { PaymobService } from '../paymob/paymob.service';
 import { Order } from '../orders/schema/order.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
-import { Earning } from '../orders/schema/earning.schema';
-import { Lesson } from '../lessons/schema/lesson.schema';
+import { Earning } from '../earnings/schema/earning.schema';
 import { Course } from '../courses/schema/course.schema';
+import { Lesson } from '../lessons/schema/lesson.schema';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
+import { OrderStatus } from '../common/enums/order-status.enum';
+import { EarningStatus } from '../common/enums/earning-status.enum';
 
 @Controller('webhooks')
 export class WebhooksController {
   constructor(
     private readonly paymobService: PaymobService,
-    @InjectModel(Order.name) private orderModel: Model<Order>,
-    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
-    @InjectModel('Earning') private earningModel: Model<any>,
-    @InjectModel(Lesson.name) private lessonModel: Model<Lesson>,
-    @InjectModel(Course.name) private courseModel: Model<Course>,
+    @InjectModel(Order.name) private readonly orderModel: Model<Order>,
+    @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
+    @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
+    @InjectModel(Course.name) private readonly courseModel: Model<Course>,
+    @InjectModel(Lesson.name) private readonly lessonModel: Model<Lesson>
   ) {}
 
   @Post('paymob')
-  async handlePaymobWebhook(@Req() req: Request, @Res() res: Response) {
-    const body = req.body;
-    const obj = body?.obj;
-
-    // In production, always enforce HMAC. In dev, allow bypass for testing.
-    const isProd = process.env.NODE_ENV === 'production';
-    const hmacHeader = req.headers['hmac'] as string;
-
-    if (isProd) {
-      if (!hmacHeader) {
-        res.status(400).send('Missing HMAC header');
-        return;
-      }
-      if (!obj) {
-        res.status(400).send('Invalid payload: missing obj');
-        return;
-      }
-
-      // Paymob HMAC verification logic
-      const concatenatedString = [
-        obj.amount_cents,
-        obj.created_at,
-        obj.currency,
-        obj.error_occured,
-        obj.has_parent_transaction,
-        obj.id,
-        obj.integration_id,
-        obj.is_3d_secure,
-        obj.is_auth,
-        obj.is_capture,
-        obj.is_refunded,
-        obj.is_standalone_payment,
-        obj.is_voided,
-        obj.order?.id,
-        obj.owner,
-        obj.pending,
-        obj.source_data?.pan,
-        obj.source_data?.sub_type,
-        obj.source_data?.type,
-        obj.success,
-      ].join('');
-
-      const hmac = crypto
-        .createHmac('sha512', this.paymobService.hmacSecret)
-        .update(concatenatedString)
-        .digest('hex');
-
-      if (hmac !== hmacHeader) {
-        res.status(400).send('Invalid HMAC signature');
-        return;
-      }
+  async handlePaymobWebhook(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Headers('hmac') hmacSignature: string
+  ) {
+    if (!hmacSignature) {
+      throw new UnauthorizedException('Missing HMAC signature');
     }
 
-    // Guard: if obj is missing (malformed body), just return OK
-    if (!obj) {
-      res.status(200).send('No obj in payload');
-      return;
+    const isValid = this.paymobService.verifyWebhookHmac(req.body, hmacSignature);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid HMAC signature');
     }
 
-    // Process only successful transactions
-    if (obj.success === true) {
-      const merchantOrderId = obj.order?.merchant_order_id || obj.special_reference;
+    const payload = req.body;
+    
+    // In our mock, the payload structure would have an orderId or clientSecret.
+    // For this implementation, we will assume payload.order_id matches order._id
+    const orderIdStr = payload.order_id || payload.clientSecret?.replace('paymob_', '') || payload.obj?.order?.merchant_order_id || payload.obj?.special_reference;
+    
+    if (!orderIdStr || !Types.ObjectId.isValid(orderIdStr)) {
+      return res.status(200).send('Invalid or missing order reference in webhook');
+    }
 
-      if (!merchantOrderId) {
-        res.status(200).send('No order reference found');
-        return;
+    const session = await this.orderModel.db.startSession();
+    session.startTransaction();
+
+    try {
+      // Find the order
+      const order = await this.orderModel.findById(orderIdStr).session(session);
+      
+      if (!order) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(200).send('Order not found');
       }
 
-      const session = await this.orderModel.db.startSession();
-      session.startTransaction();
+      // Idempotency: If already COMPLETED, just return 200
+      if (order.status === OrderStatus.COMPLETED) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(200).send('Already processed');
+      }
 
-      try {
-        const order = await this.orderModel.findById(merchantOrderId).session(session);
-        if (!order || order.status === 'COMPLETED') {
-          await session.abortTransaction();
-          session.endSession();
-          res.status(200).send('Order already processed or not found');
-          return;
-        }
-
-        order.status = 'COMPLETED';
+      // Check if it's a failed transaction from paymob
+      if (payload.success === false || payload.success === 'false' || payload.obj?.success === false) {
+        order.status = OrderStatus.FAILED;
         await order.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+        return res.status(200).send('Recorded failure');
+      }
 
-        for (const item of order.items) {
-          if (item.itemType === 'course') {
-            const enrollment = await this.enrollmentModel.findOne({ studentId: order.studentId, courseId: item.courseId }).session(session);
-            if (enrollment) {
-              enrollment.type = 'full_course';
-              enrollment.sectionIds = [];
-              await enrollment.save({ session });
-            } else {
-              await this.enrollmentModel.create([{
-                studentId: order.studentId,
-                courseId: item.courseId,
-                type: 'full_course',
-                sectionIds: [],
-              }], { session });
+      // 1. Mark Order as COMPLETED
+      order.status = OrderStatus.COMPLETED;
+      order.paidAt = new Date();
+      await order.save({ session });
+
+      // 2. Create Enrollments and Earnings
+      for (const item of order.items) {
+        // Find if enrollment already exists for this student + course
+        let enrollment = await this.enrollmentModel.findOne({
+          studentId: order.studentId,
+          courseId: item.courseId
+        }).session(session);
+
+        if (!enrollment) {
+          enrollment = new this.enrollmentModel({
+            studentId: order.studentId,
+            courseId: item.courseId,
+            type: item.itemType,
+            sectionIds: item.itemType === PurchaseType.SECTION ? [item.sectionId] : []
+          });
+        } else {
+          // If upgrading from section to full_course
+          if (item.itemType === PurchaseType.FULL_COURSE) {
+            enrollment.type = PurchaseType.FULL_COURSE;
+          } 
+          // If adding a section
+          else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
+            if (!enrollment.sectionIds.some(id => id.toString() === item.sectionId!.toString())) {
+              enrollment.sectionIds.push(item.sectionId);
             }
-
-            await this.earningModel.create([{
-              instructorId: item.instructorId,
-              orderId: order._id,
-              courseId: item.courseId,
-              sectionId: null,
-              amount: item.price * 0.80,
-              status: 'PENDING',
-            }], { session });
-
-          } else if (item.itemType === 'section') {
-            let enrollment = await this.enrollmentModel.findOne({ studentId: order.studentId, courseId: item.courseId }).session(session);
-            
-            if (enrollment) {
-              if (enrollment.type === 'sections') {
-                if (!enrollment.sectionIds.some(id => id.toString() === item.sectionId?.toString())) {
-                  enrollment.sectionIds.push(item.sectionId as Types.ObjectId);
-                  await enrollment.save({ session });
-                }
-              }
-            } else {
-              const newEnrolls = await this.enrollmentModel.create([{
-                studentId: order.studentId,
-                courseId: item.courseId,
-                type: 'sections',
-                sectionIds: item.sectionId ? [item.sectionId] : [],
-              }], { session });
-              enrollment = newEnrolls[0];
-            }
-
-            // Auto-upgrade check
-            if (enrollment && enrollment.type === 'sections') {
-              const course = await this.courseModel.findById(item.courseId).session(session);
-              if (course && enrollment.sectionIds.length >= course.sections.length) {
-                enrollment.type = 'full_course';
-                enrollment.sectionIds = [];
-                await enrollment.save({ session });
-              }
-            }
-
-            await this.earningModel.create([{
-              instructorId: item.instructorId,
-              orderId: order._id,
-              courseId: item.courseId,
-              sectionId: item.sectionId,
-              amount: item.price * 0.80,
-              status: 'PENDING',
-            }], { session });
+          }
+        }
+        
+        // Auto-upgrade check
+        if (enrollment && enrollment.type === PurchaseType.SECTION) {
+          const course = await this.courseModel.findById(item.courseId).session(session);
+          if (course && enrollment.sectionIds.length >= course.sections.length) {
+            enrollment.type = PurchaseType.FULL_COURSE;
+            enrollment.sectionIds = [];
           }
         }
 
-        await session.commitTransaction();
-        session.endSession();
-      } catch (err) {
-        await session.abortTransaction();
-        session.endSession();
-        console.error('Webhook processing failed:', err);
-        res.status(500).send('Webhook processing failed');
-        return;
-      }
-    }
+        await enrollment.save({ session });
 
-    res.status(200).send();
+        // Earnings (80% split to instructor)
+        const course = await this.courseModel.findById(item.courseId).session(session);
+        if (course) {
+          const earningAmount = item.price * 0.80; // 80% split
+          const earning = new this.earningModel({
+            instructorId: course.instructorId,
+            orderId: order._id,
+            amount: earningAmount,
+            status: EarningStatus.PENDING
+          });
+          await earning.save({ session });
+        }
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).send('Webhook processed successfully');
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error('Webhook processing failed:', error);
+      throw new InternalServerErrorException('Failed to process webhook');
+    }
   }
 
   @Post('cloudinary')

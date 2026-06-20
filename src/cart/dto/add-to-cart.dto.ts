@@ -1,21 +1,16 @@
-import { IsNotEmpty, IsMongoId, IsEnum, ValidateIf, IsOptional } from 'class-validator';
-
-export enum CartItemType {
-  COURSE = 'course',
-  SECTION = 'section',
-}
+import { IsNotEmpty, IsMongoId, IsEnum, ValidateIf } from 'class-validator';
+import { PurchaseType } from '../../common/enums/purchase-type.enum';
 
 export class AddToCartDto {
-  @IsEnum(CartItemType)
-  @IsNotEmpty()
-  itemType: CartItemType;
+  @IsEnum(PurchaseType)
+  type: PurchaseType;
 
   @IsMongoId()
   @IsNotEmpty()
   courseId: string;
 
-  @ValidateIf(o => o.itemType === CartItemType.SECTION)
+  @ValidateIf(o => o.type === 'section')
   @IsMongoId()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'sectionId is required when type is section' })
   sectionId?: string;
 }

@@ -14,23 +14,26 @@ export class CartController {
   constructor(private readonly cartService: CartService) { }
 
   @Get()
-  getCart(@CurrentUser() user: { userId: string }) {
-    return this.cartService.getCart(user.userId);
+  async getCart(@CurrentUser() user: { userId: string }) {
+    const response = await this.cartService.getCart(user.userId);
+    return { success: true, message: 'Cart retrieved successfully', data: response };
   }
 
   @Post()
-  addToCart(
+  async addToCart(
     @Body() addToCartDto: AddToCartDto,
     @CurrentUser() user: { userId: string }
   ) {
-    return this.cartService.addToCart(user.userId, addToCartDto);
+    const response = await this.cartService.addToCart(user.userId, addToCartDto.type, addToCartDto.courseId, addToCartDto.sectionId);
+    return { success: true, message: 'Added to cart', data: response };
   }
 
   @Delete(':itemId')
-  removeFromCart(
+  async removeFromCart(
     @Param('itemId') itemId: string,
     @CurrentUser() user: { userId: string }
   ) {
-    return this.cartService.removeFromCart(user.userId, itemId);
+    const response = await this.cartService.removeFromCart(user.userId, itemId);
+    return { success: true, message: 'Removed from cart', data: response };
   }
 }

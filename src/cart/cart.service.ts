@@ -2,177 +2,176 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException }
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Cart } from './schema/cart.schema';
-import { Course } from '../courses/schema/course.schema';
-import { Enrollment } from '../enrollments/schema/enrollment.schema';
-import { AddToCartDto, CartItemType } from './dto/add-to-cart.dto';
-import { CourseStatus } from '../common/enums/course-status.enum';
-import { CartSerializer } from './serializers/cart.serializer';
+import { CoursesService } from '../courses/courses.service';
+import { EnrollmentsService } from '../enrollments/enrollments.service';
+import { CartResponse, CartItemResponse } from '../frontend-contracts';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 
 @Injectable()
 export class CartService {
   constructor(
     @InjectModel(Cart.name) private cartModel: Model<Cart>,
-    @InjectModel(Course.name) private courseModel: Model<Course>,
-    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
+    private coursesService: CoursesService,
+    private enrollmentsService: EnrollmentsService
   ) { }
 
-  // 1. Get the user's cart and populate the course details (price, title, thumbnail)
-  async getCart(studentId: string) {
-    let cart = await this.cartModel
-      .findOne({ studentId: new Types.ObjectId(studentId) })
-      .populate('items.courseId', 'title price thumbnail')
-      .exec();
-
-    // If they don't have a cart yet, create an empty one!
+  async getCart(studentId: string): Promise<CartResponse> {
+    let cart = await this.cartModel.findOne({ studentId: new Types.ObjectId(studentId) }).exec();
     if (!cart) {
       cart = await this.cartModel.create({ studentId: new Types.ObjectId(studentId), items: [] });
     }
-    return new CartSerializer(cart.toObject() as any);
-  }
 
-  // 2. Add a course or section to the cart
-  async addToCart(studentId: string, dto: AddToCartDto) {
-    if (!Types.ObjectId.isValid(dto.courseId)) throw new BadRequestException('Invalid Course ID');
+    let subtotal = 0;
+    const itemsResponse: CartItemResponse[] = [];
 
-    // Find the course first to get price and validate
-    const course = await this.courseModel.findById(dto.courseId);
-    if (!course) throw new NotFoundException('Course not found');
-    if (course.courseStatus !== CourseStatus.PUBLISHED) {
-      throw new BadRequestException('Course is not available for purchase');
+    for (const item of cart.items) {
+      try {
+        const course = await this.coursesService.findCourseDocument(item.courseId.toString());
+
+        let sectionTitle;
+        if (item.itemType === 'section' && item.sectionId) {
+          const section = course.sections.find((s: any) => s._id.toString() === item.sectionId?.toString());
+          if (section) {
+            sectionTitle = section.title;
+          }
+        }
+
+        const price = item.price;
+        subtotal += price;
+
+          const instructor = course.instructorId as any;
+          const instructorName = instructor?.firstName && instructor?.lastName
+            ? `${instructor.firstName} ${instructor.lastName}`
+            : 'Instructor';
+
+          itemsResponse.push({
+            type: item.itemType as any,
+            courseId: course._id.toString(),
+            courseTitle: course.title,
+            thumbnail: course.thumbnail,
+            instructorName,
+          sectionId: item.sectionId?.toString(),
+          sectionTitle,
+          price
+        });
+      } catch (e) {
+        // Ignore deleted courses or sections in cart view
+      }
     }
 
-    let price = 0;
+    return {
+      items: itemsResponse,
+      subtotal,
+      total: subtotal
+    };
+  }
 
-    if (dto.itemType === CartItemType.COURSE) {
-      // Check if student already enrolled in full course
-      const enrollment = await this.enrollmentModel.findOne({
-        studentId: new Types.ObjectId(studentId),
-        courseId: new Types.ObjectId(dto.courseId),
-        type: 'full_course'
-      });
-      if (enrollment) throw new ConflictException('You already have full access to this course');
-      price = course.price;
-    } else if (dto.itemType === CartItemType.SECTION) {
-      if (!dto.sectionId || !Types.ObjectId.isValid(dto.sectionId)) {
-        throw new BadRequestException('Invalid Section ID');
-      }
-      
-      const section = course.sections.find(s => s._id.toString() === dto.sectionId);
-      if (!section) throw new NotFoundException('Section not found in this course');
-      
-      if (section.price === null || section.price === undefined) {
-        throw new BadRequestException('This section is not available for individual purchase');
-      }
+  async addToCart(studentId: string, itemType: PurchaseType, courseId: string, sectionId?: string): Promise<CartResponse> {
+    if (!Types.ObjectId.isValid(courseId)) throw new BadRequestException('Invalid Course ID');
+    if (itemType === PurchaseType.SECTION && (!sectionId || !Types.ObjectId.isValid(sectionId))) {
+      throw new BadRequestException('Invalid Section ID');
+    }
 
-      // Check if student already owns this section or the full course
-      const enrollment = await this.enrollmentModel.findOne({
-        studentId: new Types.ObjectId(studentId),
-        courseId: new Types.ObjectId(dto.courseId)
-      });
-
-      if (enrollment) {
-        if (enrollment.type === 'full_course') {
-          throw new ConflictException('You already have full access to this course');
-        }
-        const hasSection = enrollment.sectionIds.some(id => id.toString() === dto.sectionId);
-        if (hasSection) {
-          throw new ConflictException('You already have access to this section');
-        }
-      }
-      
-      price = section.price;
+    const isOwned = await this.enrollmentsService.hasDuplicate(studentId, itemType, courseId, sectionId);
+    if (isOwned) {
+      throw new ConflictException('You already have access to this content');
     }
 
     let cart = await this.cartModel.findOne({ studentId: new Types.ObjectId(studentId) });
-
     if (!cart) {
-      cart = new this.cartModel({
-        studentId: new Types.ObjectId(studentId),
-        items: [],
-      });
+      cart = new this.cartModel({ studentId: new Types.ObjectId(studentId), items: [] });
     }
 
-    // Check if item is already in the cart to prevent duplicates
-    const exists = cart.items.some(item => {
-      if (dto.itemType === CartItemType.COURSE) {
-        return item.itemType === CartItemType.COURSE && item.courseId.toString() === dto.courseId;
-      } else {
-        return item.itemType === CartItemType.SECTION && item.sectionId?.toString() === dto.sectionId;
-      }
-    });
+    const exists = cart.items.some(item =>
+      item.courseId.toString() === courseId &&
+      (item.itemType === PurchaseType.FULL_COURSE || item.sectionId?.toString() === sectionId)
+    );
+    if (exists) {
+      throw new ConflictException('This item is already in your cart');
+    }
 
-    if (exists) throw new BadRequestException('Item is already in your cart');
+    const course = await this.coursesService.findCourseDocument(courseId);
+    let priceToSnapshot = course.price;
+
+    if (itemType === PurchaseType.SECTION) {
+      const section = course.sections.find((s: any) => s._id.toString() === sectionId?.toString());
+      if (!section) throw new NotFoundException('Section not found');
+      if (section.price === null || section.price === undefined) {
+        throw new BadRequestException('This section is not purchasable individually');
+      }
+      priceToSnapshot = section.price;
+    }
 
     cart.items.push({
-      itemType: dto.itemType,
-      courseId: new Types.ObjectId(dto.courseId),
-      sectionId: dto.sectionId ? new Types.ObjectId(dto.sectionId) : null,
-      price: price
+      itemType,
+      courseId: new Types.ObjectId(courseId),
+      sectionId: sectionId ? new Types.ObjectId(sectionId) : undefined,
+      price: priceToSnapshot
     });
 
     await cart.save();
-
     return this.getCart(studentId);
   }
 
-  // 3. Remove an item from the cart
-  async removeFromCart(studentId: string, itemId: string) {
-    if (!Types.ObjectId.isValid(itemId)) throw new BadRequestException('Invalid Item ID');
-
-    const cart = await this.cartModel.findOneAndUpdate(
-      { studentId: new Types.ObjectId(studentId) },
-      { $pull: { items: { _id: new Types.ObjectId(itemId) } } },
-      { returnDocument: 'after' }
-    ).populate('items.courseId', 'title price thumbnail');
-
-    if (!cart) throw new NotFoundException('Cart not found');
-    return new CartSerializer(cart.toObject() as any);
-  }
-
-  // 4. Validate cart before checkout
-  async validateCart(studentId: string) {
+  async removeFromCart(studentId: string, itemId: string): Promise<CartResponse> {
     const cart = await this.cartModel.findOne({ studentId: new Types.ObjectId(studentId) });
-    if (!cart || cart.items.length === 0) {
-      throw new BadRequestException('Your cart is empty');
+    if (!cart) throw new NotFoundException('Cart not found');
+
+    const initialLength = cart.items.length;
+    // Assume frontend sends the cart item's _id or courseId/sectionId. Let's try _id first.
+    cart.items = cart.items.filter(item => {
+      return item._id?.toString() !== itemId && item.courseId.toString() !== itemId && item.sectionId?.toString() !== itemId;
+    });
+
+    if (cart.items.length === initialLength) {
+      throw new NotFoundException('Item not found in cart');
     }
 
-    let pricesChanged = false;
-    let invalidItemsCount = 0;
+    await cart.save();
+    return this.getCart(studentId);
+  }
+
+  async validateCart(studentId: string) {
+    const cart = await this.cartModel.findOne({ studentId: new Types.ObjectId(studentId) });
+    if (!cart || cart.items.length === 0) return true;
+
+    let changed = false;
 
     for (let i = cart.items.length - 1; i >= 0; i--) {
       const item = cart.items[i];
-      const course = await this.courseModel.findById(item.courseId);
-
-      // If course deleted or unpublished, remove item
-      if (!course || course.courseStatus !== CourseStatus.PUBLISHED) {
+      const isOwned = await this.enrollmentsService.hasDuplicate(studentId, item.itemType, item.courseId.toString(), item.sectionId?.toString());
+      if (isOwned) {
         cart.items.splice(i, 1);
-        invalidItemsCount++;
+        changed = true;
         continue;
       }
 
-      if (item.itemType === CartItemType.COURSE) {
-        if (item.price !== course.price) {
-          item.price = course.price; // Update snapshot
-          pricesChanged = true;
+      try {
+        const course = await this.coursesService.findCourseDocument(item.courseId.toString());
+        let currentPrice = course.price;
+        if (item.itemType === PurchaseType.SECTION) {
+          const section = course.sections.find((s: any) => s._id.toString() === item.sectionId?.toString());
+          if (!section || section.price === null || section.price === undefined) {
+            cart.items.splice(i, 1);
+            changed = true;
+            continue;
+          }
+          currentPrice = section.price;
         }
-      } else if (item.itemType === CartItemType.SECTION) {
-        const section = course.sections.find(s => s._id.toString() === item.sectionId?.toString());
-        // If section deleted or not purchasable individually, remove item
-        if (!section || section.price === null || section.price === undefined) {
-          cart.items.splice(i, 1);
-          invalidItemsCount++;
-          continue;
+
+        if (item.price !== currentPrice) {
+          item.price = currentPrice;
+          changed = true;
         }
-        if (item.price !== section.price) {
-          item.price = section.price; // Update snapshot
-          pricesChanged = true;
-        }
+      } catch (e) {
+        cart.items.splice(i, 1);
+        changed = true;
       }
     }
 
-    if (pricesChanged || invalidItemsCount > 0) {
+    if (changed) {
       await cart.save();
-      throw new ConflictException('Prices changed or items became unavailable. Please review your cart.');
+      throw new ConflictException('Prices have changed or items are already owned, please review your cart');
     }
 
     return cart;

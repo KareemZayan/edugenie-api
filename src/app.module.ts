@@ -23,6 +23,7 @@ import { PaymobModule } from './paymob/paymob.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ProgressModule } from './progress/progress.module';
 import { NotesModule } from './notes/notes.module';
+import { EarningsModule } from './earnings/earnings.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { NotesModule } from './notes/notes.module';
     WebhooksModule,
     ProgressModule,
     NotesModule,
+    EarningsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
