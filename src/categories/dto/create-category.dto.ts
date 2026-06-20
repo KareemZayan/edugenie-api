@@ -6,10 +6,6 @@ export class createCategoryDto {
   name!: string;
 
   @IsString()
-  @IsNotEmpty()
-  iconUrl!: string;
-
-  @IsString()
   @IsOptional()
   description?: string;
 

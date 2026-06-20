@@ -23,13 +23,16 @@ export class Course {
   description!: string;
 
   @Prop({
-    required: true,
+    default: 0,
     min: 0,
   })
   price!: number;
 
   @Prop({ required: true })
   thumbnail!: string;
+
+  @Prop({ default: '' })
+  thumbnailPublicId!: string;
 
   @Prop({
     type: String,
@@ -44,6 +47,9 @@ export class Course {
     default: CourseStatus.DRAFT,
   })
   courseStatus!: CourseStatus;
+
+  @Prop()
+  rejectionReason?: string;
 
   @Prop({
     type: Types.ObjectId,
@@ -75,9 +81,6 @@ export class Course {
 
   @Prop({ default: 0, min: 0 })
   totalLessons!: number;
-
-  @Prop({ default: 0, min: 0 })
-  totalVideos!: number;
 
   @Prop({ default: 0, min: 0 })
   totalHours!: number;

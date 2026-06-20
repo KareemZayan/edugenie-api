@@ -2,19 +2,32 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { User } from './schema/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { v2 as cloudinary } from 'cloudinary';
+import { UserSerializer } from './serializers/user.serializer';
+import { UserRole } from '../common/enums/user-role.enum';
+import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
+import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
+import { ChangeUserRoleDto } from './dto/change-user-role.dto';
+import { ChangeRoleResponse } from './interfaces/change-role-response.interface';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<User>) {}
+  constructor(
+    @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+    @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
+  ) {}
 
-  async createUser(createUserDto: CreateUserDto): Promise<User> {
+  async createUser(createUserDto: CreateUserDto): Promise<UserSerializer> {
     const existingUser = await this.userModel.findOne({
       email: createUserDto.email,
     });
@@ -24,25 +37,23 @@ export class UsersService {
     }
 
     const newUser = new this.userModel(createUserDto);
-    return newUser.save();
+    const savedUser = await newUser.save();
+    return new UserSerializer(savedUser.toObject());
   }
 
   async findByEmail(email: string): Promise<User | null> {
     return this.userModel.findOne({ email }).exec();
   }
 
-  async getProfile(userId: string) {
-    const user = await this.userModel
-      .findById(userId)
-      .select('-password -passwordReset')
-      .exec();
+  async getProfile(userId: string): Promise<UserSerializer> {
+    const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return user;
+    return new UserSerializer(user.toObject());
   }
 
-  async updateProfile(userId: string, updateUserDto: UpdateUserDto) {
+  async updateProfile(userId: string, updateUserDto: UpdateUserDto): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -61,18 +72,15 @@ export class UsersService {
           try {
             await cloudinary.uploader.destroy(user.avatarPublicId);
           } catch (error) {
-            // Gracefully handle Cloudinary deletion errors
-            // We don't fail the profile update if the image deletion fails
-            console.error(
+            Logger.error(
               `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
-              error,
+              error instanceof Error ? error.stack : 'Unknown error',
+              'UsersService'
             );
           }
         }
       }
 
-      // If user is deleting avatar, ensure we also nullify avatarPublicId
-      // just in case they didn't send it explicitly
       if (
         updateUserDto.avatar === null &&
         updateUserDto.avatarPublicId === undefined
@@ -87,13 +95,84 @@ export class UsersService {
         { $set: updateUserDto },
         { returnDocument: 'after', runValidators: true },
       )
-      .select('-password -passwordReset')
       .exec();
 
     if (!updatedUser) {
       throw new NotFoundException('User not found');
     }
 
-    return updatedUser;
+    return new UserSerializer(updatedUser.toObject());
+  }
+  async changeUserRole(
+    targetUserId: string,
+    dto: ChangeUserRoleDto,
+    requestingSuperAdminId: string,
+  ): Promise<ChangeRoleResponse> {
+    const targetUser = await this.userModel.findById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (targetUserId === requestingSuperAdminId) {
+      throw new ForbiddenException('You cannot change your own role');
+    }
+
+    if (
+      targetUser.role === UserRole.SUPERADMIN &&
+      dto.newRole !== UserRole.SUPERADMIN
+    ) {
+      const superAdminCount = await this.userModel.countDocuments({
+        role: UserRole.SUPERADMIN,
+      });
+
+      if (superAdminCount <= 1) {
+        throw new ConflictException(
+          'Cannot remove the last remaining superadmin. Promote another user to superadmin first.',
+        );
+      }
+    }
+
+    if (
+      targetUser.role === UserRole.SUPERADMIN &&
+      !dto.confirmSuperAdminChange
+    ) {
+      throw new BadRequestException(
+        "Changing a superadmin's role requires explicit confirmation. Set confirmSuperAdminChange: true in the request body.",
+      );
+    }
+
+    if (targetUser.role === dto.newRole) {
+      throw new BadRequestException(`User already has the role ${dto.newRole}`);
+    }
+
+    const oldRole = targetUser.role;
+    targetUser.role = dto.newRole;
+    await targetUser.save();
+
+    await this.auditLogModel.create({
+      action: 'ROLE_CHANGE',
+      performedBy: new Types.ObjectId(requestingSuperAdminId),
+      targetUser: new Types.ObjectId(targetUserId),
+      details: { oldRole, newRole: dto.newRole },
+    });
+
+    await this.notificationModel.create({
+      userId: new Types.ObjectId(targetUserId),
+      title: 'Role Changed',
+      message: `Your account role has been changed from ${oldRole} to ${dto.newRole}`,
+      type: 'ROLE_CHANGE',
+      isRead: false,
+    });
+
+    return {
+      id: targetUser._id.toString(),
+      email: targetUser.email,
+      firstName: targetUser.firstName,
+      lastName: targetUser.lastName,
+      oldRole,
+      newRole: targetUser.role,
+      changedAt: new Date(),
+      changedBy: requestingSuperAdminId,
+    };
   }
 }

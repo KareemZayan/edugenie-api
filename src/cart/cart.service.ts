@@ -26,11 +26,11 @@ export class CartService {
 
     for (const item of cart.items) {
       try {
-        const course = await this.coursesService.findOne(item.courseId.toString());
+        const course = await this.coursesService.findCourseDocument(item.courseId.toString());
 
         let sectionTitle;
         if (item.itemType === 'section' && item.sectionId) {
-          const section = course.sections.id(item.sectionId);
+          const section = course.sections.find((s: any) => s._id.toString() === item.sectionId?.toString());
           if (section) {
             sectionTitle = section.title;
           }
@@ -90,11 +90,11 @@ export class CartService {
       throw new ConflictException('This item is already in your cart');
     }
 
-    const course = await this.coursesService.findOne(courseId);
+    const course = await this.coursesService.findCourseDocument(courseId);
     let priceToSnapshot = course.price;
 
     if (itemType === PurchaseType.SECTION) {
-      const section = course.sections.id(sectionId!);
+      const section = course.sections.find((s: any) => s._id.toString() === sectionId?.toString());
       if (!section) throw new NotFoundException('Section not found');
       if (section.price === null || section.price === undefined) {
         throw new BadRequestException('This section is not purchasable individually');
@@ -147,10 +147,10 @@ export class CartService {
       }
 
       try {
-        const course = await this.coursesService.findOne(item.courseId.toString());
+        const course = await this.coursesService.findCourseDocument(item.courseId.toString());
         let currentPrice = course.price;
         if (item.itemType === PurchaseType.SECTION) {
-          const section = course.sections.id(item.sectionId!);
+          const section = course.sections.find((s: any) => s._id.toString() === item.sectionId?.toString());
           if (!section || section.price === null || section.price === undefined) {
             cart.items.splice(i, 1);
             changed = true;

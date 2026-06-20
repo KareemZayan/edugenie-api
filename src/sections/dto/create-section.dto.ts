@@ -2,10 +2,11 @@ import {
   IsString,
   IsArray,
   IsOptional,
-  IsBoolean,
   IsNotEmpty,
   MinLength,
   ArrayMaxSize,
+  IsNumber,
+  Min,
 } from 'class-validator';
 
 export class CreateSectionDto {
@@ -26,6 +27,7 @@ export class CreateSectionDto {
   expectedOutcomes?: string[];
 
   @IsOptional()
-  @IsBoolean()
-  isBasicSection?: boolean;
+  @IsNumber()
+  @Min(0)
+  price?: number | null;
 }

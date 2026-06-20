@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   Patch,
@@ -12,9 +13,10 @@ import { CreateLessonDto } from './dto/create-lesson.dto';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { UserRole } from 'src/common/enums/user-role.enum';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../common/enums/user-role.enum';
+import { ReorderLessonsDto } from './dto/reorder-lessons.dto';
 
 @Controller('courses/:courseId/sections/:sectionId/lessons')
 export class LessonsController {
@@ -36,6 +38,40 @@ export class LessonsController {
       sectionId,
       instructorId,
       createLessonDto,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Get(':lessonId')
+  getLesson(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.lessonsService.getLessonById(
+      courseId,
+      sectionId,
+      lessonId,
+      user.userId,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Patch('reorder')
+  reorderLessons(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() dto: ReorderLessonsDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.lessonsService.reorderLessons(
+      courseId,
+      sectionId,
+      user.userId,
+      dto.lessonIds,
     );
   }
 

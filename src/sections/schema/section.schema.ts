@@ -19,10 +19,8 @@ export class Section {
   @Prop({ type: [String], default: [] })
   expectedOutcomes!: string[];
 
-  @Prop({ default: false })
-  isBasicSection!: boolean;
 
-  @Prop({ type: Number, default: null })
+  @Prop({ type: Number, default: null, min: 0 })
   price!: number | null;
 
   @Prop({ type: [LessonSchema], default: [] })
