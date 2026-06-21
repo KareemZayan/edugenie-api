@@ -6,6 +6,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  Get,
 } from '@nestjs/common';
 import { LessonsService } from './lessons.service';
 import { CreateLessonDto } from './dto/create-lesson.dto';
@@ -68,6 +69,23 @@ export class LessonsController {
     @CurrentUser() user: { userId: string },
   ) {
     return this.lessonsService.removeLesson(
+      courseId,
+      sectionId,
+      lessonId,
+      user.userId,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Get(':lessonId/transcription-status')
+  getTranscriptionStatus(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.lessonsService.getTranscriptionStatus(
       courseId,
       sectionId,
       lessonId,

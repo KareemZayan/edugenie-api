@@ -8,6 +8,7 @@ import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { CoursesService } from '../courses/courses.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class LessonsService {
   constructor(
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private coursesService: CoursesService,
+    private cloudinaryService: CloudinaryService,
   ) {}
 
   async addLesson(
@@ -116,5 +118,55 @@ export class LessonsService {
 
     await this.coursesService.syncMetadata(courseId);
     return { success: true, message: 'Lesson removed successfully' };
+  }
+
+  async getTranscriptionStatus(
+    courseId: string,
+    sectionId: string,
+    lessonId: string,
+    instructorId: string,
+  ) {
+    const course = await this.courseModel.findOne({
+      _id: new Types.ObjectId(courseId),
+      instructorId: new Types.ObjectId(instructorId),
+      'sections._id': new Types.ObjectId(sectionId),
+    }).exec();
+
+    if (!course) {
+      throw new NotFoundException('Course, Section not found or Unauthorized');
+    }
+
+    const section = course.sections.find((s: any) => s._id.toString() === sectionId);
+    const lesson = section?.lessons.find((l: any) => l._id.toString() === lessonId);
+
+    if (!lesson) {
+      throw new NotFoundException('Lesson not found');
+    }
+
+    if (lesson.transcript) {
+      return { transcriptReady: true, transcript: lesson.transcript, videoReady: true };
+    }
+
+    if (!lesson.videoPublicId) {
+      return { videoReady: false, transcriptReady: false, transcript: null };
+    }
+
+    const status = await this.cloudinaryService.getTranscriptionStatus(lesson.videoPublicId);
+
+    if (status.transcriptReady && status.transcriptText !== null) {
+      await this.courseModel.updateOne(
+        { _id: new Types.ObjectId(courseId) },
+        { $set: { 'sections.$[s].lessons.$[l].transcript': status.transcriptText } },
+        {
+          arrayFilters: [
+            { 's._id': new Types.ObjectId(sectionId) },
+            { 'l._id': new Types.ObjectId(lessonId) },
+          ],
+        }
+      ).exec();
+      return { videoReady: true, transcriptReady: true, transcript: status.transcriptText };
+    }
+
+    return { videoReady: status.videoReady, transcriptReady: false, transcript: null };
   }
 }

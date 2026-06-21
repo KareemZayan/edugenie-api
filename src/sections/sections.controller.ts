@@ -68,3 +68,20 @@ export class SectionsController {
     };
   }
 }
+
+// NOTE FOR FUTURE IMPLEMENTATION: When the quiz generation
+// endpoint that merges lesson transcripts for a section is built,
+// it MUST check that every lesson in the section has a transcript
+// that is both non-null AND non-empty:
+//   transcript !== null && transcript !== ''
+// If any lesson fails this check, reject with a clear error
+// listing which lessons are not ready:
+//   throw new BadRequestException(
+//     `Cannot generate quiz — transcripts still processing or
+//      empty for: ${problemLessonTitles.join(', ')}`
+//   )
+// Lessons with an empty transcript (valid 'ready' state but no
+// detected speech) should be reported to the instructor distinctly
+// from lessons still pending — consider including which case
+// applies for each lesson in the error response so the instructor
+// knows whether to wait or to re-upload/re-check that video's audio.
