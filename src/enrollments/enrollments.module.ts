@@ -13,6 +13,7 @@ import { Course, CourseSchema } from '../courses/schema/course.schema'; // Add t
     ])
   ],
   controllers: [EnrollmentsController],
-  providers: [EnrollmentsService]
+  providers: [EnrollmentsService],
+  exports: [EnrollmentsService, MongooseModule]
 })
 export class EnrollmentsModule { }

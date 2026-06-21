@@ -23,26 +23,28 @@ export class CloudinaryService {
     });
   }
 
-  generateSignature(folderPath: string) {
-    const timestamp = Math.round(new Date().getTime() / 1000);
+  generateSignature(folderPath: string, context?: string) {
+    const timestamp = Math.round(Date.now() / 1000);
+  
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
     const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-
-    const folder = `courses/${folderPath}`;
-
-    const paramsToSign = {
+  
+    const paramsToSign: Record<string, any> = {
       timestamp,
-      folder,
+      folder: folderPath,
       resource_type: 'video',
       raw_convert: 'google_speech',
     };
-
+  
+    if (context) {
+      paramsToSign.context = context;
+    }
+  
     const signature = cloudinary.utils.api_sign_request(
       paramsToSign,
       apiSecret as string,
     );
-
     return {
       signature,
       timestamp,
@@ -52,11 +54,30 @@ export class CloudinaryService {
     };
   }
 
-  verifyWebhookSignature(body: any, signature: string, timestamp: string): boolean {
+  async deleteAsset(
+    publicId: string,
+    resourceType: 'image' | 'video' = 'image',
+  ): Promise<{ success: boolean }> {
+    try {
+      await cloudinary.uploader.destroy(publicId, {
+        resource_type: resourceType,
+      });
+      this.logger.log(`Deleted Cloudinary asset: ${publicId}`);
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`Failed to delete asset: ${publicId}`, error);
+      return { success: false };
+    }
+  }
+
+  verifyWebhookSignature(
+    body: Record<string, unknown>,
+    signature: string,
+    timestamp: string,
+  ): boolean {
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     if (!apiSecret) return false;
 
-    // Use JSON stringified payload as fallback since NestJS parses raw body
     const payload = JSON.stringify(body);
     const expectedSignature = crypto
       .createHash('sha1')
@@ -64,62 +85,58 @@ export class CloudinaryService {
       .digest('hex');
 
     try {
-      if (cloudinary.utils.verifyNotificationSignature(payload, Number(timestamp), signature)) {
+      if (
+        cloudinary.utils.verifyNotificationSignature(
+          payload,
+          Number(timestamp),
+          signature,
+        )
+      ) {
         return true;
       }
-    } catch (error) {
-      // Fallback to manual verification
+    } catch {
+      // fall through to manual check
     }
 
     return expectedSignature === signature;
   }
 
-  async processUploadWebhook(payload: any) {
-    const { public_id, secure_url, duration } = payload;
-
+  async processUploadWebhook(payload: Record<string, unknown>) {
+    const public_id = payload.public_id as string | undefined;
+    const secure_url = payload.secure_url as string | undefined;
+    const duration = payload.duration as number | undefined;
+    const context = payload.context as Record<string, string> | undefined;
     if (!public_id) return;
 
-    // Expected folder structure in public_id: courses/courseId/sections/sectionId/lessons/lessonId/filename
-    const pathParts = public_id.split('/');
-    
-    const courseIndex = pathParts.indexOf('courses');
-    const sectionsIndex = pathParts.indexOf('sections');
-    const lessonsIndex = pathParts.indexOf('lessons');
+    // ✅ NEW: get IDs from context instead of parsing
+    const courseId = context?.courseId;
+    const sectionId = context?.sectionId;
+    const lessonId = context?.lessonId;
 
-    if (
-      courseIndex === -1 ||
-      sectionsIndex === -1 ||
-      lessonsIndex === -1 ||
-      lessonsIndex + 1 >= pathParts.length
-    ) {
-      this.logger.warn(`Could not extract IDs from public_id: ${public_id}`);
+    if (!courseId || !sectionId || !lessonId) {
+      this.logger.warn(`Missing context in Cloudinary webhook`);
       return;
     }
-
-    const courseId = pathParts[courseIndex + 1];
-    const sectionId = pathParts[sectionsIndex + 1];
-    const lessonId = pathParts[lessonsIndex + 1];
 
     if (
       !Types.ObjectId.isValid(courseId) ||
       !Types.ObjectId.isValid(sectionId) ||
       !Types.ObjectId.isValid(lessonId)
     ) {
-      this.logger.warn(`Invalid ObjectIds extracted from public_id: ${public_id}`);
+      this.logger.warn(`Invalid ObjectIds in webhook context`);
       return;
     }
 
     try {
-      // Update the specific lesson's media fields using array filters
-      const updateFields: Record<string, any> = {
-        'sections.$[s].lessons.$[l].videoUrl': secure_url,
-        'sections.$[s].lessons.$[l].videoPublicId': public_id,
-        'sections.$[s].lessons.$[l].videoDuration': duration || 0,
-      };
-
       const updated = await this.courseModel.updateOne(
         { _id: new Types.ObjectId(courseId) },
-        { $set: updateFields },
+        {
+          $set: {
+            'sections.$[s].lessons.$[l].videoUrl': secure_url,
+            'sections.$[s].lessons.$[l].videoPublicId': public_id,
+            'sections.$[s].lessons.$[l].videoDuration': duration || 0,
+          },
+        },
         {
           arrayFilters: [
             { 's._id': new Types.ObjectId(sectionId) },
@@ -129,14 +146,13 @@ export class CloudinaryService {
       );
 
       if (updated.modifiedCount > 0) {
-        this.logger.log(`Successfully updated lesson ${lessonId} with video ${public_id}`);
-        // Re-calculate the total videos and course duration hours
+        this.logger.log(`Updated lesson ${lessonId}`);
         await this.coursesService.syncMetadata(courseId);
       } else {
-        this.logger.warn(`No lesson found to update for ${lessonId}`);
+        this.logger.warn(`No lesson found for ${lessonId}`);
       }
     } catch (error) {
-      this.logger.error(`Failed to update lesson media for ${lessonId}`, error);
+      this.logger.error(`Webhook update failed`, error);
     }
   }
 

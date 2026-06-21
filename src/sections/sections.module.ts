@@ -5,11 +5,14 @@ import { SectionsController } from './sections.controller';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { CoursesModule } from '../courses/courses.module';
 
+import { EnrollmentsModule } from '../enrollments/enrollments.module';
+
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Course.name, schema: CourseSchema }]),
 
     CoursesModule,
+    EnrollmentsModule,
   ],
   controllers: [SectionsController],
   providers: [SectionsService],

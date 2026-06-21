@@ -1,9 +1,10 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
 import { Category } from './schema/category.schema';
-import { createCategoryDto } from './dto/create-category.dto';
+import { CreateCategoryDto } from './dto/create-category.dto';
+import { CategorySerializer } from './serializers/category.serializer';
 
 @Injectable()
 export class CategoriesService {
@@ -12,7 +13,7 @@ export class CategoriesService {
     private readonly categoryModel: Model<Category>,
   ) { }
 
-  async createCategory(createCategoryDto: createCategoryDto): Promise<Category> {
+  async createCategory(createCategoryDto: CreateCategoryDto): Promise<CategorySerializer> {
 
     const existingCategory = await this.categoryModel.findOne({ name: createCategoryDto.name }).exec();
 
@@ -21,10 +22,36 @@ export class CategoriesService {
     }
 
     const newCategory = new this.categoryModel(createCategoryDto);
-    return newCategory.save();
+    const saved = await newCategory.save();
+    return new CategorySerializer(saved.toObject());
   }
 
-  async findAll(): Promise<Category[]> {
-    return this.categoryModel.find().exec();
+  async findAll(): Promise<CategorySerializer[]> {
+    const categories = await this.categoryModel.find().exec();
+    return categories.map(c => new CategorySerializer(c.toObject()));
+  }
+
+  async updateCategory(id: string, updateCategoryDto: any): Promise<CategorySerializer> {
+    const updatedCategory = await this.categoryModel.findByIdAndUpdate(
+      id,
+      updateCategoryDto,
+      { new: true, runValidators: true }
+    ).exec();
+
+    if (!updatedCategory) {
+      throw new ConflictException('Category not found');
+    }
+
+    return new CategorySerializer(updatedCategory.toObject());
+  }
+
+  async removeCategory(id: string): Promise<any> {
+    const deletedCategory = await this.categoryModel.findByIdAndDelete(id).exec();
+
+    if (!deletedCategory) {
+      throw new ConflictException('Category not found');
+    }
+
+    return { success: true, message: 'Category deleted successfully' };
   }
 }

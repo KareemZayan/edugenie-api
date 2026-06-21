@@ -21,17 +21,6 @@ export class Category {
   })
   slug!: string;
 
-  @Prop({
-    required: true,
-    trim: true,
-  })
-  iconUrl!: string;
-
-  @Prop({
-    trim: true,
-  })
-  description?: string;
-
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);

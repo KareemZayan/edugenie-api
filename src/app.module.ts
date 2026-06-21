@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -13,8 +14,20 @@ import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { QuizzesModule } from './quizzes/quizzes.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
-
+import { ReviewsModule } from './reviews/reviews.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AiModule } from './ai/ai.module';
+import { PaymobModule } from './paymob/paymob.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { ProgressModule } from './progress/progress.module';
+import { NotesModule } from './notes/notes.module';
+import { InstructorModule } from './instructor/instructor.module';
+import { EarningsModule } from './earnings/earnings.module';
+import { AdminModule } from './admin/admin.module';
+import { ReportsModule } from './reports/reports.module';
+import { SuperAdminModule } from './superadmin/superadmin.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -35,6 +48,10 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
       }),
       inject: [ConfigService],
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // 1 minute
+      limit: 100, // global limit
+    }]),
     AuthModule,
     UsersModule,
     CoursesModule,
@@ -44,9 +61,22 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     CartModule,
     OrdersModule,
     EnrollmentsModule,
+    QuizzesModule,
     CloudinaryModule,
+    ReviewsModule,
+    NotificationsModule,
+    AiModule,
+    PaymobModule,
+    WebhooksModule,
+    ProgressModule,
+    NotesModule,
+    InstructorModule,
+    EarningsModule,
+    ReportsModule,
+    AdminModule,
+    SuperAdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }
