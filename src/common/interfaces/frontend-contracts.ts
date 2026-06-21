@@ -1,3 +1,9 @@
+export interface TranscriptionStatusResponse {
+  videoReady: boolean;
+  transcriptReady: boolean;
+  transcript: string | null;
+}
+
 // ── 1. Enums ────────────────────────────────────────────────
 export enum UserRole {
   STUDENT = 'student',

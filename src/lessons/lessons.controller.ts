@@ -110,4 +110,21 @@ export class LessonsController {
       user.userId,
     );
   }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Get(':lessonId/transcription-status')
+  getTranscriptionStatus(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.lessonsService.getTranscriptionStatus(
+      courseId,
+      sectionId,
+      lessonId,
+      user.userId,
+    );
+  }
 }

@@ -33,6 +33,8 @@ export class CloudinaryService {
     const paramsToSign: Record<string, any> = {
       timestamp,
       folder: folderPath,
+      resource_type: 'video',
+      raw_convert: 'google_speech',
     };
   
     if (context) {
@@ -43,8 +45,13 @@ export class CloudinaryService {
       paramsToSign,
       apiSecret as string,
     );
-  
-    return { signature, timestamp, apiKey, cloudName };
+    return {
+      signature,
+      timestamp,
+      apiKey,
+      cloudName,
+      raw_convert: 'google_speech',
+    };
   }
 
   async deleteAsset(
@@ -147,5 +154,56 @@ export class CloudinaryService {
     } catch (error) {
       this.logger.error(`Webhook update failed`, error);
     }
+  }
+
+  async getTranscriptionStatus(publicId: string): Promise<{
+    videoReady: boolean;
+    transcriptReady: boolean;
+    transcriptText: string | null;
+  }> {
+    let videoReady = false;
+    let transcriptReady = false;
+    let transcriptText: string | null = null;
+
+    try {
+      const videoResource = await cloudinary.api.resource(publicId, { resource_type: 'video' });
+      if (videoResource) {
+        videoReady = true;
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to check video resource ${publicId}:`, error?.message || error);
+    }
+
+    try {
+      const rawResource = await cloudinary.api.resource(`${publicId}.transcript`, { resource_type: 'raw' });
+      if (rawResource && rawResource.secure_url) {
+        const response = await fetch(rawResource.secure_url);
+        if (response.ok) {
+          const text = await response.text();
+          if (text && text.trim() !== '') {
+            const json = JSON.parse(text);
+            transcriptReady = true;
+            // Extract transcript text
+            if (Array.isArray(json)) {
+              transcriptText = json.map((res: any) => res.transcript || '').join(' ').trim();
+            } else if (json && json.results && Array.isArray(json.results)) {
+              const parts = json.results.map((res: any) => {
+                if (res.alternatives && res.alternatives.length > 0 && res.alternatives[0].transcript) {
+                  return res.alternatives[0].transcript;
+                }
+                return '';
+              });
+              transcriptText = parts.join(' ').trim();
+            } else {
+              transcriptText = JSON.stringify(json);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      // 404 means the transcript is not ready yet, this is normal behavior.
+    }
+
+    return { videoReady, transcriptReady, transcriptText };
   }
 }
