@@ -5,12 +5,18 @@ import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import { UserSerializer } from '../users/serializers/user.serializer';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { ExchangeToken, ExchangeTokenDocument } from './schemas/exchange-token.schema';
+import * as crypto from 'crypto';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    @InjectModel(ExchangeToken.name) private exchangeTokenModel: Model<ExchangeTokenDocument>,
   ) {}
 
   async register(createUserDto: CreateUserDto) {
@@ -26,7 +32,33 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{ token: string; user: UserSerializer }> {
+  async generateExchangeToken(userId: Types.ObjectId): Promise<string> {
+    const token = crypto.randomBytes(32).toString('hex');
+    await this.exchangeTokenModel.create({ userId, token });
+    return token;
+  }
+
+  async verifyExchangeToken(token: string): Promise<{ token: string; user: UserSerializer }> {
+    const exchangeToken = await this.exchangeTokenModel.findOneAndDelete({ token });
+    if (!exchangeToken) {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+    
+    const user = await this.usersService.findById(exchangeToken.userId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const payload = { id: user._id, role: user.role };
+    const jwtToken = this.jwtService.sign(payload);
+
+    return {
+      token: jwtToken,
+      user: new UserSerializer(user.toObject()),
+    };
+  }
+
+  async login(loginDto: LoginDto): Promise<{ token: string; user: UserSerializer; isExchangeToken: boolean }> {
     const user = await this.usersService.findByEmail(loginDto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -41,11 +73,20 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const payload = { id: user._id, role: user.role };
-    const token = this.jwtService.sign(payload);
+    let token: string;
+    let isExchangeToken = false;
+
+    if (user.role === UserRole.STUDENT) {
+      token = await this.generateExchangeToken(user._id as Types.ObjectId);
+      isExchangeToken = true;
+    } else {
+      const payload = { id: user._id, role: user.role };
+      token = this.jwtService.sign(payload);
+    }
 
     return {
       token,
+      isExchangeToken,
       user: new UserSerializer(user.toObject()),
     };
   }

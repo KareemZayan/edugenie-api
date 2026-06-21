@@ -45,6 +45,10 @@ export class UsersService {
     return this.userModel.findOne({ email }).exec();
   }
 
+  async findById(id: string | Types.ObjectId): Promise<User | null> {
+    return this.userModel.findById(id).exec();
+  }
+
   async getProfile(userId: string): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
