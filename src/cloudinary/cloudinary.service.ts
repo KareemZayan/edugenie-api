@@ -25,22 +25,21 @@ export class CloudinaryService {
 
   generateSignature(folderPath: string, context?: string) {
     const timestamp = Math.round(Date.now() / 1000);
-  
+
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
     const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-  
+
     const paramsToSign: Record<string, any> = {
       timestamp,
       folder: folderPath,
-      resource_type: 'video',
       raw_convert: 'google_speech',
     };
-  
+
     if (context) {
       paramsToSign.context = context;
     }
-  
+
     const signature = cloudinary.utils.api_sign_request(
       paramsToSign,
       apiSecret as string,
