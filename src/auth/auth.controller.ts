@@ -36,9 +36,36 @@ export class AuthController {
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
-    const { token, user: userData } = await this.authService.login(loginDto);
+    const { token, user: userData, isExchangeToken } = await this.authService.login(loginDto);
 
-    response.cookie('jwt', token, {
+    if (!isExchangeToken) {
+      response.cookie('jwt', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'none',
+        path: '/',
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        message: 'Login successful',
+        user: userData,
+        exchangeToken: token,
+      }
+    };
+  }
+
+  @Post('verify-exchange-token')
+  async verifyExchangeToken(
+    @Body('token') token: string,
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse>> {
+    const { token: jwtToken, user: userData } = await this.authService.verifyExchangeToken(token);
+
+    response.cookie('jwt', jwtToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
@@ -49,7 +76,7 @@ export class AuthController {
     return {
       success: true,
       data: {
-        message: 'Login successful',
+        message: 'Exchange token verified successfully',
         user: userData,
       }
     };

@@ -6,8 +6,14 @@ import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
+import { MongooseModule } from '@nestjs/mongoose';
+import { ExchangeToken, ExchangeTokenSchema } from './schemas/exchange-token.schema';
+
 @Module({
   imports: [
+    MongooseModule.forFeature([
+      { name: ExchangeToken.name, schema: ExchangeTokenSchema },
+    ]),
     UsersModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
