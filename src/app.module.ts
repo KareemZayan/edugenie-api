@@ -27,6 +27,7 @@ import { InstructorModule } from './instructor/instructor.module';
 import { EarningsModule } from './earnings/earnings.module';
 import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
+import { SuperAdminModule } from './superadmin/superadmin.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -73,6 +74,7 @@ import { ReportsModule } from './reports/reports.module';
     EarningsModule,
     ReportsModule,
     AdminModule,
+    SuperAdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

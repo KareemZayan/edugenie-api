@@ -705,3 +705,111 @@ export interface PlatformAnalyticsResponse {
     totalStudents: number;
   }>;
 }
+
+// -- 18. SuperAdmin Dashboard Module ------------------------------
+export interface ProcessPayoutRequest {
+  method: 'bank_transfer' | 'paypal';
+  reference: string;
+}
+
+export interface UpdatePlatformConfigRequest {
+  platformFeePercent?: number;
+  maintenanceMode?: boolean;
+  minimumPayoutThreshold?: number;
+}
+
+export interface AuditLogsFilterRequest {
+  userId?: string;
+  action?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface SuperAdminDashboardOverviewResponse {
+  systemStatus: string;
+  platformRevenue: number;
+  payoutLiability: number;
+  activeAdmins: number;
+  pendingPayouts: number;
+  criticalAlerts: Array<{
+    type: 'webhook_failure' | 'payout_backlog';
+    service?: string;
+    occurredCount?: number;
+    lastOccurredAt?: Date;
+    count?: number;
+    oldestPendingDate?: Date;
+  }>;
+}
+
+export interface AdminListItem {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  lastActiveAt: Date | null;
+  actionsThisMonth: number;
+}
+
+export interface AdminActivityItem {
+  action: string;
+  targetId: string;
+  targetLabel: string;
+  createdAt: Date;
+}
+
+export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> {}
+
+export interface PendingPayoutListItem {
+  instructorId: string;
+  instructorName: string;
+  amount: number;
+  earningsCount: number;
+  periodStart: Date;
+  periodEnd: Date;
+}
+
+export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}
+
+export interface PayoutProcessResponse {
+  instructorId: string;
+  amount: number;
+  status: string;
+  processedBy: string;
+  processedAt: Date;
+  reference: string;
+}
+
+export interface PlatformConfigResponse {
+  platformFeePercent: number;
+  instructorSharePercent: number;
+  maintenanceMode: boolean;
+  minimumPayoutThreshold: number;
+  updatedBy?: string;
+  updatedAt?: Date;
+}
+
+export interface AuditLogItem {
+  id: string;
+  action: string;
+  performedBy: { id: string; name: string };
+  targetUser: { id: string; name: string };
+  details: Record<string, unknown>;
+  createdAt: Date;
+}
+
+export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> {}
+
+export interface SystemHealthResponse {
+  apiStatus: string;
+  averageResponseTimeMs: number | null;
+  errorRateLast24h: number | null;
+  webhookFailuresLast24h: number;
+  lastWebhookFailure: {
+    service: string;
+    endpoint: string;
+    errorMessage: string;
+    occurredAt: Date;
+  } | null;
+}

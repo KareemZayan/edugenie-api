@@ -10,6 +10,7 @@ import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Earning } from '../earnings/schema/earning.schema';
 import { Course } from '../courses/schema/course.schema';
 import { Lesson } from '../lessons/schema/lesson.schema';
+import { WebhookFailureLog } from '../superadmin/schema/webhook-failure-log.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { OrderStatus } from '../common/enums/order-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
@@ -22,7 +23,8 @@ export class WebhooksController {
     @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
-    @InjectModel(Lesson.name) private readonly lessonModel: Model<Lesson>
+    @InjectModel(Lesson.name) private readonly lessonModel: Model<Lesson>,
+    @InjectModel(WebhookFailureLog.name) private readonly webhookFailureLogModel: Model<WebhookFailureLog>
   ) {}
 
   @Post('paymob')
@@ -145,48 +147,77 @@ export class WebhooksController {
       await session.abortTransaction();
       session.endSession();
       console.error('Webhook processing failed:', error);
+      
+      // Log the failure for System Health endpoint
+      try {
+        await this.webhookFailureLogModel.create({
+          service: 'paymob',
+          endpoint: '/webhooks/paymob',
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+      } catch (logError) {
+        console.error('Failed to save webhook failure log:', logError);
+      }
+
       throw new InternalServerErrorException('Failed to process webhook');
     }
   }
 
   @Post('cloudinary')
   async handleCloudinaryWebhook(@Req() req: RawBodyRequest<Request>, @Res() res: Response) {
-    // Basic Cloudinary verification (often via X-Cld-Signature header or basic auth)
-    // For simplicity, assuming payload structure is parsed and valid
-    const body = req.body;
+    try {
+      // Basic Cloudinary verification (often via X-Cld-Signature header or basic auth)
+      // For simplicity, assuming payload structure is parsed and valid
+      const body = req.body;
 
-    if (body.notification_type === 'upload' && body.duration) {
-      const publicId = body.public_id;
-      const durationSecs = Math.round(parseFloat(body.duration));
+      if (body.notification_type === 'upload' && body.duration) {
+        const publicId = body.public_id;
+        const durationSecs = Math.round(parseFloat(body.duration));
 
-      // Find the course that contains this lesson via publicId and update it
-      // Cloudinary doesn't give us lesson ID directly, so we search by videoPublicId
-      const course = await this.courseModel.findOne({ 'sections.lessons.videoPublicId': publicId });
-      
-      if (course) {
-        let durationDiff = 0;
+        // Find the course that contains this lesson via publicId and update it
+        // Cloudinary doesn't give us lesson ID directly, so we search by videoPublicId
+        const course = await this.courseModel.findOne({ 'sections.lessons.videoPublicId': publicId });
         
-        // Update the specific lesson within the nested array
-        course.sections.forEach(section => {
-          section.lessons.forEach(lesson => {
-            if (lesson.videoPublicId === publicId) {
-              const oldDuration = lesson.videoDuration || 0;
-              lesson.videoDuration = durationSecs;
-              durationDiff = durationSecs - oldDuration;
-            }
-          });
-        });
-
-        if (durationDiff !== 0) {
-          // Update course totalHours (simplified logic: adding duration in seconds, though it's called totalHours)
-          // Adjust logic based on how totalHours is calculated in the app. Let's assume it's actually totalSeconds for now.
-          course.totalHours += (durationDiff / 3600); // Assuming totalHours is in hours
+        if (course) {
+          let durationDiff = 0;
           
-          await course.save();
+          // Update the specific lesson within the nested array
+          course.sections.forEach(section => {
+            section.lessons.forEach(lesson => {
+              if (lesson.videoPublicId === publicId) {
+                const oldDuration = lesson.videoDuration || 0;
+                lesson.videoDuration = durationSecs;
+                durationDiff = durationSecs - oldDuration;
+              }
+            });
+          });
+
+          if (durationDiff !== 0) {
+            // Update course totalHours (simplified logic: adding duration in seconds, though it's called totalHours)
+            // Adjust logic based on how totalHours is calculated in the app. Let's assume it's actually totalSeconds for now.
+            course.totalHours += (durationDiff / 3600); // Assuming totalHours is in hours
+            
+            await course.save();
+          }
         }
       }
-    }
 
-    res.status(200).send();
+      res.status(200).send();
+    } catch (error) {
+      console.error('Cloudinary webhook processing failed:', error);
+      
+      // Log the failure for System Health endpoint
+      try {
+        await this.webhookFailureLogModel.create({
+          service: 'cloudinary',
+          endpoint: '/webhooks/cloudinary',
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+      } catch (logError) {
+        console.error('Failed to save webhook failure log:', logError);
+      }
+
+      throw new InternalServerErrorException('Failed to process Cloudinary webhook');
+    }
   }
 }
