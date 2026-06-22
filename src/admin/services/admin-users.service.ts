@@ -54,6 +54,7 @@ export class AdminUsersService {
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      avatar: user.avatar,
       role: user.role,
       status: user.status,
       createdAt: (user as any).createdAt,

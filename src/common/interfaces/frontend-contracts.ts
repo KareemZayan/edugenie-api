@@ -656,6 +656,7 @@ export interface AdminUserListItem {
   email: string;
   firstName: string;
   lastName: string;
+  avatar?: string;
   role: string;
   status: string;
   createdAt: Date;
