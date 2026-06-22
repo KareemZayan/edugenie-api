@@ -12,7 +12,6 @@ export class Category {
     trim: true,
   })
   name!: string;
-
 }
 
 export const CategorySchema = SchemaFactory.createForClass(Category);
