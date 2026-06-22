@@ -11,7 +11,8 @@ import {
   PendingCourseListResponse,
   CourseReviewDetailResponse,
   CourseApprovalResponse,
-  CourseRejectionResponse
+  CourseRejectionResponse,
+  RejectedCourseListResponse
 } from '../../common/interfaces/frontend-contracts';
 
 @Injectable()
@@ -47,6 +48,49 @@ export class AdminCoursesService {
         submittedAt: (course as any).updatedAt,
         totalSections: course.sections.length,
         totalLessons: course.sections.reduce((acc, sec) => acc + sec.lessons.length, 0),
+      };
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      }
+    };
+  }
+
+  async getRejectedCourses(query: PaginateQueryDto): Promise<RejectedCourseListResponse> {
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+    const skip = (page - 1) * limit;
+
+    const [courses, total] = await Promise.all([
+      this.courseModel.find({ courseStatus: CourseStatus.REJECTED })
+        .populate('instructorId', 'firstName lastName')
+        .populate('rejectedBy', 'firstName lastName')
+        .sort({ rejectedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.courseModel.countDocuments({ courseStatus: CourseStatus.REJECTED }).exec()
+    ]);
+
+    const data = courses.map((course) => {
+      const instructor = course.instructorId as any;
+      const admin = course.rejectedBy as any;
+      return {
+        courseId: course._id.toString(),
+        title: course.title,
+        instructorId: instructor?._id?.toString() || '',
+        instructorName: instructor ? `${instructor.firstName} ${instructor.lastName}` : 'Unknown',
+        rejectionReason: course.rejectionReason || 'No reason provided',
+        rejectedBy: admin ? `${admin.firstName} ${admin.lastName}` : 'Unknown Admin',
+        rejectedAt: course.rejectedAt || (course as any).updatedAt,
       };
     });
 

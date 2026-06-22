@@ -606,6 +606,18 @@ export interface PendingCourseListItem {
 
 export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> { }
 
+export interface RejectedCourseListItem {
+  courseId: string;
+  title: string;
+  instructorId: string;
+  instructorName: string;
+  rejectionReason: string;
+  rejectedBy: string;
+  rejectedAt: Date;
+}
+
+export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> { }
+
 export interface CourseReviewDetailResponse {
   courseId: string;
   title: string;

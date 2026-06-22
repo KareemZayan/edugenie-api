@@ -10,7 +10,8 @@ import {
   PendingCourseListResponse,
   CourseReviewDetailResponse,
   CourseApprovalResponse,
-  CourseRejectionResponse
+  CourseRejectionResponse,
+  RejectedCourseListResponse
 } from '../../common/interfaces/frontend-contracts';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -22,6 +23,11 @@ export class AdminCoursesController {
   @Get('pending-review')
   async getPendingReviews(@Query() query: PaginateQueryDto): Promise<PendingCourseListResponse> {
     return this.adminCoursesService.getPendingReviews(query);
+  }
+
+  @Get('rejected')
+  async getRejectedCourses(@Query() query: PaginateQueryDto): Promise<RejectedCourseListResponse> {
+    return this.adminCoursesService.getRejectedCourses(query);
   }
 
   @Get(':id/review')
