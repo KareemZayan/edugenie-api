@@ -5,6 +5,7 @@ import { CategoriesController } from './categories.controller';
 import { CategoriesService } from './categories.service';
 
 import { Category, CategorySchema } from './schema/category.schema';
+import { Course, CourseSchema } from '../courses/schema/course.schema';
 
 @Module({
   imports: [
@@ -12,6 +13,10 @@ import { Category, CategorySchema } from './schema/category.schema';
       {
         name: Category.name,
         schema: CategorySchema,
+      },
+      {
+        name: Course.name,
+        schema: CourseSchema,
       },
     ]),
   ],
