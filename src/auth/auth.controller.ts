@@ -68,9 +68,9 @@ export class AuthController {
     response.cookie('jwt', jwtToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      path: '/',
+      sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
     });
 
     return {
@@ -78,6 +78,7 @@ export class AuthController {
       data: {
         message: 'Exchange token verified successfully',
         user: userData,
+        token: jwtToken,
       }
     };
   }
