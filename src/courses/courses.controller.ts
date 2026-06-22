@@ -77,7 +77,7 @@ export class CoursesController {
   async findAll(
     @Query('skip') skip?: number,
     @Query('limit') limit?: number,
-    @Query('categorySlug') categorySlug?: string,
+    @Query('categoryId') categoryId?: string,
     @Query('level') level?: string,
     @Query('search') search?: string,
     @Query('minPrice') minPrice?: number,
@@ -86,7 +86,7 @@ export class CoursesController {
     const result = await this.coursesService.findAll({
       skip: skip ? +skip : 0,
       limit: limit ? +limit : 10,
-      categorySlug,
+      categoryId,
       level,
       search,
       minPrice: minPrice ? +minPrice : undefined,
