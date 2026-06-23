@@ -34,9 +34,25 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
   app.enableCors({
-    origin: ['https://edugenie-dashboard.vercel.app', 'http://localhost:4200', 'http://localhost:4200'],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      const allowedOrigins = [
+        process.env.ANGULAR_APP_URL,
+        process.env.NEXTJS_APP_URL,
+        // local dev
+        'http://localhost:4200',
+        'http://localhost:3000',
+        'http://localhost:3001',
+      ].filter(Boolean);
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   });
   mongoose.connection.on('connected', () => {
     Logger.log('Successfully connected to MongoDB', 'Mongoose');
