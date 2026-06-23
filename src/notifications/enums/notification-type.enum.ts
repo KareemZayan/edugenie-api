@@ -1,0 +1,4 @@
+export enum NotificationType {
+  COURSE_APPROVED = 'COURSE_APPROVED',
+  COURSE_REJECTED = 'COURSE_REJECTED',
+}

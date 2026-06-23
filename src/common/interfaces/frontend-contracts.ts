@@ -334,6 +334,14 @@ export interface NotificationResponse {
   updatedAt: Date;
 }
 
+export interface NotificationListResponse extends PaginatedResponse<NotificationResponse> {
+  unreadCount: number;
+}
+
+export interface UnreadCountResponse {
+  unreadCount: number;
+}
+
 // ── 14. Quizzes Extended Module ─────────────────────────────
 export interface SubmitAnswerRequest {
   questionId: string;

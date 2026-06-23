@@ -9,6 +9,7 @@ import { Category, CategorySchema } from '../categories/schema/category.schema';
 import { Review, ReviewSchema } from '../reviews/schema/review.schema';
 import { AuditLog, AuditLogSchema } from '../audit-logs/schemas/audit-log.schema';
 import { Notification, NotificationSchema } from '../notifications/schema/notification.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 import { AdminController } from './controllers/admin.controller';
 import { AdminCoursesController } from './controllers/admin-courses.controller';
@@ -34,6 +35,7 @@ import { AdminCategoriesService } from './services/admin-categories.service';
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: Notification.name, schema: NotificationSchema },
     ]),
+    NotificationsModule,
   ],
   controllers: [
     AdminController,
