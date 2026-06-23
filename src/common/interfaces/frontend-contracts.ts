@@ -819,3 +819,18 @@ export interface SystemHealthResponse {
     occurredAt: Date;
   } | null;
 }
+
+// ── 20. Handoff Auth Module ─────────────────────────────────
+export interface HandoffCodeResponse {
+  code: string;
+  expiresIn: number;
+}
+
+export interface RedeemCodeRequest {
+  code: string;
+}
+
+export interface RedeemCodeResponse {
+  success: boolean;
+  data: { userId: string; userRole: string; }
+}
