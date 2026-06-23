@@ -19,22 +19,26 @@ async function bootstrap() {
   app.use(helmet());
   app.use(cookieParser());
 
-
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       // forbidNonWhitelisted: true,
       transform: true,
-      transformOptions: { enableImplicitConversion: true }
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
+  app.useGlobalPipes(new ValidationPipe({ transform: true }));
 
   app.enableCors({
-    origin: ['https://edugenie-dashboard.vercel.app', 'http://localhost:4200', 'http://localhost:4200'],
+    origin: [
+      'https://edugenie-dashboard.vercel.app',
+      'http://localhost:4200',
+      'http://localhost:4200',
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
@@ -55,7 +59,10 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') || 3000;
 
   await app.listen(port);
-  Logger.log(`Application is running on: http://localhost:${port}`, 'Bootstrap');
+  Logger.log(
+    `Application is running on: http://localhost:${port}`,
+    'Bootstrap',
+  );
 }
 
 bootstrap().catch((err) => {
