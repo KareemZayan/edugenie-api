@@ -46,7 +46,7 @@ export class AuthController {
       response.cookie('jwt', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'none',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         path: '/',
         maxAge: 24 * 60 * 60 * 1000,
       });
@@ -93,7 +93,7 @@ export class AuthController {
     response.clearCookie('jwt', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       path: '/',
     });
     return {
@@ -107,37 +107,37 @@ export class AuthController {
   @Post('handoff-code')
   @UseGuards(JwtAuthGuard)
   async generateHandoffCode(
-    @CurrentUser() user: { userId: string; role: string },
-    @Res() res: express.Response
+    @CurrentUser() user: { userId?: string; id?: string; _id?: string; role: string }
   ) {
-    const userId = user.userId;
+    console.log('generateHandoffCode - user payload:', user);
+    const userId = user.userId || user.id || user._id;
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
     const code = await this.authService.generateHandoffCode(
-      userId, user.role
+      userId as string, user.role
     );
-    return res.json({ code, expiresIn: 30 });
+    return { code, expiresIn: 30 };
   }
 
   @Post('redeem-code')
   async redeemHandoffCode(
     @Body() dto: RedeemHandoffCodeDto,
-    @Res() res: express.Response
+    @Res({ passthrough: true }) res: express.Response
   ) {
     const { userId, userRole, token } = await this.authService.redeemHandoffCode(dto.code);
 
     res.cookie('jwt', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       path: '/',
       maxAge: 24 * 60 * 60 * 1000,
     });
 
-    return res.json({
+    return {
       success: true,
       data: { userId, userRole }
-    });
+    };
   }
 }

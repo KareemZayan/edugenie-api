@@ -34,7 +34,7 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
   app.enableCors({
-    origin: ['https://edugenie-dashboard.vercel.app', 'http://localhost:4200', 'http://localhost:3000'],
+    origin: ['https://edugenie-dashboard.vercel.app', 'https://edugenie-student-web.vercel.app', 'http://localhost:4200', 'http://localhost:3000'],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });

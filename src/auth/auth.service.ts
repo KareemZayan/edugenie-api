@@ -120,7 +120,7 @@ export class AuthService {
     const updated = await this.handoffCodeModel.findOneAndUpdate(
       { code, used: false, expiresAt: { $gt: new Date() } },
       { $set: { used: true } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!updated) {
       throw new UnauthorizedException('Code is no longer valid');
