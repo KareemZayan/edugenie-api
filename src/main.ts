@@ -34,11 +34,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ transform: true }));
 
   app.enableCors({
-    origin: [
-      'https://edugenie-dashboard.vercel.app',
-      'http://localhost:4200',
-      'http://localhost:4200',
-    ],
+    origin: ['https://edugenie-dashboard.vercel.app', 'https://edugenie-student-web.vercel.app', 'http://localhost:4200', 'http://localhost:3000'],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
