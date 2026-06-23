@@ -107,10 +107,10 @@ export class AuthController {
   @Post('handoff-code')
   @UseGuards(JwtAuthGuard)
   async generateHandoffCode(
-    @CurrentUser() user: { id?: string; _id?: string; role: string },
+    @CurrentUser() user: { userId: string; role: string },
     @Res() res: express.Response
   ) {
-    const userId = user.id || user._id;
+    const userId = user.userId;
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
