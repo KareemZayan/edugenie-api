@@ -8,6 +8,7 @@ import { UserSerializer } from '../users/serializers/user.serializer';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ExchangeToken, ExchangeTokenDocument } from './schemas/exchange-token.schema';
+import { HandoffCode, HandoffCodeDocument } from './schemas/handoff-code.schema';
 import * as crypto from 'crypto';
 import { UserRole } from '../common/enums/user-role.enum';
 
@@ -17,6 +18,7 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     @InjectModel(ExchangeToken.name) private exchangeTokenModel: Model<ExchangeTokenDocument>,
+    @InjectModel(HandoffCode.name) private handoffCodeModel: Model<HandoffCodeDocument>,
   ) {}
 
   async register(createUserDto: CreateUserDto) {
@@ -88,6 +90,49 @@ export class AuthService {
       token,
       isExchangeToken,
       user: new UserSerializer(user.toObject()),
+    };
+  }
+
+  async generateHandoffCode(userId: string, userRole: string): Promise<string> {
+    const code = crypto.randomBytes(16).toString('hex');
+    await this.handoffCodeModel.create({
+      code,
+      userId: new Types.ObjectId(userId),
+      userRole,
+      used: false,
+      expiresAt: new Date(Date.now() + 30 * 1000)
+    });
+    return code;
+  }
+
+  async redeemHandoffCode(code: string): Promise<{ userId: string; userRole: string; token: string }> {
+    const doc = await this.handoffCodeModel.findOne({ code });
+    if (!doc) {
+      throw new UnauthorizedException('Invalid or expired code');
+    }
+    if (doc.expiresAt < new Date()) {
+      throw new UnauthorizedException('Code has expired');
+    }
+    if (doc.used) {
+      throw new UnauthorizedException('Code has already been used');
+    }
+
+    const updated = await this.handoffCodeModel.findOneAndUpdate(
+      { code, used: false, expiresAt: { $gt: new Date() } },
+      { $set: { used: true } },
+      { new: true }
+    );
+    if (!updated) {
+      throw new UnauthorizedException('Code is no longer valid');
+    }
+
+    const payload = { id: updated.userId, role: updated.userRole };
+    const jwtToken = this.jwtService.sign(payload);
+
+    return {
+      userId: updated.userId.toString(),
+      userRole: updated.userRole,
+      token: jwtToken,
     };
   }
 }

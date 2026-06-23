@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import * as express from 'express';
@@ -14,6 +15,9 @@ import { LoginDto } from './dto/login.dto';
 import type { ApiResponse } from '../common/interfaces/api-response.interface';
 import type { AuthResponse } from './interfaces/auth-response.interface';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
+import { RedeemHandoffCodeDto } from './dto/redeem-handoff-code.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('auth')
 @UseGuards(ThrottlerGuard)
@@ -98,5 +102,42 @@ export class AuthController {
         message: 'Logout successful',
       }
     };
+  }
+
+  @Post('handoff-code')
+  @UseGuards(JwtAuthGuard)
+  async generateHandoffCode(
+    @CurrentUser() user: { id?: string; _id?: string; role: string },
+    @Res() res: express.Response
+  ) {
+    const userId = user.id || user._id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    const code = await this.authService.generateHandoffCode(
+      userId, user.role
+    );
+    return res.json({ code, expiresIn: 30 });
+  }
+
+  @Post('redeem-code')
+  async redeemHandoffCode(
+    @Body() dto: RedeemHandoffCodeDto,
+    @Res() res: express.Response
+  ) {
+    const { userId, userRole, token } = await this.authService.redeemHandoffCode(dto.code);
+
+    res.cookie('jwt', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      path: '/',
+      maxAge: 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({
+      success: true,
+      data: { userId, userRole }
+    });
   }
 }
