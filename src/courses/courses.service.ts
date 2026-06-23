@@ -47,7 +47,7 @@ export class CoursesService {
   async findAll(filterDto: {
     skip: number;
     limit: number;
-    categorySlug?: string;
+    categoryId?: string;
     level?: string;
     search?: string;
     minPrice?: number;
@@ -56,7 +56,7 @@ export class CoursesService {
     const {
       skip,
       limit,
-      categorySlug,
+      categoryId,
       level,
       search,
       minPrice,
@@ -64,11 +64,15 @@ export class CoursesService {
     } = filterDto;
 
     let categoryIdObj;
-    if (categorySlug) {
-      const category = await this.categoryModel.findOne({ slug: categorySlug }).exec();
-      if (category) {
-        categoryIdObj = category._id;
-      } else {
+    if (categoryId) {
+      try {
+        const category = await this.categoryModel.findById(categoryId).exec();
+        if (category) {
+          categoryIdObj = category._id;
+        } else {
+          return { data: [], meta: { total: 0, page: 1, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
+        }
+      } catch (error) {
         return { data: [], meta: { total: 0, page: 1, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
       }
     }
@@ -94,10 +98,11 @@ export class CoursesService {
     const [data, total] = await Promise.all([
       this.courseModel
         .find(query)
+        .select('-sections -description -requirements -goals')
         .skip(skip)
         .limit(limit)
-        .populate('instructorId', 'firstName lastName')
-        .populate('categoryId', 'name slug iconUrl')
+        .populate('instructorId', 'firstName lastName email avatar')
+        .populate('categoryId', 'name')
         .exec(),
       this.courseModel.countDocuments(query),
     ]);
@@ -188,7 +193,7 @@ export class CoursesService {
   async getRejectionReason(courseId: string, instructorId: string) {
     const course = await this.courseModel.findById(courseId).populate('rejectedBy', 'firstName lastName').exec();
     if (!course) throw new NotFoundException('Course not found');
-    
+
     // OWNERSHIP CHECK ENFORCED: verifies course belongs to the requesting instructor
     if (course.instructorId.toString() !== instructorId) {
       throw new ForbiddenException('You do not own this course');
@@ -216,8 +221,8 @@ export class CoursesService {
 
     const course = await this.courseModel
       .findById(id)
-      .populate('instructorId', 'firstName lastName bio avatar')
-      .populate('categoryId', 'name slug')
+      .populate('instructorId', 'firstName lastName bio avatar email')
+      .populate('categoryId', 'name')
       .exec();
 
     if (!course) throw new NotFoundException('Course not found');
@@ -460,7 +465,7 @@ export class CoursesService {
     const courses = await this.courseModel
       .find({ courseStatus: CourseStatus.UNDER_REVIEW })
       .populate('instructorId', 'firstName lastName avatar email')
-      .populate('categoryId', 'name slug')
+      .populate('categoryId', 'name')
       .lean()
       .exec();
     return courses.map((course: unknown) => {
@@ -481,16 +486,15 @@ export class CoursesService {
         createdAt: c.createdAt,
         category: c.categoryId ? {
           _id: c.categoryId._id?.toString() || c.categoryId.toString(),
-          name: c.categoryId.name,
-          slug: c.categoryId.slug
+          name: c.categoryId.name
         } : null,
-      instructor: c.instructorId ? {
-        _id: c.instructorId._id?.toString() || c.instructorId.toString(),
-        firstName: c.instructorId.firstName,
-        lastName: c.instructorId.lastName,
-        avatar: c.instructorId.avatar,
-        email: c.instructorId.email
-      } : null
+        instructor: c.instructorId ? {
+          _id: c.instructorId._id?.toString() || c.instructorId.toString(),
+          firstName: c.instructorId.firstName,
+          lastName: c.instructorId.lastName,
+          avatar: c.instructorId.avatar,
+          email: c.instructorId.email
+        } : null
       };
     });
   }
@@ -544,11 +548,11 @@ export class CoursesService {
         _id: new Types.ObjectId(courseId),
         courseStatus: CourseStatus.UNDER_REVIEW,
       },
-      { 
-        $set: { 
+      {
+        $set: {
           courseStatus: CourseStatus.REJECTED,
           ...(reason && { rejectionReason: reason })
-        } 
+        }
       },
       { returnDocument: 'after', runValidators: true },
     );

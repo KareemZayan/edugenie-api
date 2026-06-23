@@ -19,19 +19,19 @@ async function bootstrap() {
   app.use(helmet());
   app.use(cookieParser());
 
-
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       // forbidNonWhitelisted: true,
       transform: true,
-      transformOptions: { enableImplicitConversion: true }
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
+  app.useGlobalPipes(new ValidationPipe({ transform: true }));
 
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
@@ -71,7 +71,10 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') || 3000;
 
   await app.listen(port);
-  Logger.log(`Application is running on: http://localhost:${port}`, 'Bootstrap');
+  Logger.log(
+    `Application is running on: http://localhost:${port}`,
+    'Bootstrap',
+  );
 }
 
 bootstrap().catch((err) => {

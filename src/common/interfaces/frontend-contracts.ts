@@ -143,27 +143,16 @@ export interface ChangeRoleResponse {
 // ── 5. Categories Module ────────────────────────────────────
 export interface CreateCategoryRequest {
   name: string;
-  slug: string;
-  description?: string;
 }
 
 export interface UpdateCategoryRequest {
   name?: string;
-  slug?: string;
-  description?: string;
 }
 
 export interface CategoryResponse {
   id: string;
   name: string;
-  slug: string;
-  description?: string;
-  imageUrl?: string;
-  icon?: string;
-  isActive: boolean;
   courseCount?: number;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 // ── 6. Courses Module ───────────────────────────────────────
@@ -184,8 +173,8 @@ export interface CourseResponse {
   thumbnail: string;
   level: string;
   courseStatus: string;
-  instructor: Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'avatar'> | string;
-  category: { id: string; name: string; slug: string } | string;
+  instructor: Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'> | string;
+  category: { id: string; name: string } | string;
   goals: string[];
   requirements: string[];
   ratingAverage: number;
@@ -343,6 +332,14 @@ export interface NotificationResponse {
   type: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface NotificationListResponse extends PaginatedResponse<NotificationResponse> {
+  unreadCount: number;
+}
+
+export interface UnreadCountResponse {
+  unreadCount: number;
 }
 
 // ── 14. Quizzes Extended Module ─────────────────────────────
@@ -615,7 +612,19 @@ export interface PendingCourseListItem {
   totalLessons: number;
 }
 
-export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> {}
+export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> { }
+
+export interface RejectedCourseListItem {
+  courseId: string;
+  title: string;
+  instructorId: string;
+  instructorName: string;
+  rejectionReason: string;
+  rejectedBy: string;
+  rejectedAt: Date;
+}
+
+export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> { }
 
 export interface CourseReviewDetailResponse {
   courseId: string;
@@ -656,12 +665,13 @@ export interface AdminUserListItem {
   email: string;
   firstName: string;
   lastName: string;
+  avatar?: string;
   role: string;
   status: string;
   createdAt: Date;
 }
 
-export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> {}
+export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> { }
 
 export interface UserStatusChangeResponse {
   userId: string;
@@ -681,7 +691,7 @@ export interface ReportListItem {
   createdAt: Date;
 }
 
-export interface ReportListResponse extends PaginatedResponse<ReportListItem> {}
+export interface ReportListResponse extends PaginatedResponse<ReportListItem> { }
 
 export interface ReportResolutionResponse {
   reportId: string;
@@ -765,7 +775,7 @@ export interface AdminActivityItem {
   createdAt: Date;
 }
 
-export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> {}
+export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> { }
 
 export interface PendingPayoutListItem {
   instructorId: string;
@@ -776,7 +786,7 @@ export interface PendingPayoutListItem {
   periodEnd: Date;
 }
 
-export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}
+export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> { }
 
 export interface PayoutProcessResponse {
   instructorId: string;
@@ -805,7 +815,7 @@ export interface AuditLogItem {
   createdAt: Date;
 }
 
-export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> {}
+export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> { }
 
 export interface SystemHealthResponse {
   apiStatus: string;

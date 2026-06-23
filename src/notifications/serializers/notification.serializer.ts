@@ -6,6 +6,7 @@ export class NotificationSerializer {
   @Expose() title: string;
   @Expose() message: string;
   @Expose() isRead: boolean;
+  @Expose() courseId?: string;
   @Expose() type: string;
   @Expose() createdAt: Date;
   @Expose() updatedAt: Date;

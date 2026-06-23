@@ -4,4 +4,5 @@ export interface AuthResponse {
   message: string;
   user?: UserResponse;
   exchangeToken?: string;
+  token?: string;
 }

@@ -19,6 +19,9 @@ export class Notification {
 
   @Prop({ required: true })
   type: string;
+
+  @Prop({ required: false })
+  courseId?: string;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
