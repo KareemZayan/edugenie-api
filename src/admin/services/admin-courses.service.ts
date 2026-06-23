@@ -197,6 +197,7 @@ export class AdminCoursesService {
       'Course Approved',
       `Your course '${course.title}' was approved!`,
       NotificationType.COURSE_APPROVED,
+      course._id.toString(),
     );
 
     return {
@@ -247,6 +248,7 @@ export class AdminCoursesService {
       'Course Rejected',
       `Your course '${course.title}' was rejected. Reason: ${dto.rejectionReason}`,
       NotificationType.COURSE_REJECTED,
+      course._id.toString(),
     );
 
     return {
