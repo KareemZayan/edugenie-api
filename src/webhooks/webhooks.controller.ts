@@ -1,4 +1,4 @@
-import { Controller, Post, Req, Res, Headers, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
+import { Controller, Post, Req, Res, Headers, UnauthorizedException, InternalServerErrorException, UseInterceptors } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
@@ -14,11 +14,14 @@ import { WebhookFailureLog } from '../superadmin/schema/webhook-failure-log.sche
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { OrderStatus } from '../common/enums/order-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
 
 @Controller('webhooks')
 export class WebhooksController {
   constructor(
     private readonly paymobService: PaymobService,
+    private readonly notificationsService: NotificationsService,
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
@@ -28,6 +31,7 @@ export class WebhooksController {
   ) {}
 
   @Post('paymob')
+  @UseInterceptors()
   async handlePaymobWebhook(
     @Req() req: Request,
     @Res() res: Response,
@@ -43,11 +47,9 @@ export class WebhooksController {
     }
 
     const payload = req.body;
-    
-    // In our mock, the payload structure would have an orderId or clientSecret.
-    // For this implementation, we will assume payload.order_id matches order._id
+
     const orderIdStr = payload.order_id || payload.clientSecret?.replace('paymob_', '') || payload.obj?.order?.merchant_order_id || payload.obj?.special_reference;
-    
+
     if (!orderIdStr || !Types.ObjectId.isValid(orderIdStr)) {
       return res.status(200).send('Invalid or missing order reference in webhook');
     }
@@ -56,9 +58,8 @@ export class WebhooksController {
     session.startTransaction();
 
     try {
-      // Find the order
       const order = await this.orderModel.findById(orderIdStr).session(session);
-      
+
       if (!order) {
         await session.abortTransaction();
         session.endSession();
@@ -78,6 +79,15 @@ export class WebhooksController {
         await order.save({ session });
         await session.commitTransaction();
         session.endSession();
+
+        //  Payment Failed notification
+        await this.notificationsService.create(
+          order.studentId,
+          'Payment Failed',
+          'Your payment could not be processed. Please try again.',
+          NotificationType.PAYMENT_FAILED,
+        );
+
         return res.status(200).send('Recorded failure');
       }
 
@@ -88,7 +98,6 @@ export class WebhooksController {
 
       // 2. Create Enrollments and Earnings
       for (const item of order.items) {
-        // Find if enrollment already exists for this student + course
         let enrollment = await this.enrollmentModel.findOne({
           studentId: order.studentId,
           courseId: item.courseId
@@ -102,18 +111,15 @@ export class WebhooksController {
             sectionIds: item.itemType === PurchaseType.SECTION ? [item.sectionId] : []
           });
         } else {
-          // If upgrading from section to full_course
           if (item.itemType === PurchaseType.FULL_COURSE) {
             enrollment.type = PurchaseType.FULL_COURSE;
-          } 
-          // If adding a section
-          else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
+          } else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
             if (!enrollment.sectionIds.some(id => id.toString() === item.sectionId!.toString())) {
               enrollment.sectionIds.push(item.sectionId);
             }
           }
         }
-        
+
         // Auto-upgrade check
         if (enrollment && enrollment.type === PurchaseType.SECTION) {
           const course = await this.courseModel.findById(item.courseId).session(session);
@@ -128,7 +134,7 @@ export class WebhooksController {
         // Earnings (80% split to instructor)
         const course = await this.courseModel.findById(item.courseId).session(session);
         if (course) {
-          const earningAmount = item.price * 0.80; // 80% split
+          const earningAmount = item.price * 0.80;
           const earning = new this.earningModel({
             instructorId: course.instructorId,
             orderId: order._id,
@@ -142,13 +148,35 @@ export class WebhooksController {
       await session.commitTransaction();
       session.endSession();
 
+      //  Purchase Completed notification (to student)
+      await this.notificationsService.create(
+        order.studentId,
+        'Purchase Successful',
+        'Your purchase was completed successfully. Enjoy your course!',
+        NotificationType.PURCHASE_COMPLETED,
+      );
+
+      // New Enrollment notifications (to each course instructor)
+      for (const item of order.items) {
+        const course = await this.courseModel.findById(item.courseId);
+        if (course?.instructorId) {
+          await this.notificationsService.create(
+            course.instructorId,
+            'New Enrollment',
+            'A new student has enrolled in your course.',
+            NotificationType.NEW_ENROLLMENT,
+            item.courseId.toString(),
+          );
+        }
+      }
+
       return res.status(200).send('Webhook processed successfully');
+
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
       console.error('Webhook processing failed:', error);
-      
-      // Log the failure for System Health endpoint
+
       try {
         await this.webhookFailureLogModel.create({
           service: 'paymob',
@@ -164,24 +192,20 @@ export class WebhooksController {
   }
 
   @Post('cloudinary')
+  @UseInterceptors()
   async handleCloudinaryWebhook(@Req() req: RawBodyRequest<Request>, @Res() res: Response) {
     try {
-      // Basic Cloudinary verification (often via X-Cld-Signature header or basic auth)
-      // For simplicity, assuming payload structure is parsed and valid
       const body = req.body;
 
       if (body.notification_type === 'upload' && body.duration) {
         const publicId = body.public_id;
         const durationSecs = Math.round(parseFloat(body.duration));
 
-        // Find the course that contains this lesson via publicId and update it
-        // Cloudinary doesn't give us lesson ID directly, so we search by videoPublicId
         const course = await this.courseModel.findOne({ 'sections.lessons.videoPublicId': publicId });
-        
+
         if (course) {
           let durationDiff = 0;
-          
-          // Update the specific lesson within the nested array
+
           course.sections.forEach(section => {
             section.lessons.forEach(lesson => {
               if (lesson.videoPublicId === publicId) {
@@ -193,10 +217,7 @@ export class WebhooksController {
           });
 
           if (durationDiff !== 0) {
-            // Update course totalHours (simplified logic: adding duration in seconds, though it's called totalHours)
-            // Adjust logic based on how totalHours is calculated in the app. Let's assume it's actually totalSeconds for now.
-            course.totalHours += (durationDiff / 3600); // Assuming totalHours is in hours
-            
+            course.totalHours += (durationDiff / 3600);
             await course.save();
           }
         }
@@ -205,8 +226,7 @@ export class WebhooksController {
       res.status(200).send();
     } catch (error) {
       console.error('Cloudinary webhook processing failed:', error);
-      
-      // Log the failure for System Health endpoint
+
       try {
         await this.webhookFailureLogModel.create({
           service: 'cloudinary',

@@ -19,6 +19,10 @@ import { PaginatedResponse } from '../common/interfaces/paginated-response.inter
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Progress } from '../progress/schema/progress.schema';
 
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { UserRole } from 'src/common/enums/user-role.enum';
+
 @Injectable()
 export class CoursesService {
   constructor(
@@ -27,6 +31,7 @@ export class CoursesService {
     @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
     @InjectModel(Progress.name) private readonly progressModel: Model<Progress>,
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
+  private readonly notificationsService: NotificationsService,
   ) { }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<CourseSerializer> {
@@ -457,6 +462,22 @@ export class CoursesService {
     // Pass: Change Status
     course.courseStatus = CourseStatus.UNDER_REVIEW;
     await course.save();
+    //  notify admins
+const admins = await this.courseModel.db.collection('users').find({
+  role: { $in: [UserRole.ADMIN, UserRole.SUPERADMIN] }
+}).toArray();
+
+await Promise.all(
+  admins.map((admin) =>
+    this.notificationsService.create(
+      admin._id,
+      'New Course Submitted',
+      `Instructor submitted course: ${course.title} for review`,
+      NotificationType.COURSE_APPROVED, 
+      course._id.toString(),
+    ),
+  ),
+);
 
     return new CourseSerializer(course.toObject());
   }
