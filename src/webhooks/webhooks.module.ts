@@ -9,7 +9,7 @@ import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import { Lesson, LessonSchema } from '../lessons/schema/lesson.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { WebhookFailureLog, WebhookFailureLogSchema } from '../superadmin/schema/webhook-failure-log.schema';
-
+import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -20,7 +20,8 @@ import { WebhookFailureLog, WebhookFailureLogSchema } from '../superadmin/schema
       { name: Course.name, schema: CourseSchema },
       { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema }
     ]),
-    PaymobModule
+    PaymobModule,
+    NotificationsModule
   ],
   controllers: [WebhooksController]
 })
