@@ -29,13 +29,6 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
   const allowedOrigins = [
-    process.env.NEXTJS_APP_URL,
-    process.env.ANGULAR_APP_URL,
-    'http://localhost:3000',
-    'http://localhost:4200',
-  ].filter(Boolean) as string[];
-
-  const allowedOrigins = [
     process.env.NEXTJS_APP_URL,      // e.g. https://your-nextjs.vercel.app
     process.env.ANGULAR_APP_URL,     // e.g. https://your-angular.vercel.app
     'http://localhost:3000',
