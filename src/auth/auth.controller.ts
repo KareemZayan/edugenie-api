@@ -27,6 +27,7 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() createUserDto: CreateUserDto): Promise<ApiResponse<AuthResponse>> {
+    console.log('DEBUG (API): register endpoint received:', createUserDto);
     const result = await this.authService.register(createUserDto);
     return {
       success: true,
@@ -69,10 +70,10 @@ export class AuthController {
   ): Promise<ApiResponse<AuthResponse>> {
     const { token: jwtToken, user: userData } = await this.authService.verifyExchangeToken(token);
 
-    response.cookie('jwt', jwtToken, {
+    response.cookie('jwt', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: process.env.NODE_ENV === 'production',      // ✓ true on Vercel
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',  // ✓ 'none' on Vercel
       path: '/',
       maxAge: 24 * 60 * 60 * 1000,
     });

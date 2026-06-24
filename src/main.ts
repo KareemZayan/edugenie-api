@@ -33,27 +33,30 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
   app.useGlobalPipes(new ValidationPipe({ transform: true }));
 
+  const allowedOrigins = [
+    process.env.NEXTJS_APP_URL,      // e.g. https://your-nextjs.vercel.app
+    process.env.ANGULAR_APP_URL,     // e.g. https://your-angular.vercel.app
+    'http://localhost:3000',
+    'http://localhost:4200',
+  ].filter(Boolean);
+
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      const allowedOrigins = [
-        process.env.ANGULAR_APP_URL,
-        process.env.NEXTJS_APP_URL,
-        // local dev
-        'http://localhost:4200',
-        'http://localhost:3000',
-        'http://localhost:3001',
-      ].filter(Boolean);
-
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (Postman, server-to-server)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS blocked: ${origin}`));
       }
     },
-    credentials: true,
+    credentials: true,          // ← CRITICAL: allows cookies cross-origin
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
+
+  app.setGlobalPrefix('api');   // all routes become /api/auth, /api/users etc.
+  await app.listen(process.env.PORT || 3001);
   mongoose.connection.on('connected', () => {
     Logger.log('Successfully connected to MongoDB', 'Mongoose');
   });
@@ -70,7 +73,8 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3000;
 
-  await app.listen(port);
+  app.setGlobalPrefix('api');
+  await app.listen(process.env.PORT || 3001);
   Logger.log(
     `Application is running on: http://localhost:${port}`,
     'Bootstrap',
