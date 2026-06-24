@@ -68,12 +68,14 @@ export class AuthController {
     @Body('token') token: string,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
+    console.log('verify-exchange-token called with token:', token);
     const { token: jwtToken, user: userData } = await this.authService.verifyExchangeToken(token);
+    console.log('jwtToken to be set in cookie:', jwtToken);
 
-    response.cookie('jwt', token, {
+    response.cookie('jwt', jwtToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',      // ✓ true on Vercel
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',  // ✓ 'none' on Vercel
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       path: '/',
       maxAge: 24 * 60 * 60 * 1000,
     });
