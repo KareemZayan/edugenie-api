@@ -57,14 +57,42 @@ export class UsersService {
     return new UserSerializer(user.toObject());
   }
 
-  async updateProfile(userId: string, updateUserDto: UpdateUserDto): Promise<UserSerializer> {
+  async updateProfile(userId: string, updateUserDto: UpdateUserDto, file?: any): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    // Avatar update and deletion flow
-    if (updateUserDto.avatar !== undefined) {
+    if (file) {
+      try {
+        const result: any = await new Promise((resolve, reject) => {
+          cloudinary.uploader.upload_stream(
+            { folder: 'avatars' },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            }
+          ).end(file.buffer);
+        });
+
+        if (user.avatarPublicId) {
+          try {
+            await cloudinary.uploader.destroy(user.avatarPublicId);
+          } catch (error) {
+            Logger.error(
+              `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
+              error instanceof Error ? error.stack : 'Unknown error',
+              'UsersService'
+            );
+          }
+        }
+
+        updateUserDto.avatar = result.secure_url;
+        updateUserDto.avatarPublicId = result.public_id;
+      } catch (error) {
+        throw new BadRequestException('Failed to upload image');
+      }
+    } else if (updateUserDto.avatar !== undefined) {
       // Check if user already has an avatar public ID
       if (user.avatarPublicId) {
         const isAvatarDeleted = updateUserDto.avatar === null;

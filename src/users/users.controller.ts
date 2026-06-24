@@ -5,7 +5,10 @@ import {
   Body,
   UseGuards,
   Param,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -37,14 +40,17 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @Patch('profile')
+  @UseInterceptors(FileInterceptor('profileImage'))
   async updateProfile(
     @CurrentUser() user: { userId: string },
     @Body() updateUserDto: UpdateUserDto,
+    @UploadedFile() file?: any,
   ): Promise<ApiResponse<UserResponse>> {
     const userId = user.userId;
     const updatedProfile = await this.usersService.updateProfile(
       userId,
       updateUserDto,
+      file,
     );
 
     return {
