@@ -8,15 +8,18 @@ import { QuizAttempt } from '../quizzes/schema/quiz-attempt.schema';
 import { TrackProgressDto } from './dto/track-progress.dto';
 import { ProgressResponse } from './interfaces/progress-response.interface';
 import { progressStateEnum } from '../common/enums/progress.enum';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
 
 @Injectable()
 export class ProgressService {
   constructor(
-    @InjectModel(Progress.name) private progressModel: Model<Progress>,
-    @InjectModel(Course.name) private courseModel: Model<Course>,
-    @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
-    @InjectModel(QuizAttempt.name) private quizAttemptModel: Model<QuizAttempt>,
-  ) { }
+  @InjectModel(Progress.name) private progressModel: Model<Progress>,
+  @InjectModel(Course.name) private courseModel: Model<Course>,
+  @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
+  @InjectModel(QuizAttempt.name) private quizAttemptModel: Model<QuizAttempt>,
+  private readonly notificationsService: NotificationsService,
+) {}
 
   async trackProgress(dto: TrackProgressDto, studentId: string): Promise<ProgressResponse> {
     const { lessonId, watchedDuration, isCompleted } = dto;
@@ -114,6 +117,22 @@ export class ProgressService {
       }
     }
 
+    // 6. Check course completion (last section, no quiz)
+    if (sectionCompleted && !quizRequired) {
+      const lastSectionIndex = course.sections.length - 1;
+      const isLastSection = course.sections[lastSectionIndex]._id.toString() === foundSection._id.toString();
+
+      if (isLastSection) {
+        await this.notificationsService.create(
+          studentId,
+          'Course Completed!',
+          `Congratulations! You have completed "${course.title}".`,
+          NotificationType.COURSE_COMPLETED,
+          course._id.toString(),
+        );
+      }
+    }
+
     return {
       lessonState: updatedProgress.lessonState as progressStateEnum,
       nextLessonUnlocked,
@@ -164,9 +183,19 @@ export class ProgressService {
       }
     }
 
+   if (isCourseCompleted) {
+      await this.notificationsService.create(
+        studentId,
+        'Course Completed!',
+        `Congratulations! You have completed "${course.title}".`,
+        NotificationType.COURSE_COMPLETED,
+        course._id.toString(),
+      );
+    }
+
     return {
       nextSectionUnlocked,
-      isCourseCompleted
+      isCourseCompleted,
     };
   }
 }

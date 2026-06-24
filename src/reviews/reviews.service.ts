@@ -7,14 +7,16 @@ import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ReviewSerializer } from './serializers/review.serializer';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
-
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
 @Injectable()
 export class ReviewsService {
-  constructor(
-    @InjectModel(Review.name) private readonly reviewModel: Model<Review>,
-    @InjectModel(Course.name) private readonly courseModel: Model<Course>,
-    @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
-  ) {}
+ constructor(
+  @InjectModel(Review.name) private readonly reviewModel: Model<Review>,
+  @InjectModel(Course.name) private readonly courseModel: Model<Course>,
+  @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
+  private readonly notificationsService: NotificationsService,
+) {}
 
   async getCourseReviews(courseId: string, page: number, limit: number, userId?: string) {
     if (!Types.ObjectId.isValid(courseId)) {
@@ -96,8 +98,42 @@ export class ReviewsService {
 
     // 4. Update Course Rating Metadata
     await this.updateCourseRating(dto.courseId);
+  const populatedReview = await newReview.populate('studentId', 'firstName lastName avatar');
 
-    const populatedReview = await newReview.populate('studentId', 'firstName lastName avatar');
+  // 5. Fetch course to get instructorId + title
+  const course = await this.courseModel
+    .findById(dto.courseId)
+    .select('instructorId title')
+    .exec();
+
+  if (course) {
+    const student = populatedReview.studentId as unknown as {
+      firstName: string;
+      lastName: string;
+    };
+    const studentName = `${student.firstName} ${student.lastName}`;
+
+    // NEW_REVIEW notification → instructor
+    await this.notificationsService.create(
+      course.instructorId,
+      'New Review Posted',
+      `${studentName} left a ${dto.rating}-star review on your course "${course.title}".`,
+      NotificationType.NEW_REVIEW,
+      dto.courseId,
+    );
+
+    // LOW_RATING notification → instructor (rating ≤ 2)
+    if (dto.rating <= 2) {
+      await this.notificationsService.create(
+        course.instructorId,
+        'Low Rating Alert',
+        `Your course "${course.title}" received a ${dto.rating}-star review. Consider reviewing student feedback.`,
+        NotificationType.LOW_RATING,
+        dto.courseId,
+      );
+    }
+  }
+  
     return new ReviewSerializer(((populatedReview.toObject ? populatedReview.toObject() : populatedReview) as unknown) as Record<string, unknown>);
   }
 

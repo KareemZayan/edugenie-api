@@ -157,6 +157,7 @@ export class WebhooksController {
       );
 
       // New Enrollment notifications (to each course instructor)
+      // New Enrollment notifications (to each course instructor)
       for (const item of order.items) {
         const course = await this.courseModel.findById(item.courseId);
         if (course?.instructorId) {
@@ -167,11 +168,21 @@ export class WebhooksController {
             NotificationType.NEW_ENROLLMENT,
             item.courseId.toString(),
           );
+
+          // Earning Recorded notification
+          const earningAmount = item.price * 0.80;
+          await this.notificationsService.create(
+            course.instructorId,
+            'Earning Recorded',
+            `You earned ${earningAmount.toFixed(2)} EGP from a new purchase.`,
+            NotificationType.EARNING_RECORDED,
+            item.courseId.toString(),
+          );
         }
       }
 
       return res.status(200).send('Webhook processed successfully');
-
+      
     } catch (error) {
       await session.abortTransaction();
       session.endSession();

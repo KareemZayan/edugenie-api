@@ -6,6 +6,7 @@ import { Progress, ProgressSchema } from './schema/progress.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
 import { QuizAttempt, QuizAttemptSchema } from '../quizzes/schema/quiz-attempt.schema';
+import { NotificationsModule } from '../notifications/notifications.module'; // ← ADD
 
 @Module({
   imports: [
@@ -14,7 +15,8 @@ import { QuizAttempt, QuizAttemptSchema } from '../quizzes/schema/quiz-attempt.s
       { name: Course.name, schema: CourseSchema },
       { name: Quiz.name, schema: QuizSchema },
       { name: QuizAttempt.name, schema: QuizAttemptSchema },
-    ])
+    ]),
+    NotificationsModule, 
   ],
   controllers: [ProgressController],
   providers: [ProgressService],
