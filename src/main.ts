@@ -35,6 +35,13 @@ async function bootstrap() {
     'http://localhost:4200',
   ].filter(Boolean) as string[];
 
+  const allowedOrigins = [
+    process.env.NEXTJS_APP_URL,      // e.g. https://your-nextjs.vercel.app
+    process.env.ANGULAR_APP_URL,     // e.g. https://your-angular.vercel.app
+    'http://localhost:3000',
+    'http://localhost:4200',
+  ].filter(Boolean);
+
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin) return callback(null, true);
@@ -44,7 +51,7 @@ async function bootstrap() {
         callback(new Error(`CORS blocked: ${origin}`));
       }
     },
-    credentials: true,
+    credentials: true,          // ← CRITICAL: allows cookies cross-origin
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
