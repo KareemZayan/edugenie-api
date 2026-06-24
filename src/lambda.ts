@@ -1,18 +1,23 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 import { NestFactory, Reflector } from '@nestjs/core';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
+import { ExpressAdapter } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { ValidationPipe, ClassSerializerInterceptor, Logger } from '@nestjs/common';
-import helmet from 'helmet';
-import cookieParser from 'cookie-parser';
-import { ConfigService } from '@nestjs/config';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { MongoExceptionFilter } from './common/filters/mongo-exception.filter';
-import mongoose from 'mongoose';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import express from 'express';
+import { IncomingMessage, ServerResponse } from 'http';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+let cachedApp: express.Express | null = null;
+
+async function createApp(): Promise<express.Express> {
+  const expressApp = express();
+  const adapter = new ExpressAdapter(expressApp);
+
+  const app = await NestFactory.create(AppModule, adapter, { rawBody: true });
 
   app.use(helmet());
   app.use(cookieParser());
@@ -49,29 +54,17 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  app.setGlobalPrefix('api');   // ← only once
+  app.setGlobalPrefix('api');
 
-  const config = new DocumentBuilder()
-    .setTitle('EduGenie API')
-    .setDescription('The EduGenie API documentation')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  await app.init();   // ← init() not listen() — no HTTP server, Vercel handles that
 
-  const configService = app.get(ConfigService);
-  const port = configService.get<number>('PORT') || 3001;
-
-  await app.listen(port);       // ← only once
-
-  mongoose.connection.on('connected', () => {
-    Logger.log('Successfully connected to MongoDB', 'Mongoose');
-  });
-
-  Logger.log(`Application running on: http://localhost:${port}`, 'Bootstrap');
+  return expressApp;
 }
 
-bootstrap().catch((err) => {
-  Logger.error('Error during bootstrap', err, 'Bootstrap');
-});
+// Vercel calls this function on every request
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  if (!cachedApp) {
+    cachedApp = await createApp();  // cold start — cached for warm invocations
+  }
+  cachedApp(req, res);
+}
