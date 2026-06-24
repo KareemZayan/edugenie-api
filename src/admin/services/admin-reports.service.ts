@@ -10,16 +10,19 @@ import { ReportStatus } from '../../common/enums/report-status.enum';
 import { ReportResolvedAction } from '../../common/enums/report-action.enum';
 import { ReportType } from '../../common/enums/report-type.enum';
 import { ReportListResponse, ReportResolutionResponse } from '../../common/interfaces/frontend-contracts';
+import { Notification, NotificationDocument } from '../../notifications/schema/notification.schema';
+import { NotificationType } from '../../notifications/enums/notification-type.enum';
 
 @Injectable()
 export class AdminReportsService {
   private readonly logger = new Logger(AdminReportsService.name);
 
   constructor(
-    @InjectModel(Report.name) private reportModel: Model<ReportDocument>,
-    @InjectModel(Review.name) private reviewModel: Model<ReviewDocument>,
-    @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
-  ) {}
+  @InjectModel(Report.name) private reportModel: Model<ReportDocument>,
+  @InjectModel(Review.name) private reviewModel: Model<ReviewDocument>,
+  @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
+  @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+) {}
 
   async getReports(query: AdminReportsFilterDto): Promise<ReportListResponse> {
     const page = query.page || 1;
@@ -93,16 +96,12 @@ export class AdminReportsService {
 
     if (dto.action === ReportResolvedAction.CONTENT_REMOVED) {
       if (report.type === ReportType.REVIEW) {
-        // Concrete removal action for review
         try {
           await this.reviewModel.findByIdAndDelete(report.targetId).exec();
         } catch (error) {
           this.logger.error(`Failed to delete review ${report.targetId} during report resolution`, error);
         }
       } else {
-        // NOTE: content_removed for type 'payment' or 'course' requires coordination 
-        // with the respective modules — implementing the report status update only, 
-        // flag for product decision on the actual remediation action.
         this.logger.warn(`Action 'content_removed' requested for type '${report.type}' but not concretely implemented yet.`);
       }
     }
@@ -110,13 +109,24 @@ export class AdminReportsService {
     await this.auditLogModel.create({
       action: 'REPORT_RESOLVED',
       performedBy: new Types.ObjectId(adminId),
-      targetUser: report.reportedBy as any, // Might be null for system generated
+      targetUser: report.reportedBy as any,
       details: {
         reportId: report._id.toString(),
         resolution: dto.resolution,
         actionTaken: dto.action,
       },
     });
+
+    // 👇 NEW — notify the student who filed the report
+    if (report.reportedBy) {
+      await this.notificationModel.create({
+        userId: report.reportedBy,
+        title: 'Report Resolved',
+        message: `Your report has been reviewed and resolved: ${dto.resolution}`,
+        type: NotificationType.REPORT_RESOLVED,
+        isRead: false,
+      });
+    }
 
     return {
       reportId: report._id.toString(),
