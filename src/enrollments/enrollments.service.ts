@@ -5,14 +5,16 @@ import { Enrollment } from './schema/enrollment.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { Course } from '../courses/schema/course.schema';
 import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
 
 @Injectable()
 export class EnrollmentsService {
-  constructor(
-    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
-    // We need the Course model to check how many total lessons exist!
-    @InjectModel(Course.name) private courseModel: Model<Course>,
-  ) { }
+ constructor(
+  @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
+  @InjectModel(Course.name) private courseModel: Model<Course>,
+  private readonly notificationsService: NotificationsService,
+) {}
 
   async hasDuplicate(studentId: string, itemType: PurchaseType, courseId: string, sectionId?: string): Promise<boolean> {
     const enrollment = await this.enrollmentModel.findOne({
@@ -183,9 +185,23 @@ export class EnrollmentsService {
     enrollment.progressPercentage = Math.min(Math.round(rawPercentage), 100);
 
     // G. If they hit 100%, trigger graduation!
+    // G. If they hit 100%, trigger graduation!
     if (enrollment.progressPercentage === 100) {
       enrollment.isCourseCompleted = true;
-      // Note: In Sprint 4, this is where we will trigger the Certificate Generation!
+
+      // Fetch course title for the notification
+      const fullCourse = await this.courseModel
+        .findById(courseId)
+        .select('title')
+        .exec();
+
+      await this.notificationsService.create(
+        studentId,
+        'Certificate Earned!',
+        `You have earned a certificate for completing "${fullCourse?.title}".`,
+        NotificationType.CERTIFICATE_EARNED,
+        courseId,
+      );
     }
 
     await enrollment.save();
