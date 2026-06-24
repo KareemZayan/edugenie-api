@@ -11,6 +11,8 @@ import { Earning, EarningSchema } from '../orders/schema/earning.schema';
 import { Category, CategorySchema } from '../categories/schema/category.schema';
 import { ProgressModule } from '../progress/progress.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
+import { NotificationsService } from 'src/notifications/notifications.service';
+import { NotificationsModule } from 'src/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
     }),
     ProgressModule,
     EnrollmentsModule,
+    NotificationsModule
   ],
   controllers: [CoursesController, InstructorCoursesController],
   providers: [CoursesService],
