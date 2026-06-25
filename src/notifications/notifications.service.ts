@@ -12,12 +12,14 @@ import {
   NotificationListResponse,
   UnreadCountResponse,
 } from '../common/interfaces/frontend-contracts';
+import { PusherService } from '../pusher/pusher.service';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<NotificationDocument>,
+    private readonly pusherService: PusherService,
   ) {}
 
   async markAsRead(
@@ -60,7 +62,8 @@ export class NotificationsService {
     type: NotificationType,
     courseId?: string,
   ): Promise<NotificationDocument> {
-    return this.notificationModel.create({
+    const userIdStr = userId.toString();
+    const notification = await this.notificationModel.create({
       userId: new Types.ObjectId(userId),
       title,
       message,
@@ -68,6 +71,15 @@ export class NotificationsService {
       courseId,
       isRead: false,
     });
+
+    // 👇 push it in real time to the user's channel
+    await this.pusherService.trigger(
+      `user-${userIdStr}`,
+      'new-notification',
+      new NotificationSerializer(notification.toObject() as any),
+    );
+
+    return notification;
   }
 
   async getNotifications(
@@ -82,7 +94,7 @@ export class NotificationsService {
     const [notifications, total, unreadCount] = await Promise.all([
       this.notificationModel
         .find({ userId: userObjectId })
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1 }) 
         .skip(skip)
         .limit(limit)
         .exec(),
