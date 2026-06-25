@@ -12,7 +12,13 @@ export class Earning {
   @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
   orderId: Types.ObjectId;
 
-  @Prop({ required: true })
+  @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
+  courseId: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, default: null })
+  sectionId: Types.ObjectId | null;
+
+  @Prop({ required: true, min: 0 })
   amount: number;
 
   @Prop({ type: String, enum: EarningStatus, default: EarningStatus.PENDING })

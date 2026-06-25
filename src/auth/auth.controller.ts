@@ -18,20 +18,24 @@ import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { RedeemHandoffCodeDto } from './dto/redeem-handoff-code.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Req } from '@nestjs/common'; // add to existing import
+import { extractClientIp } from './utils/login-device.util';
 
 @Controller('auth')
 @UseGuards(ThrottlerGuard)
 @Throttle({ default: { limit: 20, ttl: 60000 } }) // 5 requests per 15 mins
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService) {}
 
   @Post('register')
-  async register(@Body() createUserDto: CreateUserDto): Promise<ApiResponse<AuthResponse>> {
+  async register(
+    @Body() createUserDto: CreateUserDto,
+  ): Promise<ApiResponse<AuthResponse>> {
     console.log('DEBUG (API): register endpoint received:', createUserDto);
     const result = await this.authService.register(createUserDto);
     return {
       success: true,
-      data: { message: result.message }
+      data: { message: result.message },
     };
   }
 
@@ -39,9 +43,17 @@ export class AuthController {
   @Post('login')
   async login(
     @Body() loginDto: LoginDto,
+    @Req() request: express.Request,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
-    const { token, user: userData, isExchangeToken } = await this.authService.login(loginDto);
+    const ip = extractClientIp(request);
+    const userAgent = request.headers['user-agent'] || '';
+
+    const {
+      token,
+      user: userData,
+      isExchangeToken,
+    } = await this.authService.login(loginDto, ip, userAgent);
 
     if (!isExchangeToken) {
       response.cookie('jwt', token, {
@@ -59,7 +71,7 @@ export class AuthController {
         message: 'Login successful',
         user: userData,
         exchangeToken: token,
-      }
+      },
     };
   }
 
@@ -69,7 +81,8 @@ export class AuthController {
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
     console.log('verify-exchange-token called with token:', token);
-    const { token: jwtToken, user: userData } = await this.authService.verifyExchangeToken(token);
+    const { token: jwtToken, user: userData } =
+      await this.authService.verifyExchangeToken(token);
     console.log('jwtToken to be set in cookie:', jwtToken);
 
     response.cookie('jwt', jwtToken, {
@@ -86,7 +99,7 @@ export class AuthController {
         message: 'Exchange token verified successfully',
         user: userData,
         token: jwtToken,
-      }
+      },
     };
   }
 
@@ -103,14 +116,20 @@ export class AuthController {
       success: true,
       data: {
         message: 'Logout successful',
-      }
+      },
     };
   }
 
   @Post('handoff-code')
   @UseGuards(JwtAuthGuard)
   async generateHandoffCode(
-    @CurrentUser() user: { userId?: string; id?: string; _id?: string; role: string }
+    @CurrentUser()
+    user: {
+      userId?: string;
+      id?: string;
+      _id?: string;
+      role: string;
+    },
   ) {
     console.log('generateHandoffCode - user payload:', user);
     const userId = user.userId || user.id || user._id;
@@ -118,7 +137,8 @@ export class AuthController {
       throw new UnauthorizedException('User ID not found');
     }
     const code = await this.authService.generateHandoffCode(
-      userId as string, user.role
+      userId as string,
+      user.role,
     );
     return { code, expiresIn: 30 };
   }
@@ -126,9 +146,10 @@ export class AuthController {
   @Post('redeem-code')
   async redeemHandoffCode(
     @Body() dto: RedeemHandoffCodeDto,
-    @Res({ passthrough: true }) res: express.Response
+    @Res({ passthrough: true }) res: express.Response,
   ) {
-    const { userId, userRole, token } = await this.authService.redeemHandoffCode(dto.code);
+    const { userId, userRole, token } =
+      await this.authService.redeemHandoffCode(dto.code);
 
     res.cookie('jwt', token, {
       httpOnly: true,
@@ -140,7 +161,7 @@ export class AuthController {
 
     return {
       success: true,
-      data: { userId, userRole }
+      data: { userId, userRole },
     };
   }
 }

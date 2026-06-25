@@ -18,8 +18,9 @@ export class NotificationsService {
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<NotificationDocument>,
-    
   ) {}
+
+
 
   async markAsRead(
     notificationId: string,

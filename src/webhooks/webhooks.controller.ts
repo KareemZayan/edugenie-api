@@ -178,6 +178,8 @@ export class WebhooksController {
           const earning = new this.earningModel({
             instructorId: course.instructorId,
             orderId: order._id,
+            courseId: item.courseId,
+            sectionId: item.sectionId ?? null,
             amount: earningAmount,
             status: EarningStatus.PENDING,
           });

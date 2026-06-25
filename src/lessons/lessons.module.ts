@@ -8,7 +8,7 @@ import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { ProgressModule } from '../progress/progress.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { StudentLessonsController } from './student-lessons.controller';
-
+import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Course.name, schema: CourseSchema }]),
@@ -16,6 +16,7 @@ import { StudentLessonsController } from './student-lessons.controller';
     CloudinaryModule,
     ProgressModule,
     EnrollmentsModule,
+    NotificationsModule,
   ],
   controllers: [LessonsController, StudentLessonsController],
   providers: [LessonsService],

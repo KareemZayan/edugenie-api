@@ -12,7 +12,12 @@ export class Enrollment {
   @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
   courseId: Types.ObjectId;
 
-  @Prop({ type: String, enum: PurchaseType, required: true, default: PurchaseType.FULL_COURSE })
+  @Prop({
+    type: String,
+    enum: PurchaseType,
+    required: true,
+    default: PurchaseType.FULL_COURSE,
+  })
   type: PurchaseType;
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Section' }], default: [] })
@@ -28,6 +33,15 @@ export class Enrollment {
 
   @Prop({ default: false })
   isCourseCompleted: boolean;
+
+  @Prop({ type: Date, default: Date.now })
+  lastActivityAt: Date;
+
+  @Prop({ type: Date, default: null })
+  lastInactivityNotifiedAt: Date | null;
+
+  @Prop({ default: false })
+  milestone50Notified: boolean;
 }
 
 export const EnrollmentSchema = SchemaFactory.createForClass(Enrollment);

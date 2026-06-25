@@ -16,6 +16,8 @@ import { Progress } from '../progress/schema/progress.schema';
 import { ForbiddenException } from '@nestjs/common';
 import { SectionSerializer } from '../sections/serializers/section.serializer';
 import { LessonSerializer } from './serializers/lesson.serializer';
+import { NotificationType } from 'src/notifications/enums/notification-type.enum';
+import { NotificationsService } from 'src/notifications/notifications.service';
 
 @Injectable()
 export class LessonsService {
@@ -25,6 +27,7 @@ export class LessonsService {
     private coursesService: CoursesService,
     private cloudinaryService: CloudinaryService,
     private enrollmentsService: EnrollmentsService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async addLesson(
@@ -49,7 +52,35 @@ export class LessonsService {
       throw new NotFoundException('Invalid Course, Section, or Ownership');
 
     await this.coursesService.syncMetadata(courseId);
-    return updated.toObject().sections.map((sec: any) => new SectionSerializer(sec));
+
+    // New Content Published — notify students with access to this section
+    const studentIds =
+      await this.enrollmentsService.getStudentIdsWithSectionAccess(
+        courseId,
+        sectionId,
+      );
+
+    for (const studentId of studentIds) {
+      try {
+        await this.notificationsService.create(
+          studentId,
+          'New Lesson Available',
+          `A new lesson, "${createLessonDto.title}", was added to "${updated.title}".`,
+          NotificationType.NEW_CONTENT_PUBLISHED,
+          courseId,
+        );
+      } catch (error) {
+        // Don't let one bad notification block the rest of the class
+        console.error(
+          `Failed to notify student ${studentId} of new lesson:`,
+          error,
+        );
+      }
+    }
+
+    return updated
+      .toObject()
+      .sections.map((sec: any) => new SectionSerializer(sec));
   }
 
   async getLessonById(
@@ -58,26 +89,34 @@ export class LessonsService {
     lessonId: string,
     instructorId: string,
   ) {
-    const lesson = await this.courseModel.findOne({
-      _id: new Types.ObjectId(courseId),
-      instructorId: new Types.ObjectId(instructorId),
-      'sections._id': new Types.ObjectId(sectionId),
-      'sections.lessons._id': new Types.ObjectId(lessonId),
-    }, { 'sections.$': 1, 'sections.$.lessons': 1 })
+    const lesson = await this.courseModel
+      .findOne(
+        {
+          _id: new Types.ObjectId(courseId),
+          instructorId: new Types.ObjectId(instructorId),
+          'sections._id': new Types.ObjectId(sectionId),
+          'sections.lessons._id': new Types.ObjectId(lessonId),
+        },
+        { 'sections.$': 1, 'sections.$.lessons': 1 },
+      )
       .exec();
 
     if (!lesson)
       throw new NotFoundException('Invalid Course, Section, or Lesson');
 
-    const found = lesson.sections[0].lessons.find((l) => l._id.toString() === lessonId);
+    const found = lesson.sections[0].lessons.find(
+      (l) => l._id.toString() === lessonId,
+    );
     return found ? new LessonSerializer(found.toObject() as any) : null;
   }
 
   async findOneForStudent(lessonId: string, studentId: string) {
-    const course = await this.courseModel.findOne(
-      { 'sections.lessons._id': new Types.ObjectId(lessonId) },
-      { 'sections.$': 1 }
-    ).exec();
+    const course = await this.courseModel
+      .findOne(
+        { 'sections.lessons._id': new Types.ObjectId(lessonId) },
+        { 'sections.$': 1 },
+      )
+      .exec();
 
     if (!course || !course.sections || course.sections.length === 0) {
       throw new NotFoundException('Lesson not found');
@@ -90,20 +129,28 @@ export class LessonsService {
       throw new NotFoundException('Lesson not found');
     }
 
-    const hasAccess = await this.enrollmentsService.canAccessLesson(studentId, lessonId);
+    const hasAccess = await this.enrollmentsService.canAccessLesson(
+      studentId,
+      lessonId,
+    );
     if (!hasAccess) {
-      throw new ForbiddenException('You must be enrolled in this course to view this lesson');
+      throw new ForbiddenException(
+        'You must be enrolled in this course to view this lesson',
+      );
     }
 
     await this.progressModel.findOneAndUpdate(
-      { studentId: new Types.ObjectId(studentId), lessonId: new Types.ObjectId(lessonId) },
+      {
+        studentId: new Types.ObjectId(studentId),
+        lessonId: new Types.ObjectId(lessonId),
+      },
       {
         $set: {
           lastWatchedAt: new Date(),
           courseId: course._id,
-        }
+        },
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     return {
@@ -161,7 +208,9 @@ export class LessonsService {
       );
 
     await this.coursesService.syncMetadata(courseId);
-    return updated.toObject().sections.map((sec: any) => new SectionSerializer(sec));
+    return updated
+      .toObject()
+      .sections.map((sec: any) => new SectionSerializer(sec));
   }
 
   async removeLesson(
@@ -198,48 +247,74 @@ export class LessonsService {
     lessonId: string,
     instructorId: string,
   ) {
-    const course = await this.courseModel.findOne({
-      _id: new Types.ObjectId(courseId),
-      instructorId: new Types.ObjectId(instructorId),
-      'sections._id': new Types.ObjectId(sectionId),
-    }).exec();
+    const course = await this.courseModel
+      .findOne({
+        _id: new Types.ObjectId(courseId),
+        instructorId: new Types.ObjectId(instructorId),
+        'sections._id': new Types.ObjectId(sectionId),
+      })
+      .exec();
 
     if (!course) {
       throw new NotFoundException('Course, Section not found or Unauthorized');
     }
 
-    const section = course.sections.find((s: any) => s._id.toString() === sectionId);
-    const lesson = section?.lessons.find((l: any) => l._id.toString() === lessonId);
+    const section = course.sections.find(
+      (s: any) => s._id.toString() === sectionId,
+    );
+    const lesson = section?.lessons.find(
+      (l: any) => l._id.toString() === lessonId,
+    );
 
     if (!lesson) {
       throw new NotFoundException('Lesson not found');
     }
 
     if (lesson.transcript) {
-      return { transcriptReady: true, transcript: lesson.transcript, videoReady: true };
+      return {
+        transcriptReady: true,
+        transcript: lesson.transcript,
+        videoReady: true,
+      };
     }
 
     if (!lesson.videoPublicId) {
       return { videoReady: false, transcriptReady: false, transcript: null };
     }
 
-    const status = await this.cloudinaryService.getTranscriptionStatus(lesson.videoPublicId);
+    const status = await this.cloudinaryService.getTranscriptionStatus(
+      lesson.videoPublicId,
+    );
 
     if (status.transcriptReady && status.transcriptText !== null) {
-      await this.courseModel.updateOne(
-        { _id: new Types.ObjectId(courseId) },
-        { $set: { 'sections.$[s].lessons.$[l].transcript': status.transcriptText } },
-        {
-          arrayFilters: [
-            { 's._id': new Types.ObjectId(sectionId) },
-            { 'l._id': new Types.ObjectId(lessonId) },
-          ],
-        }
-      ).exec();
-      return { videoReady: true, transcriptReady: true, transcript: status.transcriptText };
+      await this.courseModel
+        .updateOne(
+          { _id: new Types.ObjectId(courseId) },
+          {
+            $set: {
+              'sections.$[s].lessons.$[l].transcript': status.transcriptText,
+            },
+          },
+          {
+            arrayFilters: [
+              { 's._id': new Types.ObjectId(sectionId) },
+              { 'l._id': new Types.ObjectId(lessonId) },
+            ],
+          },
+        )
+        .exec();
+      return {
+        videoReady: true,
+        transcriptReady: true,
+        transcript: status.transcriptText,
+      };
     }
 
-    return { videoReady: status.videoReady, transcriptReady: false, transcript: null };
+    return {
+      videoReady: status.videoReady,
+      transcriptReady: false,
+      transcript: null,
+    };
   }
 
   async reorderLessons(
@@ -287,7 +362,8 @@ export class LessonsService {
     course.markModified('sections');
     await course.save();
 
-    return course.toObject().sections.map((sec: any) => new SectionSerializer(sec));
+    return course
+      .toObject()
+      .sections.map((sec: any) => new SectionSerializer(sec));
   }
 }
-

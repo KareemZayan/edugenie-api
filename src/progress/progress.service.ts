@@ -1,4 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Progress } from './schema/progress.schema';
@@ -10,23 +17,30 @@ import { ProgressResponse } from './interfaces/progress-response.interface';
 import { progressStateEnum } from '../common/enums/progress.enum';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { Enrollment } from '../enrollments/schema/enrollment.schema';
 
 @Injectable()
 export class ProgressService {
   constructor(
-  @InjectModel(Progress.name) private progressModel: Model<Progress>,
-  @InjectModel(Course.name) private courseModel: Model<Course>,
-  @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
-  @InjectModel(QuizAttempt.name) private quizAttemptModel: Model<QuizAttempt>,
-  private readonly notificationsService: NotificationsService,
-) {}
+    @InjectModel(Progress.name) private progressModel: Model<Progress>,
+    @InjectModel(Course.name) private courseModel: Model<Course>,
+    @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
+    @InjectModel(QuizAttempt.name) private quizAttemptModel: Model<QuizAttempt>,
+    @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
-  async trackProgress(dto: TrackProgressDto, studentId: string): Promise<ProgressResponse> {
+  async trackProgress(
+    dto: TrackProgressDto,
+    studentId: string,
+  ): Promise<ProgressResponse> {
     const { lessonId, watchedDuration, isCompleted } = dto;
     const lessonObjectId = new Types.ObjectId(lessonId);
 
     // 1. Find the lesson to get its sectionId and courseId
-    const course = await this.courseModel.findOne({ 'sections.lessons._id': lessonObjectId });
+    const course = await this.courseModel.findOne({
+      'sections.lessons._id': lessonObjectId,
+    });
     if (!course) {
       throw new NotFoundException('Lesson not found');
     }
@@ -35,7 +49,9 @@ export class ProgressService {
     let foundLesson = null;
     let lessonIndex = -1;
     for (const section of course.sections) {
-      lessonIndex = section.lessons.findIndex(l => l._id.toString() === lessonId);
+      lessonIndex = section.lessons.findIndex(
+        (l) => l._id.toString() === lessonId,
+      );
       if (lessonIndex !== -1) {
         foundSection = section;
         foundLesson = section.lessons[lessonIndex];
@@ -58,9 +74,14 @@ export class ProgressService {
           lessonState: isCompleted ? 'completed' : 'in_progress',
           completedAt: isCompleted ? new Date() : null,
           lastWatchedAt: new Date(),
-        }
+        },
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
+    );
+
+    await this.enrollmentModel.updateOne(
+      { studentId: new Types.ObjectId(studentId), courseId: course._id },
+      { $set: { lastActivityAt: new Date() } },
     );
 
     let nextLessonUnlocked = false;
@@ -82,7 +103,7 @@ export class ProgressService {
     }
 
     // 4. Determine sectionCompleted
-    const sectionLessonIds = foundSection.lessons.map(l => l._id);
+    const sectionLessonIds = foundSection.lessons.map((l) => l._id);
     const completedCount = await this.progressModel.countDocuments({
       studentId: new Types.ObjectId(studentId),
       lessonId: { $in: sectionLessonIds },
@@ -120,7 +141,9 @@ export class ProgressService {
     // 6. Check course completion (last section, no quiz)
     if (sectionCompleted && !quizRequired) {
       const lastSectionIndex = course.sections.length - 1;
-      const isLastSection = course.sections[lastSectionIndex]._id.toString() === foundSection._id.toString();
+      const isLastSection =
+        course.sections[lastSectionIndex]._id.toString() ===
+        foundSection._id.toString();
 
       if (isLastSection) {
         await this.notificationsService.create(
@@ -144,7 +167,9 @@ export class ProgressService {
   }
 
   async markQuizPassed(studentId: string, sectionId: string) {
-    const course = await this.courseModel.findOne({ 'sections._id': new Types.ObjectId(sectionId) });
+    const course = await this.courseModel.findOne({
+      'sections._id': new Types.ObjectId(sectionId),
+    });
     if (!course) {
       throw new NotFoundException('Course not found for section');
     }
@@ -167,7 +192,7 @@ export class ProgressService {
     let isCourseCompleted = false;
 
     // A section is completed if all lessons are also completed.
-    const sectionLessonIds = foundSection.lessons.map(l => l._id);
+    const sectionLessonIds = foundSection.lessons.map((l) => l._id);
     const completedCount = await this.progressModel.countDocuments({
       studentId: new Types.ObjectId(studentId),
       lessonId: { $in: sectionLessonIds },
@@ -183,7 +208,7 @@ export class ProgressService {
       }
     }
 
-   if (isCourseCompleted) {
+    if (isCourseCompleted) {
       await this.notificationsService.create(
         studentId,
         'Course Completed!',

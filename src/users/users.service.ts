@@ -14,8 +14,14 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { v2 as cloudinary } from 'cloudinary';
 import { UserSerializer } from './serializers/user.serializer';
 import { UserRole } from '../common/enums/user-role.enum';
-import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
-import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
+import {
+  Notification,
+  NotificationDocument,
+} from '../notifications/schema/notification.schema';
+import {
+  AuditLog,
+  AuditLogDocument,
+} from '../audit-logs/schemas/audit-log.schema';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
 import { ChangeRoleResponse } from './interfaces/change-role-response.interface';
 
@@ -23,7 +29,8 @@ import { ChangeRoleResponse } from './interfaces/change-role-response.interface'
 export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
-    @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+    @InjectModel(Notification.name)
+    private notificationModel: Model<NotificationDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
   ) {}
 
@@ -57,7 +64,11 @@ export class UsersService {
     return new UserSerializer(user.toObject());
   }
 
-  async updateProfile(userId: string, updateUserDto: UpdateUserDto, file?: any): Promise<UserSerializer> {
+  async updateProfile(
+    userId: string,
+    updateUserDto: UpdateUserDto,
+    file?: any,
+  ): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -66,13 +77,12 @@ export class UsersService {
     if (file) {
       try {
         const result: any = await new Promise((resolve, reject) => {
-          cloudinary.uploader.upload_stream(
-            { folder: 'avatars' },
-            (error, result) => {
+          cloudinary.uploader
+            .upload_stream({ folder: 'avatars' }, (error, result) => {
               if (error) return reject(error);
               resolve(result);
-            }
-          ).end(file.buffer);
+            })
+            .end(file.buffer);
         });
 
         if (user.avatarPublicId) {
@@ -82,7 +92,7 @@ export class UsersService {
             Logger.error(
               `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
               error instanceof Error ? error.stack : 'Unknown error',
-              'UsersService'
+              'UsersService',
             );
           }
         }
@@ -107,7 +117,7 @@ export class UsersService {
             Logger.error(
               `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
               error instanceof Error ? error.stack : 'Unknown error',
-              'UsersService'
+              'UsersService',
             );
           }
         }
@@ -135,6 +145,7 @@ export class UsersService {
 
     return new UserSerializer(updatedUser.toObject());
   }
+
   async changeUserRole(
     targetUserId: string,
     dto: ChangeUserRoleDto,
@@ -206,5 +217,22 @@ export class UsersService {
       changedAt: new Date(),
       changedBy: requestingSuperAdminId,
     };
+  }
+
+  async updateLastLogin(
+    userId: Types.ObjectId | string,
+    data: { fingerprint: string; ip: string; device: string; location: string },
+  ): Promise<void> {
+    await this.userModel
+      .findByIdAndUpdate(userId, {
+        $set: {
+          lastLoginFingerprint: data.fingerprint,
+          lastLoginIp: data.ip,
+          lastLoginDevice: data.device,
+          lastLoginLocation: data.location,
+          lastLoginAt: new Date(),
+        },
+      })
+      .exec();
   }
 }

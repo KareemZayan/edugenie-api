@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
@@ -7,18 +7,36 @@ import * as bcrypt from 'bcrypt';
 import { UserSerializer } from '../users/serializers/user.serializer';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { ExchangeToken, ExchangeTokenDocument } from './schemas/exchange-token.schema';
-import { HandoffCode, HandoffCodeDocument } from './schemas/handoff-code.schema';
+import {
+  ExchangeToken,
+  ExchangeTokenDocument,
+} from './schemas/exchange-token.schema';
+import {
+  HandoffCode,
+  HandoffCodeDocument,
+} from './schemas/handoff-code.schema';
 import * as crypto from 'crypto';
 import { UserRole } from '../common/enums/user-role.enum';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import {
+  getFingerprint,
+  parseDevice,
+  getLocationFromIp,
+} from './utils/login-device.util';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
-    @InjectModel(ExchangeToken.name) private exchangeTokenModel: Model<ExchangeTokenDocument>,
-    @InjectModel(HandoffCode.name) private handoffCodeModel: Model<HandoffCodeDocument>,
+    private notificationsService: NotificationsService,
+    @InjectModel(ExchangeToken.name)
+    private exchangeTokenModel: Model<ExchangeTokenDocument>,
+    @InjectModel(HandoffCode.name)
+    private handoffCodeModel: Model<HandoffCodeDocument>,
   ) {}
 
   async register(createUserDto: CreateUserDto) {
@@ -40,12 +58,16 @@ export class AuthService {
     return token;
   }
 
-  async verifyExchangeToken(token: string): Promise<{ token: string; user: UserSerializer }> {
-    const exchangeToken = await this.exchangeTokenModel.findOneAndDelete({ token });
+  async verifyExchangeToken(
+    token: string,
+  ): Promise<{ token: string; user: UserSerializer }> {
+    const exchangeToken = await this.exchangeTokenModel.findOneAndDelete({
+      token,
+    });
     if (!exchangeToken) {
       throw new UnauthorizedException('Invalid or expired token');
     }
-    
+
     const user = await this.usersService.findById(exchangeToken.userId);
     if (!user) {
       throw new UnauthorizedException('User not found');
@@ -60,7 +82,15 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{ token: string; user: UserSerializer; isExchangeToken: boolean }> {
+  async login(
+    loginDto: LoginDto,
+    ip: string,
+    userAgent: string,
+  ): Promise<{
+    token: string;
+    user: UserSerializer;
+    isExchangeToken: boolean;
+  }> {
     const user = await this.usersService.findByEmail(loginDto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -70,7 +100,6 @@ export class AuthService {
       loginDto.password,
       user.password,
     );
-
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -86,11 +115,63 @@ export class AuthService {
       token = this.jwtService.sign(payload);
     }
 
+    // Don't block the login response on geo lookups / notification creation
+    this.checkLoginDevice(user, ip, userAgent).catch((err) =>
+      this.logger.error('Login device check failed', err),
+    );
+
     return {
       token,
       isExchangeToken,
       user: new UserSerializer(user.toObject()),
     };
+  }
+
+  private async checkLoginDevice(
+    user: any,
+    ip: string,
+    userAgent: string,
+  ): Promise<void> {
+    const fingerprint = getFingerprint(userAgent);
+
+    // First login ever recorded for this user — just store baseline, no notification
+    if (!user.lastLoginFingerprint) {
+      await this.usersService.updateLastLogin(user._id, {
+        fingerprint,
+        ip,
+        device: parseDevice(userAgent),
+        location: await getLocationFromIp(ip),
+      });
+      return;
+    }
+
+    // Same device/IP as last time — nothing to do
+    if (user.lastLoginFingerprint === fingerprint) {
+      return;
+    }
+
+    // New device/IP detected
+    const device = parseDevice(userAgent);
+    const location = await getLocationFromIp(ip);
+
+    await this.usersService.updateLastLogin(user._id, {
+      fingerprint,
+      ip,
+      device,
+      location,
+    });
+
+    const message = `A new login was detected from ${location} on ${device}. If this wasn't you, secure your account.`;
+
+    await this.notificationsService.create(
+      user._id,
+      'New Login Detected',
+      message,
+      NotificationType.NEW_LOGIN_ATTEMPT,
+    );
+
+    // TODO: wire to real mailer once email infra is set up
+    this.logger.warn(`[EMAIL STUB] Would email ${user.email}: ${message}`);
   }
 
   async generateHandoffCode(userId: string, userRole: string): Promise<string> {
@@ -100,12 +181,14 @@ export class AuthService {
       userId: new Types.ObjectId(userId),
       userRole,
       used: false,
-      expiresAt: new Date(Date.now() + 30 * 1000)
+      expiresAt: new Date(Date.now() + 30 * 1000),
     });
     return code;
   }
 
-  async redeemHandoffCode(code: string): Promise<{ userId: string; userRole: string; token: string }> {
+  async redeemHandoffCode(
+    code: string,
+  ): Promise<{ userId: string; userRole: string; token: string }> {
     const doc = await this.handoffCodeModel.findOne({ code });
     if (!doc) {
       throw new UnauthorizedException('Invalid or expired code');
@@ -120,7 +203,7 @@ export class AuthService {
     const updated = await this.handoffCodeModel.findOneAndUpdate(
       { code, used: false, expiresAt: { $gt: new Date() } },
       { $set: { used: true } },
-      { returnDocument: 'after' }
+      { returnDocument: 'after' },
     );
     if (!updated) {
       throw new UnauthorizedException('Code is no longer valid');
