@@ -9,6 +9,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ExchangeToken, ExchangeTokenSchema } from './schemas/exchange-token.schema';
 import { HandoffCode, HandoffCodeSchema } from './schemas/handoff-code.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { HandoffCode, HandoffCodeSchema } from './schemas/handoff-code.schema';
       { name: HandoffCode.name, schema: HandoffCodeSchema },
     ]),
     UsersModule,
+    NotificationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
