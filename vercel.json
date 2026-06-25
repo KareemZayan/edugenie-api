@@ -8,6 +8,13 @@
   ],
   "routes": [
     {
+      "src": "^/$",
+      "headers": {
+        "Location": "/api"
+      },
+      "status": 302
+    },
+    {
       "src": "/(.*)",
       "dest": "src/lambda.ts"
     }
