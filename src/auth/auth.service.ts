@@ -73,7 +73,12 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const payload = { id: user._id, role: user.role };
+    const payload = { 
+      id: user._id, 
+      role: user.role, 
+      firstName: user.firstName, 
+      lastName: user.lastName 
+    };
     const jwtToken = this.jwtService.sign(payload);
 
     return {
@@ -111,7 +116,12 @@ export class AuthService {
       token = await this.generateExchangeToken(user._id as Types.ObjectId);
       isExchangeToken = true;
     } else {
-      const payload = { id: user._id, role: user.role };
+      const payload = { 
+        id: user._id, 
+        role: user.role, 
+        firstName: user.firstName, 
+        lastName: user.lastName 
+      };
       token = this.jwtService.sign(payload);
     }
 
@@ -209,7 +219,17 @@ export class AuthService {
       throw new UnauthorizedException('Code is no longer valid');
     }
 
-    const payload = { id: updated.userId, role: updated.userRole };
+    const user = await this.usersService.findById(updated.userId.toString());
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const payload = { 
+      id: updated.userId, 
+      role: updated.userRole,
+      firstName: user.firstName,
+      lastName: user.lastName
+    };
     const jwtToken = this.jwtService.sign(payload);
 
     return {
