@@ -28,13 +28,17 @@ export class CoursesService {
   constructor(
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
-    @InjectModel(Enrollment.name) private readonly enrollmentModel: Model<Enrollment>,
+    @InjectModel(Enrollment.name)
+    private readonly enrollmentModel: Model<Enrollment>,
     @InjectModel(Progress.name) private readonly progressModel: Model<Progress>,
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
-  private readonly notificationsService: NotificationsService,
-  ) { }
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
-  async create(dto: CreateCourseDto, instructorId: string): Promise<CourseSerializer> {
+  async create(
+    dto: CreateCourseDto,
+    instructorId: string,
+  ): Promise<CourseSerializer> {
     if (!instructorId)
       throw new BadRequestException('Instructor ID is required');
 
@@ -58,15 +62,8 @@ export class CoursesService {
     minPrice?: number;
     maxPrice?: number;
   }): Promise<PaginatedResponse<CourseSerializer>> {
-    const {
-      skip,
-      limit,
-      categoryId,
-      level,
-      search,
-      minPrice,
-      maxPrice,
-    } = filterDto;
+    const { skip, limit, categoryId, level, search, minPrice, maxPrice } =
+      filterDto;
 
     let categoryIdObj;
     if (categoryId) {
@@ -75,10 +72,30 @@ export class CoursesService {
         if (category) {
           categoryIdObj = category._id;
         } else {
-          return { data: [], meta: { total: 0, page: 1, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
+          return {
+            data: [],
+            meta: {
+              total: 0,
+              page: 1,
+              limit,
+              totalPages: 0,
+              hasNextPage: false,
+              hasPrevPage: false,
+            },
+          };
         }
       } catch (error) {
-        return { data: [], meta: { total: 0, page: 1, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
+        return {
+          data: [],
+          meta: {
+            total: 0,
+            page: 1,
+            limit,
+            totalPages: 0,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        };
       }
     }
 
@@ -124,11 +141,13 @@ export class CoursesService {
         totalPages,
         hasNextPage: page < totalPages,
         hasPrevPage: page > 1,
-      }
+      },
     };
   }
 
-  async findInstructorCourses(instructorId: string): Promise<CourseSerializer[]> {
+  async findInstructorCourses(
+    instructorId: string,
+  ): Promise<CourseSerializer[]> {
     if (!instructorId) return [];
     const courses = await this.courseModel
       .find({ instructorId: new Types.ObjectId(instructorId) })
@@ -137,17 +156,27 @@ export class CoursesService {
     return courses.map((c) => new CourseSerializer(c.toObject()));
   }
 
-  async findByInstructor(instructorId: string, filterDto: Record<string, unknown>) {
+  async findByInstructor(
+    instructorId: string,
+    filterDto: Record<string, unknown>,
+  ) {
     const status = filterDto.status as string | undefined;
     const page = (filterDto.page as number) || 1;
     const limit = (filterDto.limit as number) || 10;
-    const query: Record<string, unknown> = { instructorId: new Types.ObjectId(instructorId) };
+    const query: Record<string, unknown> = {
+      instructorId: new Types.ObjectId(instructorId),
+    };
     if (status) query.courseStatus = status;
 
     const skip = (page - 1) * limit;
 
     const [courses, total] = await Promise.all([
-      this.courseModel.find(query).skip(skip).limit(limit).sort({ createdAt: -1 }).exec(),
+      this.courseModel
+        .find(query)
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 })
+        .exec(),
       this.courseModel.countDocuments(query),
     ]);
 
@@ -155,7 +184,10 @@ export class CoursesService {
       courses.map(async (c) => {
         const courseObjId = c._id;
 
-        const totalStudentsResult = await this.enrollmentModel.distinct('studentId', { courseId: courseObjId });
+        const totalStudentsResult = await this.enrollmentModel.distinct(
+          'studentId',
+          { courseId: courseObjId },
+        );
         const totalStudents = totalStudentsResult.length;
 
         const revenueResult = await this.earningModel.aggregate([
@@ -164,8 +196,14 @@ export class CoursesService {
         ]);
         const totalRevenue = revenueResult[0]?.total || 0;
 
-        const completedCount = await this.enrollmentModel.countDocuments({ courseId: courseObjId, isCourseCompleted: true });
-        const completionRate = totalStudents > 0 ? Math.round((completedCount / totalStudents) * 100) : 0;
+        const completedCount = await this.enrollmentModel.countDocuments({
+          courseId: courseObjId,
+          isCourseCompleted: true,
+        });
+        const completionRate =
+          totalStudents > 0
+            ? Math.round((completedCount / totalStudents) * 100)
+            : 0;
 
         return {
           id: c._id.toString(),
@@ -177,7 +215,7 @@ export class CoursesService {
           rating: c.ratingAverage || 0,
           completionRate,
         };
-      })
+      }),
     );
 
     const totalPages = Math.ceil(total / limit);
@@ -196,7 +234,10 @@ export class CoursesService {
   }
 
   async getRejectionReason(courseId: string, instructorId: string) {
-    const course = await this.courseModel.findById(courseId).populate('rejectedBy', 'firstName lastName').exec();
+    const course = await this.courseModel
+      .findById(courseId)
+      .populate('rejectedBy', 'firstName lastName')
+      .exec();
     if (!course) throw new NotFoundException('Course not found');
 
     // OWNERSHIP CHECK ENFORCED: verifies course belongs to the requesting instructor
@@ -208,14 +249,19 @@ export class CoursesService {
       throw new BadRequestException('This course is not in rejected status');
     }
 
-    const rejectedBy = course.rejectedBy as unknown as { firstName: string; lastName: string };
+    const rejectedBy = course.rejectedBy as unknown as {
+      firstName: string;
+      lastName: string;
+    };
 
     return {
       courseId: course._id.toString(),
       courseTitle: course.title,
       status: course.courseStatus,
       rejectionReason: course.rejectionReason || 'No reason provided',
-      rejectedBy: rejectedBy ? `${rejectedBy.firstName} ${rejectedBy.lastName}` : 'System',
+      rejectedBy: rejectedBy
+        ? `${rejectedBy.firstName} ${rejectedBy.lastName}`
+        : 'System',
       rejectedAt: (course as any).rejectedAt || new Date(),
     };
   }
@@ -245,7 +291,11 @@ export class CoursesService {
     return new CourseSerializer(course.toObject());
   }
 
-  async update(id: string, instructorId: string, dto: UpdateCourseDto): Promise<CourseSerializer> {
+  async update(
+    id: string,
+    instructorId: string,
+    dto: UpdateCourseDto,
+  ): Promise<CourseSerializer> {
     const updated = await this.courseModel.findOneAndUpdate(
       { _id: id, instructorId: new Types.ObjectId(instructorId) },
       { $set: dto },
@@ -260,7 +310,6 @@ export class CoursesService {
     if (!result) throw new NotFoundException('Course not found');
     return { message: 'Course successfully deleted' };
   }
-
 
   async syncMetadata(courseId: string) {
     const result = await this.courseModel.aggregate([
@@ -277,35 +326,53 @@ export class CoursesService {
             {
               $group: {
                 _id: '$_id',
-                totalPrice: { $sum: { $ifNull: ['$sections.price', 0] } }
-              }
-            }
+                totalPrice: { $sum: { $ifNull: ['$sections.price', 0] } },
+              },
+            },
           ],
 
           // Calculation B: Lessons and Hours (Requires unwinding lessons)
           videoData: [
-            { $unwind: { path: '$sections.lessons', preserveNullAndEmptyArrays: true } },
+            {
+              $unwind: {
+                path: '$sections.lessons',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
             {
               $group: {
                 _id: '$_id',
                 totalLessons: {
-                  $sum: { $cond: [{ $ifNull: ['$sections.lessons._id', false] }, 1, 0] }
+                  $sum: {
+                    $cond: [
+                      { $ifNull: ['$sections.lessons._id', false] },
+                      1,
+                      0,
+                    ],
+                  },
                 },
-                totalDurationSeconds: { $sum: { $ifNull: ['$sections.lessons.videoDuration', 0] } }
-              }
-            }
-          ]
-        }
-      }
+                totalDurationSeconds: {
+                  $sum: { $ifNull: ['$sections.lessons.videoDuration', 0] },
+                },
+              },
+            },
+          ],
+        },
+      },
     ]);
 
     if (!result || result.length === 0) return;
 
     // Extract the calculated data
     const priceStats = result[0].priceData[0] || { totalPrice: 0 };
-    const videoStats = result[0].videoData[0] || { totalLessons: 0, totalDurationSeconds: 0 };
+    const videoStats = result[0].videoData[0] || {
+      totalLessons: 0,
+      totalDurationSeconds: 0,
+    };
 
-    const totalHours = Number(((videoStats.totalDurationSeconds || 0) / 3600).toFixed(2));
+    const totalHours = Number(
+      ((videoStats.totalDurationSeconds || 0) / 3600).toFixed(2),
+    );
 
     // Update the course with the new pricing and metadata
     await this.courseModel.updateOne(
@@ -463,21 +530,24 @@ export class CoursesService {
     course.courseStatus = CourseStatus.UNDER_REVIEW;
     await course.save();
     //  notify admins
-const admins = await this.courseModel.db.collection('users').find({
-  role: { $in: [UserRole.ADMIN, UserRole.SUPERADMIN] }
-}).toArray();
+    const admins = await this.courseModel.db
+      .collection('users')
+      .find({
+        role: { $in: [UserRole.ADMIN, UserRole.SUPERADMIN] },
+      })
+      .toArray();
 
-await Promise.all(
-  admins.map((admin) =>
-    this.notificationsService.create(
-      admin._id,
-      'New Course Submitted',
-      `Instructor submitted course: ${course.title} for review`,
-      NotificationType.COURSE_APPROVED, 
-      course._id.toString(),
-    ),
-  ),
-);
+    await Promise.all(
+      admins.map((admin) =>
+        this.notificationsService.create(
+          admin._id,
+          'New Course Submitted',
+          `Instructor submitted course: ${course.title} for review`,
+          NotificationType.COURSE_SUBMITTED_FOR_REVIEW,
+          course._id.toString(),
+        ),
+      ),
+    );
 
     return new CourseSerializer(course.toObject());
   }
@@ -505,17 +575,21 @@ await Promise.all(
         goals: c.goals,
         requirements: c.requirements,
         createdAt: c.createdAt,
-        category: c.categoryId ? {
-          _id: c.categoryId._id?.toString() || c.categoryId.toString(),
-          name: c.categoryId.name
-        } : null,
-        instructor: c.instructorId ? {
-          _id: c.instructorId._id?.toString() || c.instructorId.toString(),
-          firstName: c.instructorId.firstName,
-          lastName: c.instructorId.lastName,
-          avatar: c.instructorId.avatar,
-          email: c.instructorId.email
-        } : null
+        category: c.categoryId
+          ? {
+              _id: c.categoryId._id?.toString() || c.categoryId.toString(),
+              name: c.categoryId.name,
+            }
+          : null,
+        instructor: c.instructorId
+          ? {
+              _id: c.instructorId._id?.toString() || c.instructorId.toString(),
+              firstName: c.instructorId.firstName,
+              lastName: c.instructorId.lastName,
+              avatar: c.instructorId.avatar,
+              email: c.instructorId.email,
+            }
+          : null,
       };
     });
   }
@@ -525,9 +599,9 @@ await Promise.all(
       {
         $group: {
           _id: '$courseStatus',
-          count: { $sum: 1 }
-        }
-      }
+          count: { $sum: 1 },
+        },
+      },
     ]);
 
     const result = {
@@ -535,13 +609,15 @@ await Promise.all(
       underReview: 0,
       published: 0,
       rejected: 0,
-      draft: 0
+      draft: 0,
     };
 
-    stats.forEach(stat => {
+    stats.forEach((stat) => {
       result.totalCourses += stat.count;
-      if (stat._id === CourseStatus.UNDER_REVIEW) result.underReview = stat.count;
-      else if (stat._id === CourseStatus.PUBLISHED) result.published = stat.count;
+      if (stat._id === CourseStatus.UNDER_REVIEW)
+        result.underReview = stat.count;
+      else if (stat._id === CourseStatus.PUBLISHED)
+        result.published = stat.count;
       else if (stat._id === CourseStatus.REJECTED) result.rejected = stat.count;
       else if (stat._id === CourseStatus.DRAFT) result.draft = stat.count;
     });
@@ -572,8 +648,8 @@ await Promise.all(
       {
         $set: {
           courseStatus: CourseStatus.REJECTED,
-          ...(reason && { rejectionReason: reason })
-        }
+          ...(reason && { rejectionReason: reason }),
+        },
       },
       { returnDocument: 'after', runValidators: true },
     );
@@ -592,17 +668,26 @@ await Promise.all(
       throw new ForbiddenException('You are not enrolled in this course');
     }
 
-    const progress = await this.progressModel.findOne(
-      { studentId: new Types.ObjectId(studentId), courseId: new Types.ObjectId(courseId), isCompleted: false },
-      {},
-      { sort: { lastWatchedAt: -1 } }
-    ).exec();
+    const progress = await this.progressModel
+      .findOne(
+        {
+          studentId: new Types.ObjectId(studentId),
+          courseId: new Types.ObjectId(courseId),
+          isCompleted: false,
+        },
+        {},
+        { sort: { lastWatchedAt: -1 } },
+      )
+      .exec();
 
     if (progress) {
       const lessonObjId = progress.lessonId;
       const course = await this.courseModel.findOne(
-        { _id: new Types.ObjectId(courseId), 'sections.lessons._id': lessonObjId },
-        { 'sections.$': 1 }
+        {
+          _id: new Types.ObjectId(courseId),
+          'sections.lessons._id': lessonObjId,
+        },
+        { 'sections.$': 1 },
       );
       let sectionId = '';
       if (course && course.sections && course.sections.length > 0) {

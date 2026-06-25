@@ -1,4 +1,10 @@
-import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ServiceUnavailableException,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as crypto from 'crypto';
@@ -8,24 +14,37 @@ import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { CartService } from '../cart/cart.service';
 import { PaymobService } from '../paymob/paymob.service';
-import { CheckoutResponse, OrderDetailResponse, OrderHistoryResponse } from '../frontend-contracts';
+import {
+  CheckoutResponse,
+  OrderDetailResponse,
+  OrderHistoryResponse,
+} from '../frontend-contracts';
 import { OrderStatus } from '../common/enums/order-status.enum';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { Course } from '../courses/schema/course.schema';
 
 @Injectable()
 export class OrdersService {
   constructor(
+    @InjectModel(Course.name) private courseModel: Model<Course>,
     @InjectModel(Order.name) private orderModel: Model<Order>,
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     private cartService: CartService,
     private paymobService: PaymobService,
-  ) { }
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async processCheckout(studentId: string): Promise<CheckoutResponse> {
     // 1 & 3. RE-VALIDATE THE CART
     // validateCart throws if prices changed or items are already owned.
     const validatedCart: any = await this.cartService.validateCart(studentId);
-    
-    if (!validatedCart || !validatedCart.items || validatedCart.items.length === 0) {
+
+    if (
+      !validatedCart ||
+      !validatedCart.items ||
+      validatedCart.items.length === 0
+    ) {
       throw new BadRequestException('Your cart is empty');
     }
 
@@ -40,18 +59,23 @@ export class OrdersService {
       itemType: i.itemType,
       courseId: i.courseId.toString(),
       sectionId: i.sectionId ? i.sectionId.toString() : null,
-      price: i.price
+      price: i.price,
     }));
-    cartItemsData.sort((a: any, b: any) => a.courseId.localeCompare(b.courseId));
+    cartItemsData.sort((a: any, b: any) =>
+      a.courseId.localeCompare(b.courseId),
+    );
     const cartSnapshotString = JSON.stringify(cartItemsData);
-    const cartSnapshotHash = crypto.createHash('sha256').update(cartSnapshotString).digest('hex');
+    const cartSnapshotHash = crypto
+      .createHash('sha256')
+      .update(cartSnapshotString)
+      .digest('hex');
 
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
     const existingOrder = await this.orderModel.findOne({
       studentId: new Types.ObjectId(studentId),
       status: OrderStatus.PENDING,
       cartSnapshotHash: cartSnapshotHash,
-      createdAt: { $gte: thirtyMinutesAgo }
+      createdAt: { $gte: thirtyMinutesAgo },
     });
 
     if (existingOrder) {
@@ -60,18 +84,21 @@ export class OrdersService {
           clientSecret: '',
           orderId: existingOrder._id.toString(),
           amount: 0,
-          currency: 'EGP'
+          currency: 'EGP',
         };
       }
-      const paymentData = await this.paymobService.createPaymentUrl(existingOrder.totalAmount, existingOrder._id.toString());
+      const paymentData = await this.paymobService.createPaymentUrl(
+        existingOrder.totalAmount,
+        existingOrder._id.toString(),
+      );
       return {
         clientSecret: paymentData.clientSecret,
         orderId: existingOrder._id.toString(),
         amount: existingOrder.totalAmount,
-        currency: 'EGP'
+        currency: 'EGP',
       };
     }
-    
+
     let totalAmount = 0;
     const orderItems = [];
 
@@ -80,9 +107,13 @@ export class OrdersService {
       orderItems.push({
         itemType: item.type,
         courseId: new Types.ObjectId(item.courseId),
-        sectionId: item.sectionId ? new Types.ObjectId(item.sectionId) : undefined,
-        courseTitle: item.courseTitle + (item.sectionTitle ? ` - ${item.sectionTitle}` : ''),
-        price: item.price
+        sectionId: item.sectionId
+          ? new Types.ObjectId(item.sectionId)
+          : undefined,
+        courseTitle:
+          item.courseTitle +
+          (item.sectionTitle ? ` - ${item.sectionTitle}` : ''),
+        price: item.price,
       });
     }
 
@@ -97,7 +128,7 @@ export class OrdersService {
       totalAmount,
       status: totalAmount === 0 ? OrderStatus.COMPLETED : OrderStatus.PENDING,
       cartSnapshotHash,
-      paidAt: totalAmount === 0 ? new Date() : undefined
+      paidAt: totalAmount === 0 ? new Date() : undefined,
     });
     await order.save();
 
@@ -106,7 +137,7 @@ export class OrdersService {
       for (const item of orderItems) {
         let enrollment = await this.enrollmentModel.findOne({
           studentId: order.studentId,
-          courseId: item.courseId
+          courseId: item.courseId,
         });
 
         if (!enrollment) {
@@ -114,19 +145,46 @@ export class OrdersService {
             studentId: order.studentId,
             courseId: item.courseId,
             type: item.itemType,
-            sectionIds: item.itemType === PurchaseType.SECTION ? [item.sectionId] : []
+            sectionIds:
+              item.itemType === PurchaseType.SECTION ? [item.sectionId] : [],
           });
         } else {
           if (item.itemType === PurchaseType.FULL_COURSE) {
             enrollment.type = PurchaseType.FULL_COURSE;
           } else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
-            if (!enrollment.sectionIds.some(id => id.toString() === item.sectionId!.toString())) {
+            if (
+              !enrollment.sectionIds.some(
+                (id) => id.toString() === item.sectionId!.toString(),
+              )
+            ) {
               enrollment.sectionIds.push(item.sectionId);
             }
           }
         }
         await enrollment.save();
+
+        // NEW: New Enrollment notification (to course instructor)
+        const course = await this.courseModel
+          .findById(item.courseId)
+          .select('instructorId');
+        if (course?.instructorId) {
+          await this.notificationsService.create(
+            course.instructorId,
+            'New Enrollment',
+            'A new student has enrolled in your course.',
+            NotificationType.NEW_ENROLLMENT,
+            item.courseId.toString(),
+          );
+        }
       }
+
+      // NEW: Purchase Completed notification (to student)
+      await this.notificationsService.create(
+        order.studentId,
+        'Purchase Successful',
+        'Your purchase was completed successfully. Enjoy your course!',
+        NotificationType.PURCHASE_COMPLETED,
+      );
 
       // Automatically clean the cart since items are now owned
       await this.cartService.validateCart(studentId).catch(() => {});
@@ -135,48 +193,59 @@ export class OrdersService {
         clientSecret: '',
         orderId: order._id.toString(),
         amount: 0,
-        currency: 'EGP'
+        currency: 'EGP',
       };
     }
 
     // 5. CALL PAYMOB
     try {
-      const paymentData = await this.paymobService.createPaymentUrl(totalAmount, order._id.toString());
+      const paymentData = await this.paymobService.createPaymentUrl(
+        totalAmount,
+        order._id.toString(),
+      );
       order.paymobOrderId = `paymob_${order._id}`; // Store external ID
       await order.save();
-      
+
       return {
         clientSecret: paymentData.clientSecret,
         orderId: order._id.toString(),
         amount: totalAmount,
-        currency: 'EGP'
+        currency: 'EGP',
       };
     } catch (e) {
       order.status = OrderStatus.FAILED;
       await order.save();
-      throw new ServiceUnavailableException('Payment service is currently unavailable. Please try again later.');
+      throw new ServiceUnavailableException(
+        'Payment service is currently unavailable. Please try again later.',
+      );
     }
   }
 
-  async getOrderById(studentId: string, orderId: string): Promise<OrderDetailResponse> {
-    if (!Types.ObjectId.isValid(orderId)) throw new NotFoundException('Order not found');
+  async getOrderById(
+    studentId: string,
+    orderId: string,
+  ): Promise<OrderDetailResponse> {
+    if (!Types.ObjectId.isValid(orderId))
+      throw new NotFoundException('Order not found');
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
 
     if (order.studentId.toString() !== studentId) {
-      throw new ForbiddenException('You do not have permission to view this order');
+      throw new ForbiddenException(
+        'You do not have permission to view this order',
+      );
     }
 
     return {
       orderId: order._id.toString(),
       status: order.status,
-      items: order.items.map(i => ({
+      items: order.items.map((i) => ({
         courseTitle: i.courseTitle,
         type: i.itemType,
-        price: i.price
+        price: i.price,
       })),
       total: order.totalAmount,
-      paidAt: order.paidAt
+      paidAt: order.paidAt,
     };
   }
 
@@ -187,17 +256,17 @@ export class OrdersService {
       .exec();
 
     return {
-      orders: orders.map(order => ({
+      orders: orders.map((order) => ({
         orderId: order._id.toString(),
         status: order.status,
         total: order.totalAmount,
         createdAt: (order as any).createdAt,
-        items: order.items.map(i => ({
+        items: order.items.map((i) => ({
           courseTitle: i.courseTitle,
           type: i.itemType,
-          price: i.price
-        }))
-      }))
+          price: i.price,
+        })),
+      })),
     };
   }
 }
