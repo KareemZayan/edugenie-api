@@ -25,10 +25,11 @@ export class CartService {
       .findOne({ studentId: new Types.ObjectId(studentId) })
       .exec();
     if (!cart) {
-      cart = await this.cartModel.create({
-        studentId: new Types.ObjectId(studentId),
+      return {
         items: [],
-      });
+        subtotal: 0,
+        total: 0,
+      };
     }
 
     let subtotal = 0;
@@ -176,7 +177,11 @@ export class CartService {
       throw new NotFoundException('Item not found in cart');
     }
 
-    await cart.save();
+    if (cart.items.length === 0) {
+      await this.cartModel.deleteOne({ _id: cart._id }).exec();
+    } else {
+      await cart.save();
+    }
     return this.getCart(studentId);
   }
 
@@ -234,7 +239,11 @@ export class CartService {
     }
 
     if (changed) {
-      await cart.save();
+      if (cart.items.length === 0) {
+        await this.cartModel.deleteOne({ _id: cart._id }).exec();
+      } else {
+        await cart.save();
+      }
       throw new ConflictException(
         'Prices have changed or items are already owned, please review your cart',
       );

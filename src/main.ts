@@ -36,6 +36,7 @@ async function bootstrap() {
     process.env.ANGULAR_APP_URL, // e.g. https://your-angular.vercel.app
     'http://localhost:3000',
     'http://localhost:4200',
+    'http://localhost:5000',
   ].filter(Boolean);
 
   app.enableCors({
