@@ -25,6 +25,7 @@ import { OrderStatus } from '../common/enums/order-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { STUDENT_MILESTONES } from '../common/constants/milestones.constant';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -220,6 +221,24 @@ export class WebhooksController {
             NotificationType.EARNING_RECORDED,
             item.courseId.toString(),
           );
+
+          // Milestone Reached check
+          try {
+            const instructorCourseIds = await this.courseModel.find({ instructorId: course.instructorId }).select('_id').exec();
+            const totalStudents = await this.enrollmentModel.countDocuments({
+              courseId: { $in: instructorCourseIds.map((c) => c._id) },
+            });
+            if (STUDENT_MILESTONES.includes(totalStudents)) {
+              await this.notificationsService.create(
+                course.instructorId,
+                'Milestone Reached!',
+                `Congratulations! You just reached ${totalStudents} total students!`,
+                NotificationType.MILESTONE_REACHED,
+              );
+            }
+          } catch (milestoneError) {
+            console.error('Milestone check failed:', milestoneError);
+          }
         }
       }
 
