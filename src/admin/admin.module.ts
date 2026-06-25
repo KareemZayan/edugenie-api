@@ -7,8 +7,14 @@ import { Report, ReportSchema } from '../reports/schema/report.schema';
 import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import { Category, CategorySchema } from '../categories/schema/category.schema';
 import { Review, ReviewSchema } from '../reviews/schema/review.schema';
-import { AuditLog, AuditLogSchema } from '../audit-logs/schemas/audit-log.schema';
-import { Notification, NotificationSchema } from '../notifications/schema/notification.schema';
+import {
+  AuditLog,
+  AuditLogSchema,
+} from '../audit-logs/schemas/audit-log.schema';
+import {
+  Notification,
+  NotificationSchema,
+} from '../notifications/schema/notification.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 import { AdminController } from './controllers/admin.controller';

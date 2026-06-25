@@ -165,16 +165,24 @@ export class CloudinaryService {
     let transcriptText: string | null = null;
 
     try {
-      const videoResource = await cloudinary.api.resource(publicId, { resource_type: 'video' });
+      const videoResource = await cloudinary.api.resource(publicId, {
+        resource_type: 'video',
+      });
       if (videoResource) {
         videoReady = true;
       }
     } catch (error: any) {
-      this.logger.error(`Failed to check video resource ${publicId}:`, error?.message || error);
+      this.logger.error(
+        `Failed to check video resource ${publicId}:`,
+        error?.message || error,
+      );
     }
 
     try {
-      const rawResource = await cloudinary.api.resource(`${publicId}.transcript`, { resource_type: 'raw' });
+      const rawResource = await cloudinary.api.resource(
+        `${publicId}.transcript`,
+        { resource_type: 'raw' },
+      );
       if (rawResource && rawResource.secure_url) {
         const response = await fetch(rawResource.secure_url);
         if (response.ok) {
@@ -184,10 +192,17 @@ export class CloudinaryService {
             transcriptReady = true;
             // Extract transcript text
             if (Array.isArray(json)) {
-              transcriptText = json.map((res: any) => res.transcript || '').join(' ').trim();
+              transcriptText = json
+                .map((res: any) => res.transcript || '')
+                .join(' ')
+                .trim();
             } else if (json && json.results && Array.isArray(json.results)) {
               const parts = json.results.map((res: any) => {
-                if (res.alternatives && res.alternatives.length > 0 && res.alternatives[0].transcript) {
+                if (
+                  res.alternatives &&
+                  res.alternatives.length > 0 &&
+                  res.alternatives[0].transcript
+                ) {
                   return res.alternatives[0].transcript;
                 }
                 return '';

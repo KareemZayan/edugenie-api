@@ -4,11 +4,17 @@ import { WebhooksController } from './webhooks.controller';
 import { PaymobModule } from '../paymob/paymob.module';
 
 import { Order, OrderSchema } from '../orders/schema/order.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
 import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import { Lesson, LessonSchema } from '../lessons/schema/lesson.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
-import { WebhookFailureLog, WebhookFailureLogSchema } from '../superadmin/schema/webhook-failure-log.schema';
+import {
+  WebhookFailureLog,
+  WebhookFailureLogSchema,
+} from '../superadmin/schema/webhook-failure-log.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
@@ -18,11 +24,11 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Earning.name, schema: EarningSchema },
       { name: Lesson.name, schema: LessonSchema },
       { name: Course.name, schema: CourseSchema },
-      { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema }
+      { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema },
     ]),
     PaymobModule,
-    NotificationsModule
+    NotificationsModule,
   ],
-  controllers: [WebhooksController]
+  controllers: [WebhooksController],
 })
 export class WebhooksModule {}
