@@ -3,7 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { Notification, NotificationSchema } from './schema/notification.schema';
-import { PusherModule } from 'src/pusher/pusher.module';
+import { PusherModule } from '../pusher/pusher.module';
 
 @Module({
   imports: [

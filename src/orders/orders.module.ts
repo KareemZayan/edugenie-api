@@ -10,7 +10,7 @@ import {
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { CartModule } from '../cart/cart.module';
 import { PaymobModule } from '../paymob/paymob.module';
-import { NotificationsModule } from 'src/notifications/notifications.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [

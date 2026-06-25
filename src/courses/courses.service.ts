@@ -21,7 +21,7 @@ import { Progress } from '../progress/schema/progress.schema';
 
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
-import { UserRole } from 'src/common/enums/user-role.enum';
+import { UserRole } from '../common/enums/user-role.enum';
 import { User } from '../users/schema/user.schema';
 
 @Injectable()

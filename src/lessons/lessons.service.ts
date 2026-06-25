@@ -16,8 +16,8 @@ import { Progress } from '../progress/schema/progress.schema';
 import { ForbiddenException } from '@nestjs/common';
 import { SectionSerializer } from '../sections/serializers/section.serializer';
 import { LessonSerializer } from './serializers/lesson.serializer';
-import { NotificationType } from 'src/notifications/enums/notification-type.enum';
-import { NotificationsService } from 'src/notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class LessonsService {

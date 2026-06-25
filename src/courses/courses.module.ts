@@ -12,8 +12,8 @@ import { Category, CategorySchema } from '../categories/schema/category.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { ProgressModule } from '../progress/progress.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
-import { NotificationsService } from 'src/notifications/notifications.service';
-import { NotificationsModule } from 'src/notifications/notifications.module';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
