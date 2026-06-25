@@ -117,7 +117,7 @@ export class AdminReportsService {
       },
     });
 
-    // 👇 NEW — notify the student who filed the report
+    //  NEW — notify the student who filed the report
     if (report.reportedBy) {
       await this.notificationModel.create({
         userId: report.reportedBy,
