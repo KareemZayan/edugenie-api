@@ -2,7 +2,6 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { progressStateEnum } from '../../common/enums/progress.enum';
 
-
 export type ProgressDocument = HydratedDocument<Progress>;
 
 @Schema({ timestamps: true })

@@ -173,7 +173,9 @@ export interface CourseResponse {
   thumbnail: string;
   level: string;
   courseStatus: string;
-  instructor: Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'> | string;
+  instructor:
+    | Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'>
+    | string;
   category: { id: string; name: string } | string;
   goals: string[];
   requirements: string[];
@@ -480,7 +482,10 @@ export interface DashboardOverviewResponse {
   nextPayoutDate: Date;
 }
 
-export type AttentionItemType = 'course_rejected' | 'low_review' | 'quiz_pending_review';
+export type AttentionItemType =
+  | 'course_rejected'
+  | 'low_review'
+  | 'quiz_pending_review';
 
 export interface AttentionItem {
   type: AttentionItemType;
@@ -612,7 +617,7 @@ export interface PendingCourseListItem {
   totalLessons: number;
 }
 
-export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> { }
+export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> {}
 
 export interface RejectedCourseListItem {
   courseId: string;
@@ -624,7 +629,7 @@ export interface RejectedCourseListItem {
   rejectedAt: Date;
 }
 
-export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> { }
+export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> {}
 
 export interface CourseReviewDetailResponse {
   courseId: string;
@@ -671,7 +676,7 @@ export interface AdminUserListItem {
   createdAt: Date;
 }
 
-export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> { }
+export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> {}
 
 export interface UserStatusChangeResponse {
   userId: string;
@@ -691,7 +696,7 @@ export interface ReportListItem {
   createdAt: Date;
 }
 
-export interface ReportListResponse extends PaginatedResponse<ReportListItem> { }
+export interface ReportListResponse extends PaginatedResponse<ReportListItem> {}
 
 export interface ReportResolutionResponse {
   reportId: string;
@@ -775,7 +780,7 @@ export interface AdminActivityItem {
   createdAt: Date;
 }
 
-export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> { }
+export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> {}
 
 export interface PendingPayoutListItem {
   instructorId: string;
@@ -786,7 +791,7 @@ export interface PendingPayoutListItem {
   periodEnd: Date;
 }
 
-export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> { }
+export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}
 
 export interface PayoutProcessResponse {
   instructorId: string;
@@ -815,7 +820,7 @@ export interface AuditLogItem {
   createdAt: Date;
 }
 
-export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> { }
+export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> {}
 
 export interface SystemHealthResponse {
   apiStatus: string;
@@ -842,5 +847,5 @@ export interface RedeemCodeRequest {
 
 export interface RedeemCodeResponse {
   success: boolean;
-  data: { userId: string; userRole: string; }
+  data: { userId: string; userRole: string };
 }

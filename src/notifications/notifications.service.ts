@@ -20,8 +20,6 @@ export class NotificationsService {
     private readonly notificationModel: Model<NotificationDocument>,
   ) {}
 
-
-
   async markAsRead(
     notificationId: string,
     userId: string,

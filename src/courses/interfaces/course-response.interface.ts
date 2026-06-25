@@ -8,7 +8,9 @@ export interface CourseResponse {
   thumbnail: string;
   level: string;
   courseStatus: string;
-  instructor: Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'> | string;
+  instructor:
+    | Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'>
+    | string;
   category: { id: string; name: string } | string;
   goals: string[];
   requirements: string[];

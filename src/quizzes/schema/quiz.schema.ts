@@ -23,9 +23,17 @@ export class Quiz {
   numberOfQuestions: number;
   @Prop({ type: String, enum: QuestionType, required: true })
   questionType: QuestionType;
-  @Prop({ type: String, enum: QuizGenerationStatus, default: QuizGenerationStatus.PENDING })
+  @Prop({
+    type: String,
+    enum: QuizGenerationStatus,
+    default: QuizGenerationStatus.PENDING,
+  })
   generationStatus: QuizGenerationStatus;
-  @Prop({ type: String, enum: ['pending_review', 'approved'], default: 'pending_review' })
+  @Prop({
+    type: String,
+    enum: ['pending_review', 'approved'],
+    default: 'pending_review',
+  })
   status: string;
   @Prop({ required: true, default: 600 })
   timeLimit: number;
@@ -34,12 +42,14 @@ export class Quiz {
   @Prop({ required: true, default: 3 })
   maxAttempts: number;
   // The AI-Generated Output (Initially Empty!)
-  @Prop([{
-    questionText: { type: String, required: true },
-    type: { type: String, enum: QuestionType, required: true }, // e.g. TRUE_FALSE
-    options: { type: [String], required: true }, // e.g. ["True", "False"]
-    correctAnswers: { type: [String], required: true } // Handles multi-choice!
-  }])
+  @Prop([
+    {
+      questionText: { type: String, required: true },
+      type: { type: String, enum: QuestionType, required: true }, // e.g. TRUE_FALSE
+      options: { type: [String], required: true }, // e.g. ["True", "False"]
+      correctAnswers: { type: [String], required: true }, // Handles multi-choice!
+    },
+  ])
   questions: QuizQuestion[];
 }
 

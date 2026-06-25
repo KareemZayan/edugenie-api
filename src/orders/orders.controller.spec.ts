@@ -10,7 +10,7 @@ describe('OrdersController', () => {
   beforeEach(async () => {
     service = {
       getOrderById: jest.fn(),
-      getMyOrders: jest.fn()
+      getMyOrders: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -27,7 +27,9 @@ describe('OrdersController', () => {
       const orderId = new Types.ObjectId().toString();
       service.getOrderById.mockResolvedValue({ orderId, status: 'PENDING' });
 
-      const result = await controller.getOrderById(orderId, { userId: studentId });
+      const result = await controller.getOrderById(orderId, {
+        userId: studentId,
+      });
       expect(result.data.orderId).toBe(orderId);
       expect(service.getOrderById).toHaveBeenCalledWith(studentId, orderId);
     });

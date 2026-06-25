@@ -19,29 +19,38 @@ describe('WebhooksController', () => {
 
   beforeEach(async () => {
     paymobService = {
-      verifyWebhookHmac: jest.fn()
+      verifyWebhookHmac: jest.fn(),
     };
 
-    orderModel = function() {};
-    orderModel.db = { startSession: jest.fn().mockResolvedValue({ startTransaction: jest.fn(), commitTransaction: jest.fn(), abortTransaction: jest.fn(), endSession: jest.fn() }) };
+    orderModel = function () {};
+    orderModel.db = {
+      startSession: jest
+        .fn()
+        .mockResolvedValue({
+          startTransaction: jest.fn(),
+          commitTransaction: jest.fn(),
+          abortTransaction: jest.fn(),
+          endSession: jest.fn(),
+        }),
+    };
     orderModel.findById = jest.fn().mockReturnThis();
     orderModel.session = jest.fn();
 
-    enrollmentModel = function(data: any) {
+    enrollmentModel = function (data: any) {
       Object.assign(this, data);
       this.save = jest.fn().mockResolvedValue(this);
     };
     enrollmentModel.findOne = jest.fn().mockReturnThis();
     enrollmentModel.session = jest.fn();
 
-    earningModel = function(data: any) {
+    earningModel = function (data: any) {
       Object.assign(this, data);
       this.save = jest.fn().mockResolvedValue(this);
     };
 
     courseModel = {
       findById: jest.fn().mockReturnThis(),
-      session: jest.fn()
+      session: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -63,30 +72,44 @@ describe('WebhooksController', () => {
       paymobService.verifyWebhookHmac.mockReturnValue(false);
       const req = { body: {} } as any;
       const res = {} as any;
-      
-      await expect(controller.handlePaymobWebhook(req, res, 'invalid_hmac')).rejects.toThrow(UnauthorizedException);
+
+      await expect(
+        controller.handlePaymobWebhook(req, res, 'invalid_hmac'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should accept valid HMAC and transition PENDING -> COMPLETED', async () => {
       paymobService.verifyWebhookHmac.mockReturnValue(true);
       const orderId = new Types.ObjectId();
       const req = { body: { order_id: orderId.toString() } } as any;
-      const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as any;
-      
-      const mockOrder = { 
-        _id: orderId, 
-        status: 'PENDING', 
-        studentId: new Types.ObjectId(), 
-        items: [{ courseId: new Types.ObjectId(), itemType: 'full_course', price: 100 }], 
-        save: jest.fn() 
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      } as any;
+
+      const mockOrder = {
+        _id: orderId,
+        status: 'PENDING',
+        studentId: new Types.ObjectId(),
+        items: [
+          {
+            courseId: new Types.ObjectId(),
+            itemType: 'full_course',
+            price: 100,
+          },
+        ],
+        save: jest.fn(),
       };
 
       orderModel.session.mockResolvedValue(mockOrder);
       enrollmentModel.session.mockResolvedValue(null); // No existing enrollment
-      courseModel.session.mockResolvedValue({ _id: new Types.ObjectId(), instructorId: new Types.ObjectId() });
+      courseModel.session.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        instructorId: new Types.ObjectId(),
+      });
 
       await controller.handlePaymobWebhook(req, res, 'valid_hmac');
-      
+
       expect(mockOrder.status).toBe('COMPLETED');
       expect(mockOrder.save).toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(200);
@@ -97,18 +120,21 @@ describe('WebhooksController', () => {
       paymobService.verifyWebhookHmac.mockReturnValue(true);
       const orderId = new Types.ObjectId();
       const req = { body: { order_id: orderId.toString() } } as any;
-      const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as any;
-      
-      const mockOrder = { 
-        _id: orderId, 
-        status: 'COMPLETED', 
-        save: jest.fn() 
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      } as any;
+
+      const mockOrder = {
+        _id: orderId,
+        status: 'COMPLETED',
+        save: jest.fn(),
       };
 
       orderModel.session.mockResolvedValue(mockOrder);
 
       await controller.handlePaymobWebhook(req, res, 'valid_hmac');
-      
+
       expect(mockOrder.save).not.toHaveBeenCalled();
       expect(res.send).toHaveBeenCalledWith('Already processed');
     });

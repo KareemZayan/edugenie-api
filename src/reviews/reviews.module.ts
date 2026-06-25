@@ -5,7 +5,10 @@ import { InstructorReviewsController } from './instructor-reviews.controller';
 import { ReviewsService } from './reviews.service';
 import { Review, ReviewSchema } from './schema/review.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({

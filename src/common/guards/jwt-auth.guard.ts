@@ -4,7 +4,8 @@ import { AuthGuard } from '@nestjs/passport';
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
-  canActivate(context: ExecutionContext) {  // ← was "anActivate" — guard never ran
+  canActivate(context: ExecutionContext) {
+    // ← was "anActivate" — guard never ran
     return super.canActivate(context);
   }
 }

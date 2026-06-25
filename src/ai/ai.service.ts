@@ -1,4 +1,10 @@
-import { Injectable, ForbiddenException, ServiceUnavailableException, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  ServiceUnavailableException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
@@ -22,10 +28,15 @@ export class AiService {
       throw new BadRequestException('Invalid lesson ID');
     }
 
-    const hasAccess = await this.enrollmentsService.canAccessLesson(studentId, lessonId);
+    const hasAccess = await this.enrollmentsService.canAccessLesson(
+      studentId,
+      lessonId,
+    );
 
     if (!hasAccess) {
-      throw new ForbiddenException('You must purchase this section to use the AI tutor');
+      throw new ForbiddenException(
+        'You must purchase this section to use the AI tutor',
+      );
     }
 
     try {
@@ -35,7 +46,9 @@ export class AiService {
       });
       return { reply: response.choices[0].message.content };
     } catch (error) {
-      throw new ServiceUnavailableException('AI service is currently unavailable. Please try again later.');
+      throw new ServiceUnavailableException(
+        'AI service is currently unavailable. Please try again later.',
+      );
     }
   }
 }

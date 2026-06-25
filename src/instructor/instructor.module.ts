@@ -5,7 +5,10 @@ import { InstructorService } from './instructor.service';
 import { InstructorSummaryService } from './instructor-summary.service';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { Earning, EarningSchema } from '../orders/schema/earning.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
 import { Review, ReviewSchema } from '../reviews/schema/review.schema';
 import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
 import { Progress, ProgressSchema } from '../progress/schema/progress.schema';

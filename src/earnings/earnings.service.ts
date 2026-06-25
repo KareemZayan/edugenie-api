@@ -8,13 +8,22 @@ import { Course } from '../courses/schema/course.schema';
 export class EarningsService {
   constructor(
     @InjectModel(Earning.name) private earningModel: Model<Earning>,
-    @InjectModel(Course.name) private courseModel: Model<Course>
+    @InjectModel(Course.name) private courseModel: Model<Course>,
   ) {}
 
   async getMyPayouts(instructorId: string) {
     const instructorObjId = new Types.ObjectId(instructorId);
 
-    const earnings = await this.earningModel.find({ instructorId: instructorObjId }).exec() as unknown as Array<{ amount: number; status: string; sectionId?: Types.ObjectId; courseId?: Types.ObjectId; createdAt: Date; orderId?: Types.ObjectId }>;
+    const earnings = (await this.earningModel
+      .find({ instructorId: instructorObjId })
+      .exec()) as unknown as Array<{
+      amount: number;
+      status: string;
+      sectionId?: Types.ObjectId;
+      courseId?: Types.ObjectId;
+      createdAt: Date;
+      orderId?: Types.ObjectId;
+    }>;
 
     let totalEarned = 0;
     let pendingPayout = 0;
@@ -39,11 +48,19 @@ export class EarningsService {
       let sectionTitle = null;
 
       if (e.courseId) {
-        const course = await this.courseModel.findById(e.courseId).select('title sections').exec() as unknown as { title: string; sections: Array<{ _id: Types.ObjectId; title: string }> } | null;
+        const course = (await this.courseModel
+          .findById(e.courseId)
+          .select('title sections')
+          .exec()) as unknown as {
+          title: string;
+          sections: Array<{ _id: Types.ObjectId; title: string }>;
+        } | null;
         if (course) {
           courseTitle = course.title;
           if (e.sectionId && course.sections) {
-            const section = course.sections.find((s) => s._id.toString() === e.sectionId?.toString());
+            const section = course.sections.find(
+              (s) => s._id.toString() === e.sectionId?.toString(),
+            );
             if (section) {
               sectionTitle = section.title;
             }

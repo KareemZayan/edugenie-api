@@ -1,3 +1,4 @@
+import { ApiTags, ApiOperation, ApiResponse as SwaggerApiResponse, ApiBody, ApiCookieAuth, ApiBearerAuth } from "@nestjs/swagger";
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import {
   Controller,
@@ -23,11 +24,17 @@ import { extractClientIp } from './utils/login-device.util';
 
 @Controller('auth')
 @UseGuards(ThrottlerGuard)
-@Throttle({ default: { limit: 20, ttl: 60000 } }) // 5 requests per 15 mins
+@Throttle({ default: { limit: 20, ttl: 60000 } })
+@ApiTags('Auth') // 5 requests per 15 mins
 export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
+  @ApiOperation({ summary: 'Register' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiBody({ type: CreateUserDto })
   async register(
     @Body() createUserDto: CreateUserDto,
   ): Promise<ApiResponse<AuthResponse>> {
@@ -41,6 +48,11 @@ export class AuthController {
 
   @HttpCode(HttpStatus.OK)
   @Post('login')
+  @ApiOperation({ summary: 'Login' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiBody({ type: LoginDto })
   async login(
     @Body() loginDto: LoginDto,
     @Req() request: express.Request,
@@ -76,6 +88,11 @@ export class AuthController {
   }
 
   @Post('verify-exchange-token')
+  @ApiOperation({ summary: 'Verify exchange token' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiBody({ schema: { type: 'string' } })
   async verifyExchangeToken(
     @Body('token') token: string,
     @Res({ passthrough: true }) response: express.Response,
@@ -105,6 +122,10 @@ export class AuthController {
 
   @HttpCode(HttpStatus.OK)
   @Post('logout')
+  @ApiOperation({ summary: 'Logout' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
   logout(@Res({ passthrough: true }) response: any): ApiResponse<AuthResponse> {
     response.clearCookie('jwt', {
       httpOnly: true,
@@ -122,6 +143,13 @@ export class AuthController {
 
   @Post('handoff-code')
   @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Generate handoff code' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
   async generateHandoffCode(
     @CurrentUser()
     user: {
@@ -144,6 +172,11 @@ export class AuthController {
   }
 
   @Post('redeem-code')
+  @ApiOperation({ summary: 'Redeem handoff code' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiBody({ type: RedeemHandoffCodeDto })
   async redeemHandoffCode(
     @Body() dto: RedeemHandoffCodeDto,
     @Res({ passthrough: true }) res: express.Response,
