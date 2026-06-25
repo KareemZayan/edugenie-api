@@ -19,7 +19,6 @@ export class Section {
   @Prop({ type: [String], default: [] })
   expectedOutcomes!: string[];
 
-
   @Prop({ type: Number, default: null, min: 0 })
   price!: number | null;
 

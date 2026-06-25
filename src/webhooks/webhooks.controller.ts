@@ -11,6 +11,7 @@ import {
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
+import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { Model, Types } from 'mongoose';
 
 import { PaymobService } from '../paymob/paymob.service';
@@ -28,6 +29,7 @@ import { NotificationType } from '../notifications/enums/notification-type.enum'
 import { STUDENT_MILESTONES } from '../common/constants/milestones.constant';
 
 @Controller('webhooks')
+@ApiTags('Webhooks')
 export class WebhooksController {
   constructor(
     private readonly paymobService: PaymobService,
@@ -44,6 +46,7 @@ export class WebhooksController {
 
   @Post('paymob')
   @UseInterceptors()
+  @ApiExcludeEndpoint()
   async handlePaymobWebhook(
     @Req() req: Request,
     @Res() res: Response,
@@ -265,6 +268,7 @@ export class WebhooksController {
 
   @Post('cloudinary')
   @UseInterceptors()
+  @ApiExcludeEndpoint()
   async handleCloudinaryWebhook(
     @Req() req: RawBodyRequest<Request>,
     @Res() res: Response,

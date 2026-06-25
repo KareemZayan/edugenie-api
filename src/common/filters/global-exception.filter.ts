@@ -21,7 +21,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     // if (response.headersSent) {
     //   return;
     // }
-//---------------
+    //---------------
 
     const status =
       exception instanceof HttpException

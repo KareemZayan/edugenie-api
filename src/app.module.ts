@@ -50,10 +50,12 @@ import { ScheduleModule } from '@nestjs/schedule';
       }),
       inject: [ConfigService],
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000, // 1 minute
-      limit: 100, // global limit
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 1 minute
+        limit: 100, // global limit
+      },
+    ]),
     AuthModule,
     UsersModule,
     CoursesModule,
@@ -81,4 +83,4 @@ import { ScheduleModule } from '@nestjs/schedule';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule { }
+export class AppModule {}

@@ -29,10 +29,10 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     }),
     ProgressModule,
     EnrollmentsModule,
-    NotificationsModule
+    NotificationsModule,
   ],
   controllers: [CoursesController, InstructorCoursesController],
   providers: [CoursesService],
   exports: [CoursesService],
 })
-export class CoursesModule { }
+export class CoursesModule {}

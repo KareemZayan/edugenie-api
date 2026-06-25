@@ -3,7 +3,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 
@@ -16,6 +19,6 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
     EnrollmentsModule,
   ],
   controllers: [AiController],
-  providers: [AiService]
+  providers: [AiService],
 })
 export class AiModule {}

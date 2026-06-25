@@ -14,7 +14,7 @@ import { NotificationType } from '../notifications/enums/notification-type.enum'
 /**
  * Instructor Summary Cron Service
  * Sends automated weekly and monthly performance summaries to instructors.
- * 
+ *
  * CRON Schedule:
  * - Weekly: Every Monday at 6:00 AM
  * - Monthly: 1st of every month at 6:00 AM
@@ -39,13 +39,13 @@ export class InstructorSummaryService {
   @Cron('0 6 * * 1')
   async sendWeeklySummaries(): Promise<void> {
     this.logger.log('Starting weekly instructor summary job...');
-    
+
     const periodStart = new Date();
     periodStart.setDate(periodStart.getDate() - 7);
     periodStart.setHours(0, 0, 0, 0);
 
     await this.sendSummaries(periodStart, 'weekly');
-    
+
     this.logger.log('Weekly instructor summary job completed.');
   }
 
@@ -56,12 +56,20 @@ export class InstructorSummaryService {
   @Cron('0 6 1 * *')
   async sendMonthlySummaries(): Promise<void> {
     this.logger.log('Starting monthly instructor summary job...');
-    
+
     const now = new Date();
-    const periodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const periodStart = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
 
     await this.sendSummaries(periodStart, 'monthly');
-    
+
     this.logger.log('Monthly instructor summary job completed.');
   }
 
@@ -70,7 +78,10 @@ export class InstructorSummaryService {
    * @param periodStart - Start date of the period to analyze
    * @param periodType - 'weekly' or 'monthly' (for message wording)
    */
-  private async sendSummaries(periodStart: Date, periodType: 'weekly' | 'monthly'): Promise<void> {
+  private async sendSummaries(
+    periodStart: Date,
+    periodType: 'weekly' | 'monthly',
+  ): Promise<void> {
     // 1. Fetch all instructors
     const instructors = await this.userModel
       .find({ role: UserRole.INSTRUCTOR })
@@ -82,7 +93,11 @@ export class InstructorSummaryService {
     // 2. Process each instructor
     for (const instructor of instructors) {
       try {
-        await this.sendInstructorSummary(instructor._id as Types.ObjectId, periodStart, periodType);
+        await this.sendInstructorSummary(
+          instructor._id as Types.ObjectId,
+          periodStart,
+          periodType,
+        );
       } catch (error) {
         this.logger.error(
           `Failed to send ${periodType} summary to instructor ${instructor._id}:`,
@@ -108,9 +123,9 @@ export class InstructorSummaryService {
       .find({ instructorId })
       .select('_id')
       .exec();
-    
-    const courseIds = courses.map(c => c._id);
-    
+
+    const courseIds = courses.map((c) => c._id);
+
     if (courseIds.length === 0) {
       this.logger.debug(`Instructor ${instructorId} has no courses, skipping.`);
       return;
@@ -161,13 +176,15 @@ export class InstructorSummaryService {
     }
 
     // 7. Create the notification
-    const title = periodType === 'weekly' ? 'Your Weekly Summary' : 'Your Monthly Summary';
+    const title =
+      periodType === 'weekly' ? 'Your Weekly Summary' : 'Your Monthly Summary';
     const periodWord = periodType === 'weekly' ? 'This week' : 'This month';
     const message = `${periodWord} you had ${enrollmentCount} new enrollments, earned ${totalEarnings.toFixed(2)} EGP, and received ${reviewCount} new reviews. Keep it up!`;
 
-    const notificationType = periodType === 'weekly' 
-      ? NotificationType.WEEKLY_SUMMARY 
-      : NotificationType.MONTHLY_SUMMARY;
+    const notificationType =
+      periodType === 'weekly'
+        ? NotificationType.WEEKLY_SUMMARY
+        : NotificationType.MONTHLY_SUMMARY;
 
     await this.notificationsService.create(
       instructorId,
@@ -178,7 +195,7 @@ export class InstructorSummaryService {
 
     this.logger.log(
       `Sent ${periodType} summary to instructor ${instructorId}: ` +
-      `${enrollmentCount} enrollments, ${totalEarnings} EGP, ${reviewCount} reviews`,
+        `${enrollmentCount} enrollments, ${totalEarnings} EGP, ${reviewCount} reviews`,
     );
   }
 
@@ -192,7 +209,7 @@ export class InstructorSummaryService {
    */
   async testSendWeeklySummaries(): Promise<{ message: string; count: number }> {
     this.logger.log('Manual trigger: Testing weekly summaries...');
-    
+
     const periodStart = new Date();
     periodStart.setDate(periodStart.getDate() - 7);
     periodStart.setHours(0, 0, 0, 0);
@@ -205,7 +222,11 @@ export class InstructorSummaryService {
     let notificationCount = 0;
     for (const instructor of instructors) {
       try {
-        await this.sendInstructorSummary(instructor._id as Types.ObjectId, periodStart, 'weekly');
+        await this.sendInstructorSummary(
+          instructor._id as Types.ObjectId,
+          periodStart,
+          'weekly',
+        );
         notificationCount++;
       } catch (error) {
         this.logger.error(
@@ -215,9 +236,9 @@ export class InstructorSummaryService {
       }
     }
 
-    return { 
-      message: `Weekly summary test completed. Notifications sent to ${notificationCount} instructors.`, 
-      count: notificationCount 
+    return {
+      message: `Weekly summary test completed. Notifications sent to ${notificationCount} instructors.`,
+      count: notificationCount,
     };
   }
 
@@ -225,11 +246,22 @@ export class InstructorSummaryService {
    * Manual trigger for monthly summaries (for testing)
    * POST /instructor/summary/test-monthly
    */
-  async testSendMonthlySummaries(): Promise<{ message: string; count: number }> {
+  async testSendMonthlySummaries(): Promise<{
+    message: string;
+    count: number;
+  }> {
     this.logger.log('Manual trigger: Testing monthly summaries...');
-    
+
     const now = new Date();
-    const periodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const periodStart = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
 
     const instructors = await this.userModel
       .find({ role: UserRole.INSTRUCTOR })
@@ -239,7 +271,11 @@ export class InstructorSummaryService {
     let notificationCount = 0;
     for (const instructor of instructors) {
       try {
-        await this.sendInstructorSummary(instructor._id as Types.ObjectId, periodStart, 'monthly');
+        await this.sendInstructorSummary(
+          instructor._id as Types.ObjectId,
+          periodStart,
+          'monthly',
+        );
         notificationCount++;
       } catch (error) {
         this.logger.error(
@@ -249,9 +285,9 @@ export class InstructorSummaryService {
       }
     }
 
-    return { 
-      message: `Monthly summary test completed. Notifications sent to ${notificationCount} instructors.`, 
-      count: notificationCount 
+    return {
+      message: `Monthly summary test completed. Notifications sent to ${notificationCount} instructors.`,
+      count: notificationCount,
     };
   }
 }

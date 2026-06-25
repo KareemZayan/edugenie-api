@@ -1,9 +1,12 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 import { NestFactory, Reflector } from '@nestjs/core';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { ValidationPipe, ClassSerializerInterceptor, Logger } from '@nestjs/common';
+import {
+  ValidationPipe,
+  ClassSerializerInterceptor,
+  Logger,
+} from '@nestjs/common';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { ConfigService } from '@nestjs/config';
@@ -29,14 +32,18 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
   const allowedOrigins = [
-    process.env.NEXTJS_APP_URL,      // e.g. https://your-nextjs.vercel.app
-    process.env.ANGULAR_APP_URL,     // e.g. https://your-angular.vercel.app
+    process.env.NEXTJS_APP_URL, // e.g. https://your-nextjs.vercel.app
+    process.env.ANGULAR_APP_URL, // e.g. https://your-angular.vercel.app
     'http://localhost:3000',
     'http://localhost:4200',
+    'http://localhost:5000',
   ].filter(Boolean);
 
   app.enableCors({
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
@@ -44,26 +51,40 @@ async function bootstrap() {
         callback(new Error(`CORS blocked: ${origin}`));
       }
     },
-    credentials: true,          // ← CRITICAL: allows cookies cross-origin
+    credentials: true, // ← CRITICAL: allows cookies cross-origin
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  app.setGlobalPrefix('api');   // ← only once
+  app.setGlobalPrefix('api'); // ← only once
 
-  const config = new DocumentBuilder()
-    .setTitle('EduGenie API')
-    .setDescription('The EduGenie API documentation')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  if (process.env.NODE_ENV !== 'production') {
+    const { DocumentBuilder, SwaggerModule } = await import('@nestjs/swagger');
+    const config = new DocumentBuilder()
+      .setTitle('EduGenie API')
+      .setDescription('The EduGenie API documentation')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .addCookieAuth('jwt')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+        tagsSorter: 'alpha',
+        operationsSorter: 'alpha',
+      },
+    });
+
+    const port = app.get(ConfigService).get<number>('PORT') || 3001;
+    Logger.log(`Swagger docs: http://localhost:${port}/api/docs`, 'Bootstrap');
+  }
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3001;
 
-  await app.listen(port);       // ← only once
+  await app.listen(port); // ← only once
 
   mongoose.connection.on('connected', () => {
     Logger.log('Successfully connected to MongoDB', 'Mongoose');
