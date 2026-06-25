@@ -56,15 +56,14 @@ async function createApp(): Promise<express.Express> {
 
   app.setGlobalPrefix('api');
 
-  await app.init();   // ← init() not listen() — no HTTP server, Vercel handles that
+  await app.init();
 
   return expressApp;
 }
 
-// Vercel calls this function on every request
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   if (!cachedApp) {
-    cachedApp = await createApp();  // cold start — cached for warm invocations
+    cachedApp = await createApp();
   }
   cachedApp(req, res);
 }
