@@ -64,20 +64,12 @@ export class LessonsService {
     // after: const lessonId = createdLesson?._id?.toString();
 
 if (lessonId && createLessonDto.videoUrl && createLessonDto.videoPublicId) {
-  try {
-    await this.cloudinaryService.triggerTranscription(
-      createLessonDto.videoPublicId,
-      courseId,
-      sectionId,
-      lessonId,
-    );
-  } catch (transcribeError) {
-    // Non-blocking - transcription is a best-effort feature
-    console.warn(
-      `Failed to trigger transcription for lesson ${lessonId}:`,
-      transcribeError,
-    );
-  }
+  this.cloudinaryService.triggerTranscription(
+    createLessonDto.videoPublicId,
+    courseId,
+    sectionId,
+    lessonId,
+  ).catch(err => console.warn('Transcription trigger failed:', err));
 }
 
     // New Content Published — notify students with access to this section
