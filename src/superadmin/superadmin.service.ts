@@ -1,12 +1,23 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { User } from '../users/schema/user.schema';
 import { Earning, EarningDocument } from '../earnings/schema/earning.schema';
 import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
 import { PlatformConfig, PlatformConfigDocument } from './schema/platform-config.schema';
 import { WebhookFailureLog, WebhookFailureLogDocument } from './schema/webhook-failure-log.schema';
 import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
+import { AdminInvite, AdminInviteDocument } from './schema/admin-invite.schema';
+import { MailService } from '../mail/mail.service';
+import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
@@ -34,7 +45,195 @@ export class SuperAdminService {
     @InjectModel(PlatformConfig.name) private platformConfigModel: Model<PlatformConfigDocument>,
     @InjectModel(WebhookFailureLog.name) private webhookFailureLogModel: Model<WebhookFailureLogDocument>,
     @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+    @InjectModel(AdminInvite.name) private adminInviteModel: Model<AdminInviteDocument>,
+    private readonly configService: ConfigService,
+    private readonly mailService: MailService,
   ) {}
+
+  private readonly INVITE_TTL_HOURS = 48;
+
+  /**
+   * Invites a new administrator by email. Creates a single-use, hashed,
+   * time-limited invite token and emails an acceptance link. No user record is
+   * created until the invite is accepted, so abandoned invites leave no
+   * half-provisioned privileged accounts behind.
+   */
+  async inviteAdmin(
+    superAdminId: string,
+    dto: CreateAdminInviteDto,
+  ): Promise<{
+    message: string;
+    email: string;
+    expiresAt: Date;
+    emailSent: boolean;
+    inviteUrl?: string;
+  }> {
+    const email = dto.email.toLowerCase().trim();
+
+    // Reject if a user with this email already exists.
+    const existingUser = await this.userModel.countDocuments({ email }).exec();
+    if (existingUser > 0) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    // Generate a high-entropy raw token; only its hash is persisted.
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
+    const expiresAt = new Date(
+      Date.now() + this.INVITE_TTL_HOURS * 60 * 60 * 1000,
+    );
+
+    // Replace any prior unaccepted invite for the same email (re-invite flow).
+    await this.adminInviteModel.deleteMany({ email, acceptedAt: null }).exec();
+
+    await this.adminInviteModel.create({
+      email,
+      firstName: dto.firstName.trim(),
+      lastName: dto.lastName.trim(),
+      tokenHash,
+      role: UserRole.ADMIN,
+      invitedBy: new Types.ObjectId(superAdminId),
+      expiresAt,
+    });
+
+    const dashboardUrl = (
+      this.configService.get<string>('DASHBOARD_URL') || 'http://localhost:4200'
+    ).replace(/\/$/, '');
+    const inviteUrl = `${dashboardUrl}/accept-invite?token=${rawToken}`;
+
+    await this.auditLogModel.create({
+      action: 'ADMIN_INVITED',
+      performedBy: new Types.ObjectId(superAdminId),
+      details: { email, role: UserRole.ADMIN },
+    });
+
+    let emailSent = false;
+    try {
+      await this.mailService.sendAdminInvite({
+        to: email,
+        firstName: dto.firstName.trim(),
+        inviteUrl,
+        expiresInHours: this.INVITE_TTL_HOURS,
+      });
+      emailSent = this.mailService.isConfigured;
+    } catch {
+      // Invite is persisted; surface a soft failure so the superadmin can retry.
+      emailSent = false;
+    }
+
+    return {
+      message: emailSent
+        ? 'Invitation email sent'
+        : 'Invitation created (email not configured — share the link manually)',
+      email,
+      expiresAt,
+      emailSent,
+      // Only expose the raw link when we could NOT email it (dev / misconfig).
+      inviteUrl: emailSent ? undefined : inviteUrl,
+    };
+  }
+
+  async listAdminInvites(): Promise<
+    Array<{
+      email: string;
+      firstName: string;
+      lastName: string;
+      invitedAt: Date;
+      expiresAt: Date;
+      status: 'pending' | 'expired';
+    }>
+  > {
+    const invites = await this.adminInviteModel
+      .find({ acceptedAt: null })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+
+    const now = Date.now();
+    return invites.map((inv: any) => ({
+      email: inv.email,
+      firstName: inv.firstName,
+      lastName: inv.lastName,
+      invitedAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      status: new Date(inv.expiresAt).getTime() < now ? 'expired' : 'pending',
+    }));
+  }
+
+  /**
+   * Revokes an admin's access by deactivating their account. The account and
+   * password are preserved (role stays `admin`); they simply can't log in
+   * anymore — enforced by the login/JWT status checks. Reversible via unrevoke.
+   */
+  async revokeAdmin(
+    superAdminId: string,
+    targetId: string,
+  ): Promise<{ id: string; status: UserStatus }> {
+    if (targetId === superAdminId) {
+      throw new ForbiddenException('You cannot revoke your own account');
+    }
+
+    const admin = await this.userModel.findById(targetId);
+    if (!admin) {
+      throw new NotFoundException('Admin not found');
+    }
+    if (admin.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Only admin accounts can be revoked here');
+    }
+    if (admin.status === UserStatus.DEACTIVATED) {
+      throw new BadRequestException('This admin is already revoked');
+    }
+
+    admin.status = UserStatus.DEACTIVATED;
+    admin.deactivatedReason = 'Admin access revoked by superadmin';
+    admin.deactivatedAt = new Date();
+    admin.deactivatedBy = new Types.ObjectId(superAdminId);
+    await admin.save();
+
+    await this.auditLogModel.create({
+      action: 'ADMIN_REVOKED',
+      performedBy: new Types.ObjectId(superAdminId),
+      targetUser: admin._id,
+      details: { email: admin.email },
+    });
+
+    return { id: admin._id.toString(), status: admin.status };
+  }
+
+  /** Restores a previously-revoked admin's access (reactivates the account). */
+  async unrevokeAdmin(
+    superAdminId: string,
+    targetId: string,
+  ): Promise<{ id: string; status: UserStatus }> {
+    const admin = await this.userModel.findById(targetId);
+    if (!admin) {
+      throw new NotFoundException('Admin not found');
+    }
+    if (admin.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Only admin accounts can be restored here');
+    }
+    if (admin.status === UserStatus.ACTIVE) {
+      throw new BadRequestException('This admin is already active');
+    }
+
+    admin.status = UserStatus.ACTIVE;
+    admin.deactivatedReason = null;
+    admin.deactivatedAt = null;
+    admin.deactivatedBy = null;
+    await admin.save();
+
+    await this.auditLogModel.create({
+      action: 'ADMIN_UNREVOKED',
+      performedBy: new Types.ObjectId(superAdminId),
+      targetUser: admin._id,
+      details: { email: admin.email },
+    });
+
+    return { id: admin._id.toString(), status: admin.status };
+  }
 
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -132,8 +331,9 @@ export class SuperAdminService {
           name: `${admin.firstName} ${admin.lastName}`,
           email: admin.email,
           role: admin.role,
+          status: admin.status,
           // NOTE: lastActiveAt requires a login-timestamp field on User — not currently tracked
-          lastActiveAt: null, 
+          lastActiveAt: null,
           actionsThisMonth,
         };
       })

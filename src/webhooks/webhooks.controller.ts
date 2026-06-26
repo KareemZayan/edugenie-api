@@ -1,6 +1,8 @@
 import { Controller, Post, Req, Res, Headers, UnauthorizedException, InternalServerErrorException } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import * as crypto from 'crypto';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 
@@ -11,10 +13,12 @@ import { Earning } from '../earnings/schema/earning.schema';
 import { Course } from '../courses/schema/course.schema';
 import { Lesson } from '../lessons/schema/lesson.schema';
 import { WebhookFailureLog } from '../superadmin/schema/webhook-failure-log.schema';
+import { PlatformConfig } from '../superadmin/schema/platform-config.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { OrderStatus } from '../common/enums/order-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
 
+@SkipThrottle()
 @Controller('webhooks')
 export class WebhooksController {
   constructor(
@@ -24,7 +28,8 @@ export class WebhooksController {
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     @InjectModel(Lesson.name) private readonly lessonModel: Model<Lesson>,
-    @InjectModel(WebhookFailureLog.name) private readonly webhookFailureLogModel: Model<WebhookFailureLog>
+    @InjectModel(WebhookFailureLog.name) private readonly webhookFailureLogModel: Model<WebhookFailureLog>,
+    @InjectModel(PlatformConfig.name) private readonly platformConfigModel: Model<PlatformConfig>
   ) {}
 
   @Post('paymob')
@@ -43,11 +48,20 @@ export class WebhooksController {
     }
 
     const payload = req.body;
-    
-    // In our mock, the payload structure would have an orderId or clientSecret.
-    // For this implementation, we will assume payload.order_id matches order._id
-    const orderIdStr = payload.order_id || payload.clientSecret?.replace('paymob_', '') || payload.obj?.order?.merchant_order_id || payload.obj?.special_reference;
-    
+
+    // SECURITY: the entire `obj` is HMAC-verified above, so every field inside
+    // it is trustworthy. We must derive the order reference and the paid amount
+    // ONLY from `obj` — never from client-controllable top-level fields.
+    const txn = payload?.obj;
+    if (!txn) {
+      return res.status(200).send('Missing transaction object');
+    }
+
+    const orderIdStr =
+      txn.order?.merchant_order_id ||
+      txn.payment_key_claims?.extra?.special_reference ||
+      txn.special_reference;
+
     if (!orderIdStr || !Types.ObjectId.isValid(orderIdStr)) {
       return res.status(200).send('Invalid or missing order reference in webhook');
     }
@@ -58,7 +72,7 @@ export class WebhooksController {
     try {
       // Find the order
       const order = await this.orderModel.findById(orderIdStr).session(session);
-      
+
       if (!order) {
         await session.abortTransaction();
         session.endSession();
@@ -72,14 +86,51 @@ export class WebhooksController {
         return res.status(200).send('Already processed');
       }
 
-      // Check if it's a failed transaction from paymob
-      if (payload.success === false || payload.success === 'false' || payload.obj?.success === false) {
+      // Treat refunded / voided / errored / unsuccessful transactions as failures.
+      const isSuccessful =
+        txn.success === true &&
+        txn.is_refunded !== true &&
+        txn.is_voided !== true &&
+        txn.error_occured !== true;
+
+      if (!isSuccessful) {
         order.status = OrderStatus.FAILED;
         await order.save({ session });
         await session.commitTransaction();
         session.endSession();
         return res.status(200).send('Recorded failure');
       }
+
+      // SECURITY: verify the gateway actually charged the expected amount/currency
+      // before granting any access. Prevents price-tampering / underpayment.
+      const paidCents = Number(txn.amount_cents);
+      const expectedCents = Math.round(order.totalAmount * 100);
+      const currency = String(txn.currency || '').toUpperCase();
+
+      if (
+        !Number.isFinite(paidCents) ||
+        paidCents !== expectedCents ||
+        (currency && currency !== 'EGP')
+      ) {
+        order.status = OrderStatus.FAILED;
+        await order.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+        await this.webhookFailureLogModel.create({
+          service: 'paymob',
+          endpoint: '/webhooks/paymob',
+          errorMessage: `Amount/currency mismatch for order ${orderIdStr}: paid ${paidCents} ${currency}, expected ${expectedCents} EGP`,
+        });
+        return res.status(200).send('Amount mismatch — not fulfilled');
+      }
+
+      // Resolve the configurable instructor revenue share (falls back to 80%).
+      const platformConfig = await this.platformConfigModel
+        .findOne()
+        .session(session);
+      const instructorSharePercent =
+        platformConfig?.instructorSharePercent ?? 80;
+      const instructorShare = instructorSharePercent / 100;
 
       // 1. Mark Order as COMPLETED
       order.status = OrderStatus.COMPLETED;
@@ -125,13 +176,18 @@ export class WebhooksController {
 
         await enrollment.save({ session });
 
-        // Earnings (80% split to instructor)
+        // Earnings — split per the configured instructor share, rounded to cents.
         const course = await this.courseModel.findById(item.courseId).session(session);
         if (course) {
-          const earningAmount = item.price * 0.80; // 80% split
+          const earningAmount = Math.round(item.price * instructorShare * 100) / 100;
           const earning = new this.earningModel({
             instructorId: course.instructorId,
             orderId: order._id,
+            courseId: item.courseId,
+            sectionId:
+              item.itemType === PurchaseType.SECTION && item.sectionId
+                ? item.sectionId
+                : null,
             amount: earningAmount,
             status: EarningStatus.PENDING
           });
@@ -164,10 +220,41 @@ export class WebhooksController {
   }
 
   @Post('cloudinary')
-  async handleCloudinaryWebhook(@Req() req: RawBodyRequest<Request>, @Res() res: Response) {
+  async handleCloudinaryWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Res() res: Response,
+    @Headers('x-cld-signature') signature: string,
+    @Headers('x-cld-timestamp') timestamp: string,
+  ) {
     try {
-      // Basic Cloudinary verification (often via X-Cld-Signature header or basic auth)
-      // For simplicity, assuming payload structure is parsed and valid
+      // Verify Cloudinary's notification signature:
+      // signature = sha1( rawBody + timestamp + apiSecret )
+      const apiSecret = process.env.CLOUDINARY_API_SECRET;
+      const rawBody = req.rawBody?.toString('utf8');
+      if (!apiSecret || !signature || !timestamp || !rawBody) {
+        throw new UnauthorizedException('Missing Cloudinary signature material');
+      }
+
+      // Reject stale notifications (replay protection) — 2 hour window.
+      const ageSeconds = Math.floor(Date.now() / 1000) - Number(timestamp);
+      if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds > 7200) {
+        throw new UnauthorizedException('Stale Cloudinary signature');
+      }
+
+      const expected = crypto
+        .createHash('sha1')
+        .update(`${rawBody}${timestamp}${apiSecret}`)
+        .digest('hex');
+
+      const expectedBuf = Buffer.from(expected, 'hex');
+      const signatureBuf = Buffer.from(String(signature), 'hex');
+      if (
+        expectedBuf.length !== signatureBuf.length ||
+        !crypto.timingSafeEqual(expectedBuf, signatureBuf)
+      ) {
+        throw new UnauthorizedException('Invalid Cloudinary signature');
+      }
+
       const body = req.body;
 
       if (body.notification_type === 'upload' && body.duration) {

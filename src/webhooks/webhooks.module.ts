@@ -9,6 +9,7 @@ import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import { Lesson, LessonSchema } from '../lessons/schema/lesson.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { WebhookFailureLog, WebhookFailureLogSchema } from '../superadmin/schema/webhook-failure-log.schema';
+import { PlatformConfig, PlatformConfigSchema } from '../superadmin/schema/platform-config.schema';
 
 @Module({
   imports: [
@@ -18,7 +19,8 @@ import { WebhookFailureLog, WebhookFailureLogSchema } from '../superadmin/schema
       { name: Earning.name, schema: EarningSchema },
       { name: Lesson.name, schema: LessonSchema },
       { name: Course.name, schema: CourseSchema },
-      { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema }
+      { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema },
+      { name: PlatformConfig.name, schema: PlatformConfigSchema }
     ]),
     PaymobModule
   ],

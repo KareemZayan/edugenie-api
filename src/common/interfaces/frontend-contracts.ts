@@ -748,6 +748,7 @@ export interface AdminListItem {
   name: string;
   email: string;
   role: string;
+  status: string;
   lastActiveAt: Date | null;
   actionsThisMonth: number;
 }

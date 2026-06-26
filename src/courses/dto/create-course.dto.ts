@@ -12,7 +12,6 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CourseLevel } from '../../common/enums/course-level.enum';
-import { CourseStatus } from '../../common/enums/course-status.enum';
 
 export class CreateCourseDto {
   @IsString()
@@ -51,7 +50,8 @@ export class CreateCourseDto {
   @IsString({ each: true })
   requirements?: string[];
 
-  @IsOptional()
-  @IsEnum(CourseStatus)
-  courseStatus?: CourseStatus;
+  // NOTE: courseStatus is intentionally NOT settable here. Status transitions
+  // (draft → under_review → published/rejected) happen only through the
+  // dedicated submit-for-review / admin-approval endpoints, so an instructor
+  // cannot self-publish a course by mass-assigning this field on create/update.
 }

@@ -33,8 +33,19 @@ async function bootstrap() {
 
   app.useGlobalFilters(new GlobalExceptionFilter(), new MongoExceptionFilter());
 
+  const configService = app.get(ConfigService);
+
+  // Allow both front-ends (dashboard + student web) plus local dev. Extra
+  // origins can be added via CORS_ORIGINS (comma-separated) without a redeploy.
+  const corsOrigins = [
+    configService.get<string>('DASHBOARD_URL') || 'https://edugenie-dashboard.vercel.app',
+    configService.get<string>('STUDENT_APP_URL') || 'https://edugenie-student-web.vercel.app',
+    'http://localhost:4200',
+    'http://localhost:3000',
+    ...(configService.get<string>('CORS_ORIGINS')?.split(',').map((o) => o.trim()).filter(Boolean) ?? []),
+  ];
   app.enableCors({
-    origin: ['https://edugenie-dashboard.vercel.app', 'http://localhost:4200'],
+    origin: Array.from(new Set(corsOrigins)),
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
@@ -51,7 +62,6 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3000;
 
   await app.listen(port);

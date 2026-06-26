@@ -14,6 +14,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { v2 as cloudinary } from 'cloudinary';
 import { UserSerializer } from './serializers/user.serializer';
 import { UserRole } from '../common/enums/user-role.enum';
+import { UserStatus } from '../common/enums/user-status.enum';
 import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
 import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
@@ -43,6 +44,66 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.userModel.findOne({ email }).exec();
+  }
+
+  async findById(userId: string | Types.ObjectId): Promise<User | null> {
+    if (!Types.ObjectId.isValid(userId)) return null;
+    return this.userModel.findById(userId).exec();
+  }
+
+  async emailExists(email: string): Promise<boolean> {
+    const count = await this.userModel
+      .countDocuments({ email: email.toLowerCase() })
+      .exec();
+    return count > 0;
+  }
+
+  /**
+   * Creates a privileged (admin) account from an accepted superadmin invite.
+   * This deliberately bypasses the public CreateUserDto role restriction and is
+   * only ever reached after a valid, unexpired invite token has been verified.
+   * The account is created already verified and active.
+   */
+  async createInvitedUser(data: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    role: UserRole;
+    passwordHash: string;
+  }): Promise<User> {
+    const existingUser = await this.userModel.findOne({ email: data.email });
+    if (existingUser) {
+      throw new ConflictException('Email already in use');
+    }
+
+    const newUser = new this.userModel({
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      role: data.role,
+      password: data.passwordHash,
+      isVerified: true,
+      status: UserStatus.ACTIVE,
+    });
+    return newUser.save();
+  }
+
+  /**
+   * Lightweight per-request auth lookup used by the JWT strategy.
+   * Returns only the fields needed to authorize the request, or null if the
+   * user no longer exists. Lets us enforce account status / role changes
+   * immediately instead of waiting for the 7-day token to expire.
+   */
+  async findAuthContextById(
+    userId: string,
+  ): Promise<{ role: UserRole; status: UserStatus } | null> {
+    if (!Types.ObjectId.isValid(userId)) return null;
+    const user = await this.userModel
+      .findById(userId)
+      .select('role status')
+      .lean<{ role: UserRole; status: UserStatus }>()
+      .exec();
+    return user ?? null;
   }
 
   async getProfile(userId: string): Promise<UserSerializer> {

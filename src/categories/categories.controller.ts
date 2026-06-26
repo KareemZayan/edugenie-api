@@ -14,6 +14,8 @@ import { UserRole } from '../common/enums/user-role.enum';
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) { }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @Post()
   async createCategory(@Body() createCategoryDto: CreateCategoryDto): Promise<ApiResponse<CategoryResponse>> {
     const category = await this.categoriesService.createCategory(createCategoryDto);
