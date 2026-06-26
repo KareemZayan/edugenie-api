@@ -129,7 +129,7 @@ export class CloudinaryController {
     @Body() body: { publicId: string; courseId: string; sectionId: string; lessonId: string },
   ) {
     return this.cloudinaryService.triggerTranscription(
-      body.publicId,
+      body.publicId,  
       body.courseId,
       body.sectionId,
       body.lessonId,
