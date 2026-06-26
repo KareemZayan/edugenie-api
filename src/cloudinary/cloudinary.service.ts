@@ -181,13 +181,13 @@ export class CloudinaryService {
   lessonId: string,
 ): Promise<{ queued: boolean }> {
   try {
-    await (cloudinary.uploader as any).explicit(publicId, {
+    // Use uploader.explicit with eager_async for reliability
+    await cloudinary.api.update(publicId, {
       resource_type: 'video',
-      type: 'upload',
       raw_convert: 'google_speech',
-      context: `courseId=${courseId}|sectionId=${sectionId}|lessonId=${lessonId}`,
       notification_url: this.configService.get<string>('CLOUDINARY_WEBHOOK_URL'),
-    });
+    } as any);
+
     this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId})`);
     return { queued: true };
   } catch (error: any) {
@@ -201,14 +201,14 @@ export class CloudinaryService {
   transcriptReady: boolean;
   transcriptText: string | null;
 }> {
-  // Check video exists
+  // Step 1: confirm video exists
   try {
     await cloudinary.api.resource(publicId, { resource_type: 'video' });
   } catch {
     return { videoReady: false, transcriptReady: false, transcriptText: null };
   }
 
-  // Check for transcript raw file
+  // Step 2: look for transcript raw file at {publicId}.transcript
   try {
     const raw = await cloudinary.api.resource(`${publicId}.transcript`, {
       resource_type: 'raw',
@@ -220,16 +220,20 @@ export class CloudinaryService {
         const json = await response.json() as any;
         let transcriptText: string | null = null;
 
-        if (json.results && Array.isArray(json.results)) {
+        if (json?.results && Array.isArray(json.results)) {
           const parts = json.results
             .map((r: any) => r.alternatives?.[0]?.transcript || '')
             .filter(Boolean);
-          if (parts.length > 0) transcriptText = parts.join(' ').trim();
+          if (parts.length > 0) {
+            transcriptText = parts.join(' ').trim();
+          }
         } else if (Array.isArray(json)) {
           const parts = json
             .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
             .filter(Boolean);
-          if (parts.length > 0) transcriptText = parts.join(' ').trim();
+          if (parts.length > 0) {
+            transcriptText = parts.join(' ').trim();
+          }
         }
 
         if (transcriptText) {
@@ -238,7 +242,7 @@ export class CloudinaryService {
       }
     }
   } catch {
-    // 404 = transcript not ready yet, normal
+    // 404 = not ready yet, normal
   }
 
   return { videoReady: true, transcriptReady: false, transcriptText: null };

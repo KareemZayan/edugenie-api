@@ -309,54 +309,41 @@ async handleCloudinaryWebhook(
       body.status === 'complete' &&
       body.output_public_id
     ) {
-      const transcriptPublicId: string = body.output_public_id; // e.g. "edugenie/.../video.transcript"
-      // The source video public_id is the transcript path minus the ".transcript" suffix
-      const videoPublicId = transcriptPublicId.replace(/\.transcript$/, '');
+      const videoPublicId: string = (body.output_public_id as string).replace(/\.transcript$/, '');
+      const transcriptUrl: string = body.secure_url || body.url || '';
+      let transcriptText: string | null = null;
 
       try {
-        const { default: fetch } = await import('node-fetch').catch(() => ({ default: globalThis.fetch }));
-        const transcriptUrl: string = body.secure_url || body.url;
-        let transcriptText: string | null = null;
-
         if (transcriptUrl) {
           const response = await fetch(transcriptUrl);
           if (response.ok) {
             const json = await response.json() as any;
-            if (json.results && Array.isArray(json.results)) {
+            if (json?.results && Array.isArray(json.results)) {
               transcriptText = json.results
                 .map((r: any) => r.alternatives?.[0]?.transcript || '')
                 .filter(Boolean)
                 .join(' ')
-                .trim();
+                .trim() || null;
             } else if (Array.isArray(json)) {
               transcriptText = json
                 .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
                 .filter(Boolean)
                 .join(' ')
-                .trim();
+                .trim() || null;
             }
           }
         }
 
-        if (transcriptText) {
-          // Find the lesson by videoPublicId and save transcript
+        if (transcriptText && videoPublicId) {
           await this.courseModel.updateOne(
             { 'sections.lessons.videoPublicId': videoPublicId },
-            {
-              $set: {
-                'sections.$[].lessons.$[l].transcript': transcriptText,
-              },
-            },
-            {
-              arrayFilters: [
-                { 'l.videoPublicId': videoPublicId },
-              ],
-            },
+            { $set: { 'sections.$[].lessons.$[l].transcript': transcriptText } },
+            { arrayFilters: [{ 'l.videoPublicId': videoPublicId }] },
           );
-          console.log(`Transcript saved for video: ${videoPublicId}`);
+          console.log(`[Webhook] Transcript saved for ${videoPublicId}`);
         }
-      } catch (transcriptError) {
-        console.error('Failed to save transcript from webhook:', transcriptError);
+      } catch (err) {
+        console.error('[Webhook] Failed to save transcript:', err);
       }
     }
 
