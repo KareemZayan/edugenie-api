@@ -238,4 +238,22 @@ async getTranscriptionStatus(publicId: string): Promise<{
 
   return { videoReady: true, transcriptReady: false, transcriptText: null };
 }
+
+async testTranscription(publicId: string) {
+  try {
+    const result = await cloudinary.uploader.explicit(publicId, {
+      resource_type: 'video',
+      type: 'upload',
+      raw_convert: 'google_speech',
+    } as any);
+    return { success: true, result };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error?.message,
+      http_code: error?.http_code,
+      error: JSON.stringify(error),
+    };
+  }
+}
 }

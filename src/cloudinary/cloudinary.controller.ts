@@ -25,6 +25,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CloudinaryService } from './cloudinary.service';
 
+import {  Get, Param } from '@nestjs/common';
+
 class DeleteAssetDto {
   @IsNotEmpty()
   @IsString()
@@ -110,6 +112,9 @@ export class CloudinaryController {
     return { success: true };
   }
 
+
+  
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Post('trigger-transcription')
@@ -129,4 +134,9 @@ export class CloudinaryController {
       body.lessonId,
     );
   }
+
+  @Get('test-transcript/*path')
+async testTranscript(@Param('path') publicId: string) {
+  return this.cloudinaryService.testTranscription(publicId);
+}
 }
