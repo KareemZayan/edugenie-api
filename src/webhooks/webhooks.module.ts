@@ -15,6 +15,10 @@ import {
   WebhookFailureLog,
   WebhookFailureLogSchema,
 } from '../superadmin/schema/webhook-failure-log.schema';
+import {
+  PlatformConfig,
+  PlatformConfigSchema,
+} from '../superadmin/schema/platform-config.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
@@ -25,6 +29,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Lesson.name, schema: LessonSchema },
       { name: Course.name, schema: CourseSchema },
       { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema },
+      { name: PlatformConfig.name, schema: PlatformConfigSchema },
     ]),
     PaymobModule,
     NotificationsModule,

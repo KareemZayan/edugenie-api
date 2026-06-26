@@ -8,6 +8,7 @@ import {
   IsArray,
   MinLength,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 
 import { UserRole } from '../../common/enums/user-role.enum';
@@ -35,9 +36,15 @@ export class CreateUserDto {
   @ApiProperty({ example: 'Password123!' })
   password!: string;
 
-  @IsEnum(UserRole, { message: 'Role must be student, instructor, or admin' })
-  @ApiProperty({ enum: UserRole, enumName: 'UserRole', example: 'student' })
-  role!: UserRole;
+  // SECURITY: public self-registration may only create student/instructor
+  // accounts. admin/superadmin accounts are provisioned exclusively via the
+  // superadmin invite flow. Never trust a client-supplied privileged role.
+  @IsOptional()
+  @IsIn([UserRole.STUDENT, UserRole.INSTRUCTOR], {
+    message: 'Role must be either student or instructor',
+  })
+  @ApiProperty({ enum: [UserRole.STUDENT, UserRole.INSTRUCTOR], example: 'student', required: false })
+  role?: UserRole.STUDENT | UserRole.INSTRUCTOR;
 
   // --- Optional Onboarding Fields below ---
 

@@ -78,19 +78,65 @@ export class PaymobService {
     }
   }
 
+  /**
+   * Verifies a Paymob transaction-processed callback HMAC.
+   *
+   * Paymob computes HMAC-SHA512 over a fixed, ordered concatenation of specific
+   * fields from the transaction object (`obj`) — NOT over the raw JSON body.
+   * See: https://developers.paymob.com/egypt/manage-callback/hmac-calculation
+   *
+   * There is intentionally NO bypass flag and NO mock-signature shortcut: this
+   * function must fail closed so a forged webhook can never grant enrollments.
+   */
   verifyWebhookHmac(payload: any, signature: string): boolean {
-    if (
-      process.env.WEBHOOK_BYPASS_HMAC === 'true' &&
-      process.env.NODE_ENV !== 'production'
-    ) {
-      this.logger.warn('Webhook HMAC bypassed via environment flag');
-      return true;
+    if (!signature || !this.hmacSecret || this.hmacSecret === 'dummy_hmac_secret') {
+      this.logger.warn('Rejecting webhook: missing signature or HMAC secret');
+      return false;
     }
+
+    const obj = payload?.obj;
+    if (!obj) {
+      this.logger.warn('Rejecting webhook: missing transaction object');
+      return false;
+    }
+
+    // Order is dictated by Paymob and must not change.
+    const fields = [
+      obj.amount_cents,
+      obj.created_at,
+      obj.currency,
+      obj.error_occured,
+      obj.has_parent_transaction,
+      obj.id,
+      obj.integration_id,
+      obj.is_3d_secure,
+      obj.is_auth,
+      obj.is_capture,
+      obj.is_refunded,
+      obj.is_standalone_payment,
+      obj.is_voided,
+      obj.order?.id,
+      obj.owner,
+      obj.pending,
+      obj.source_data?.pan,
+      obj.source_data?.sub_type,
+      obj.source_data?.type,
+      obj.success,
+    ];
+
+    const concatenated = fields.map((f) => String(f)).join('');
     const computed = crypto
       .createHmac('sha512', this.hmacSecret)
-      .update(typeof payload === 'string' ? payload : JSON.stringify(payload))
+      .update(concatenated)
       .digest('hex');
 
-    return computed === signature || signature === 'valid_mock_signature';
+    try {
+      const computedBuf = Buffer.from(computed, 'hex');
+      const signatureBuf = Buffer.from(String(signature), 'hex');
+      if (computedBuf.length !== signatureBuf.length) return false;
+      return crypto.timingSafeEqual(computedBuf, signatureBuf);
+    } catch {
+      return false;
+    }
   }
 }

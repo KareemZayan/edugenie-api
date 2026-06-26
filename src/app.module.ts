@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { MailModule } from './mail/mail.module';
 import { UsersModule } from './users/users.module';
 import { CoursesModule } from './courses/courses.module';
 import { SectionsModule } from './sections/sections.module';
@@ -36,11 +38,25 @@ import { ScheduleModule } from '@nestjs/schedule';
       isGlobal: true,
       validationSchema: Joi.object({
         MONGO_URI: Joi.string().required(),
-        JWT_SECRET: Joi.string().required(),
+        JWT_SECRET: Joi.string().min(16).required(),
         PORT: Joi.number().default(3000),
         CLOUDINARY_CLOUD_NAME: Joi.string().required(),
         CLOUDINARY_API_KEY: Joi.string().required(),
         CLOUDINARY_API_SECRET: Joi.string().required(),
+        NODE_ENV: Joi.string()
+          .valid('development', 'production', 'test')
+          .default('development'),
+        // Payments — required in production so the webhook can verify HMACs.
+        PAYMOB_SECRET_KEY: Joi.string().optional(),
+        PAYMOB_HMAC_SECRET: Joi.string().optional(),
+        PAYMOB_INTEGRATION_ID: Joi.string().optional(),
+        // Transactional email (Resend) — used by the admin-invite flow.
+        RESEND_API_KEY: Joi.string().optional(),
+        MAIL_FROM: Joi.string().default('EduGenie <noreply@edugenie.app>'),
+        // Front-end origins used for invite/redirect links and CORS.
+        DASHBOARD_URL: Joi.string().default('http://localhost:4200'),
+        STUDENT_APP_URL: Joi.string().default('http://localhost:3000'),
+        CORS_ORIGINS: Joi.string().optional(),
       }),
     }),
     MongooseModule.forRootAsync({
@@ -56,6 +72,7 @@ import { ScheduleModule } from '@nestjs/schedule';
         limit: 100, // global limit
       },
     ]),
+    MailModule,
     AuthModule,
     UsersModule,
     CoursesModule,
@@ -81,6 +98,13 @@ import { ScheduleModule } from '@nestjs/schedule';
     SuperAdminModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Enforce rate limiting on every route, not just /auth.
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

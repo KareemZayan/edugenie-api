@@ -17,6 +17,7 @@ import type { ApiResponse } from '../common/interfaces/api-response.interface';
 import type { AuthResponse } from './interfaces/auth-response.interface';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { RedeemHandoffCodeDto } from './dto/redeem-handoff-code.dto';
+import { AcceptInviteDto, ValidateInviteDto } from './dto/accept-invite.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Req } from '@nestjs/common'; // add to existing import
@@ -195,6 +196,43 @@ export class AuthController {
     return {
       success: true,
       data: { userId, userRole },
+    };
+  }
+
+  @Post('validate-invite')
+  @ApiOperation({ summary: 'Validate admin invite token' })
+  async validateInvite(
+    @Body() dto: ValidateInviteDto,
+  ): Promise<ApiResponse<{ email: string; firstName: string; lastName: string }>> {
+    const data = await this.authService.validateInvite(dto.token);
+    return { success: true, data };
+  }
+
+  // Accepts an admin invitation, provisions the account, and logs the new admin
+  // in by setting the session cookie.
+  @HttpCode(HttpStatus.OK)
+  @Post('accept-invite')
+  @ApiOperation({ summary: 'Accept admin invite' })
+  async acceptInvite(
+    @Body() dto: AcceptInviteDto,
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse>> {
+    const { token, user } = await this.authService.acceptInvite(dto);
+
+    response.cookie('jwt', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
+      maxAge: 24 * 60 * 60 * 1000,
+    });
+
+    return {
+      success: true,
+      data: {
+        message: 'Invitation accepted',
+        user,
+      },
     };
   }
 }

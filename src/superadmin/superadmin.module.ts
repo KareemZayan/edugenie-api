@@ -20,6 +20,10 @@ import {
   Notification,
   NotificationSchema,
 } from '../notifications/schema/notification.schema';
+import {
+  AdminInvite,
+  AdminInviteSchema,
+} from './schema/admin-invite.schema';
 
 @Module({
   imports: [
@@ -30,6 +34,7 @@ import {
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
       { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema },
       { name: Notification.name, schema: NotificationSchema },
+      { name: AdminInvite.name, schema: AdminInviteSchema },
     ]),
   ],
   controllers: [SuperAdminController],

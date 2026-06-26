@@ -34,6 +34,10 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiCookieAuth()
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Create category' })
   @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
   @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })

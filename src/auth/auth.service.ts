@@ -1,8 +1,15 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
 import * as bcrypt from 'bcrypt';
 import { UserSerializer } from '../users/serializers/user.serializer';
 import { InjectModel } from '@nestjs/mongoose';
@@ -15,8 +22,13 @@ import {
   HandoffCode,
   HandoffCodeDocument,
 } from './schemas/handoff-code.schema';
+import {
+  AdminInvite,
+  AdminInviteDocument,
+} from '../superadmin/schema/admin-invite.schema';
 import * as crypto from 'crypto';
 import { UserRole } from '../common/enums/user-role.enum';
+import { UserStatus } from '../common/enums/user-status.enum';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import {
@@ -37,13 +49,23 @@ export class AuthService {
     private exchangeTokenModel: Model<ExchangeTokenDocument>,
     @InjectModel(HandoffCode.name)
     private handoffCodeModel: Model<HandoffCodeDocument>,
+    @InjectModel(AdminInvite.name)
+    private adminInviteModel: Model<AdminInviteDocument>,
   ) {}
 
   async register(createUserDto: CreateUserDto) {
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
+    // SECURITY: public registration may only create student/instructor
+    // accounts. admin/superadmin are provisioned via the invite flow only.
+    const role =
+      createUserDto.role === UserRole.INSTRUCTOR
+        ? UserRole.INSTRUCTOR
+        : UserRole.STUDENT;
+
     await this.usersService.createUser({
       ...createUserDto,
+      role,
       password: hashedPassword,
     });
 
@@ -107,6 +129,13 @@ export class AuthService {
     );
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // SECURITY: deactivated/suspended accounts must not be able to log in.
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException(
+        'This account has been deactivated. Please contact support.',
+      );
     }
 
     let token: string;
@@ -236,6 +265,72 @@ export class AuthService {
       userId: updated.userId.toString(),
       userRole: updated.userRole,
       token: jwtToken,
+    };
+  }
+
+  private hashInviteToken(rawToken: string): string {
+    return crypto.createHash('sha256').update(rawToken).digest('hex');
+  }
+
+  /** Returns the invitee details for a valid, unexpired, unaccepted token. */
+  async validateInvite(
+    token: string,
+  ): Promise<{ email: string; firstName: string; lastName: string }> {
+    const invite = await this.adminInviteModel.findOne({
+      tokenHash: this.hashInviteToken(token),
+      acceptedAt: null,
+    });
+
+    if (!invite || invite.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('This invitation is invalid or has expired');
+    }
+
+    return {
+      email: invite.email,
+      firstName: invite.firstName,
+      lastName: invite.lastName,
+    };
+  }
+
+  /**
+   * Accepts an admin invitation: verifies the single-use token, provisions the
+   * admin account, marks the invite consumed, and issues a session token.
+   */
+  async acceptInvite(
+    dto: AcceptInviteDto,
+  ): Promise<{ token: string; user: UserSerializer }> {
+    const invite = await this.adminInviteModel.findOne({
+      tokenHash: this.hashInviteToken(dto.token),
+      acceptedAt: null,
+    });
+
+    if (!invite || invite.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('This invitation is invalid or has expired');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const user = await this.usersService.createInvitedUser({
+      firstName: invite.firstName,
+      lastName: invite.lastName,
+      email: invite.email,
+      role: invite.role,
+      passwordHash,
+    });
+
+    invite.acceptedAt = new Date();
+    await invite.save();
+
+    const payload = {
+      id: user._id,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    };
+    const token = this.jwtService.sign(payload);
+
+    return {
+      token,
+      user: new UserSerializer((user as any).toObject()),
     };
   }
 }

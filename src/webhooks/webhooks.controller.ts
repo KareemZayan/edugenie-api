@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import * as crypto from 'crypto';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InjectModel } from '@nestjs/mongoose';
 import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { Model, Types } from 'mongoose';
@@ -21,6 +23,7 @@ import { Earning } from '../earnings/schema/earning.schema';
 import { Course } from '../courses/schema/course.schema';
 import { Lesson } from '../lessons/schema/lesson.schema';
 import { WebhookFailureLog } from '../superadmin/schema/webhook-failure-log.schema';
+import { PlatformConfig } from '../superadmin/schema/platform-config.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { OrderStatus } from '../common/enums/order-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
@@ -28,6 +31,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { STUDENT_MILESTONES } from '../common/constants/milestones.constant';
 
+@SkipThrottle()
 @Controller('webhooks')
 @ApiTags('Webhooks')
 export class WebhooksController {
@@ -42,6 +46,8 @@ export class WebhooksController {
     @InjectModel(Lesson.name) private readonly lessonModel: Model<Lesson>,
     @InjectModel(WebhookFailureLog.name)
     private readonly webhookFailureLogModel: Model<WebhookFailureLog>,
+    @InjectModel(PlatformConfig.name)
+    private readonly platformConfigModel: Model<PlatformConfig>,
   ) {}
 
   @Post('paymob')
@@ -66,11 +72,19 @@ export class WebhooksController {
 
     const payload = req.body;
 
+    // SECURITY: the entire `obj` is HMAC-verified above, so every field inside
+    // it is trustworthy. Derive the order reference and the paid amount ONLY
+    // from `obj` — never from client-controllable top-level fields.
+    const txn = payload?.obj;
+    if (!txn) {
+      res.status(200).send('Missing transaction object');
+      return;
+    }
+
     const orderIdStr =
-      payload.order_id ||
-      payload.clientSecret?.replace('paymob_', '') ||
-      payload.obj?.order?.merchant_order_id ||
-      payload.obj?.special_reference;
+      txn.order?.merchant_order_id ||
+      txn.payment_key_claims?.extra?.special_reference ||
+      txn.special_reference;
 
     if (!orderIdStr || !Types.ObjectId.isValid(orderIdStr)) {
       res.status(200).send('Invalid or missing order reference in webhook');
@@ -98,12 +112,14 @@ export class WebhooksController {
         return;
       }
 
-      // Check if it's a failed transaction from paymob
-      if (
-        payload.success === false ||
-        payload.success === 'false' ||
-        payload.obj?.success === false
-      ) {
+      // Treat refunded / voided / errored / unsuccessful transactions as failures.
+      const isSuccessful =
+        txn.success === true &&
+        txn.is_refunded !== true &&
+        txn.is_voided !== true &&
+        txn.error_occured !== true;
+
+      if (!isSuccessful) {
         order.status = OrderStatus.FAILED;
         await order.save({ session });
         await session.commitTransaction();
@@ -120,6 +136,38 @@ export class WebhooksController {
         res.status(200).send('Recorded failure');
         return;
       }
+
+      // SECURITY: verify the gateway actually charged the expected amount/currency
+      // before granting any access. Prevents price-tampering / underpayment.
+      const paidCents = Number(txn.amount_cents);
+      const expectedCents = Math.round(order.totalAmount * 100);
+      const currency = String(txn.currency || '').toUpperCase();
+
+      if (
+        !Number.isFinite(paidCents) ||
+        paidCents !== expectedCents ||
+        (currency && currency !== 'EGP')
+      ) {
+        order.status = OrderStatus.FAILED;
+        await order.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+        await this.webhookFailureLogModel.create({
+          service: 'paymob',
+          endpoint: '/webhooks/paymob',
+          errorMessage: `Amount/currency mismatch for order ${orderIdStr}: paid ${paidCents} ${currency}, expected ${expectedCents} EGP`,
+        });
+        res.status(200).send('Amount mismatch — not fulfilled');
+        return;
+      }
+
+      // Resolve the configurable instructor revenue share (falls back to 80%).
+      const platformConfig = await this.platformConfigModel
+        .findOne()
+        .session(session);
+      const instructorSharePercent =
+        platformConfig?.instructorSharePercent ?? 80;
+      const instructorShare = instructorSharePercent / 100;
 
       // 1. Mark Order as COMPLETED
       order.status = OrderStatus.COMPLETED;
@@ -178,7 +226,8 @@ export class WebhooksController {
           .findById(item.courseId)
           .session(session);
         if (course) {
-          const earningAmount = item.price * 0.8;
+          const earningAmount =
+            Math.round(item.price * instructorShare * 100) / 100;
           const earning = new this.earningModel({
             instructorId: course.instructorId,
             orderId: order._id,
@@ -216,7 +265,8 @@ export class WebhooksController {
           );
 
           // Earning Recorded notification
-          const earningAmount = item.price * 0.8;
+          const earningAmount =
+            Math.round(item.price * instructorShare * 100) / 100;
           await this.notificationsService.create(
             course.instructorId,
             'Earning Recorded',
@@ -272,8 +322,38 @@ export class WebhooksController {
 async handleCloudinaryWebhook(
   @Req() req: RawBodyRequest<Request>,
   @Res() res: Response,
+  @Headers('x-cld-signature') signature: string,
+  @Headers('x-cld-timestamp') timestamp: string,
 ) {
   try {
+    // Verify Cloudinary's notification signature:
+    // signature = sha1( rawBody + timestamp + apiSecret )
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    const rawBody = req.rawBody?.toString('utf8');
+    if (!apiSecret || !signature || !timestamp || !rawBody) {
+      throw new UnauthorizedException('Missing Cloudinary signature material');
+    }
+
+    // Reject stale notifications (replay protection) — 2 hour window.
+    const ageSeconds = Math.floor(Date.now() / 1000) - Number(timestamp);
+    if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds > 7200) {
+      throw new UnauthorizedException('Stale Cloudinary signature');
+    }
+
+    const expected = crypto
+      .createHash('sha1')
+      .update(`${rawBody}${timestamp}${apiSecret}`)
+      .digest('hex');
+
+    const expectedBuf = Buffer.from(expected, 'hex');
+    const signatureBuf = Buffer.from(String(signature), 'hex');
+    if (
+      expectedBuf.length !== signatureBuf.length ||
+      !crypto.timingSafeEqual(expectedBuf, signatureBuf)
+    ) {
+      throw new UnauthorizedException('Invalid Cloudinary signature');
+    }
+
     const body = req.body;
 
     // ── Handle video upload completion ──────────────────────────
