@@ -242,20 +242,13 @@ if (updateLessonDto.videoPublicId) {
 
   // If the video was changed/added in this update, (re)trigger transcription
   if (updateLessonDto.videoUrl && updateLessonDto.videoPublicId) {
-    try {
-      await this.cloudinaryService.triggerTranscription(
-        updateLessonDto.videoPublicId,
-        courseId,
-        sectionId,
-        lessonId,
-      );
-    } catch (transcribeError) {
-      console.warn(
-        `Failed to trigger transcription for lesson ${lessonId}:`,
-        transcribeError,
-      );
-    }
-  }
+  this.cloudinaryService.triggerTranscription(
+    updateLessonDto.videoPublicId,
+    courseId,
+    sectionId,
+    lessonId,
+  ).catch(err => console.warn('Transcription trigger failed:', err));
+}
 
   return updated
     .toObject()
