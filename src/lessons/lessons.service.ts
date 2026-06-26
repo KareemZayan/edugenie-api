@@ -30,158 +30,6 @@ export class LessonsService {
     private notificationsService: NotificationsService,
   ) { }
 
-  /**
-   * Create a placeholder lesson WITHOUT video - used when instructor starts
-   * creating a lesson but hasn't uploaded video yet. This returns a real
-   * MongoDB ObjectId that can be used in Cloudinary context.
-   * 
-   * IMPORTANT: No notifications are sent - they are sent only after
-   * markLessonVideoComplete() is called with real video data.
-   */
-  async addLessonPlaceholder(
-    courseId: string,
-    sectionId: string,
-    instructorId: string,
-    title: string,
-    description?: string,
-  ) {
-    // Create a placeholder lesson with empty video fields - video is required
-    // so we use empty strings that will be updated later
-    const placeholderData = {
-      title,
-      description: description || '',
-      videoUrl: '',  // Will be updated by webhook when video uploads
-      videoPublicId: '', // Will be updated by webhook when video uploads
-      videoDuration: 0,  // Will be updated by webhook when video uploads
-      transcript: null,  // Will be set when transcription completes
-      isFree: false,
-    };
-
-    const updated = await this.courseModel
-      .findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(courseId),
-          instructorId: new Types.ObjectId(instructorId),
-          'sections._id': new Types.ObjectId(sectionId),
-        },
-        { $push: { 'sections.$.lessons': placeholderData } },
-        { returnDocument: 'after', runValidators: false },
-      )
-      .exec();
-
-    if (!updated)
-      throw new NotFoundException('Invalid Course, Section, or Ownership');
-
-    await this.coursesService.syncMetadata(courseId);
-
-    // Find the newly created lesson to return its ID
-    const section = updated.sections.find(
-      (s: any) => s._id.toString() === sectionId,
-    );
-    const lessons = section?.lessons || [];
-    const createdLesson = lessons[lessons.length - 1];
-
-    if (!createdLesson) {
-      throw new BadRequestException('Failed to create lesson placeholder');
-    }
-
-    return {
-      lessonId: createdLesson._id.toString(),
-      sections: updated
-        .toObject()
-        .sections.map((sec: any) => new SectionSerializer(sec)),
-    };
-  }
-
-  /**
-   * Called when video upload completes - updates the lesson with video data
-   * and sends notifications to students.
-   * 
-   * This is called from the Cloudinary webhook to ensure video data is complete
-   * before notifying students.
-   */
-  async markLessonVideoComplete(
-    courseId: string,
-    sectionId: string,
-    lessonId: string,
-    instructorId: string,
-    videoUrl: string,
-    videoPublicId: string,
-    videoDuration: number,
-  ) {
-    const updated = await this.courseModel
-      .findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(courseId),
-          instructorId: new Types.ObjectId(instructorId),
-          'sections._id': new Types.ObjectId(sectionId),
-          'sections.lessons._id': new Types.ObjectId(lessonId),
-        },
-        {
-          $set: {
-            'sections.$[s].lessons.$[l].videoUrl': videoUrl,
-            'sections.$[s].lessons.$[l].videoPublicId': videoPublicId,
-            'sections.$[s].lessons.$[l].videoDuration': videoDuration,
-          },
-        },
-        {
-          arrayFilters: [
-            { 's._id': new Types.ObjectId(sectionId) },
-            { 'l._id': new Types.ObjectId(lessonId) },
-          ],
-          returnDocument: 'after',
-        },
-      )
-      .exec();
-
-    if (!updated) {
-      throw new NotFoundException('Lesson not found or unauthorized');
-    }
-
-    await this.coursesService.syncMetadata(courseId);
-
-    // Get the lesson title for notifications
-    const section = updated.sections.find(
-      (s: any) => s._id.toString() === sectionId,
-    );
-    const lesson = section?.lessons.find(
-      (l: any) => l._id.toString() === lessonId,
-    );
-    const lessonTitle = lesson?.title || 'New Lesson';
-
-    // Now send notifications - students should only be notified when
-    // the lesson has a real video attached
-    const studentIds =
-      await this.enrollmentsService.getStudentIdsWithSectionAccess(
-        courseId,
-        sectionId,
-      );
-
-    for (const studentId of studentIds) {
-      try {
-        await this.notificationsService.create(
-          studentId,
-          'New Lesson Available',
-          `A new lesson, "${lessonTitle}", was added to "${updated.title}".`,
-          NotificationType.NEW_CONTENT_PUBLISHED,
-          courseId,
-        );
-      } catch (error) {
-        console.error(
-          `Failed to notify student ${studentId} of new lesson:`,
-          error,
-        );
-      }
-    }
-
-    return {
-      success: true,
-      sections: updated
-        .toObject()
-        .sections.map((sec: any) => new SectionSerializer(sec)),
-    };
-  }
-
   async addLesson(
     courseId: string,
     sectionId: string,
@@ -204,6 +52,37 @@ export class LessonsService {
       throw new NotFoundException('Invalid Course, Section, or Ownership');
 
     await this.coursesService.syncMetadata(courseId);
+
+    // Find the created lesson to get its ID for transcription
+    const section = updated.sections.find(
+      (s: any) => s._id.toString() === sectionId,
+    );
+    const lessons = section?.lessons || [];
+    const createdLesson = lessons[lessons.length - 1];
+    const lessonId = createdLesson?._id?.toString();
+
+    // Trigger transcription if lesson has video
+    // This is done AFTER lesson creation to ensure we have a real lessonId
+    if (
+      lessonId &&
+      createLessonDto.videoUrl &&
+      createLessonDto.videoPublicId
+    ) {
+      try {
+        await this.cloudinaryService.triggerTranscription(
+          createLessonDto.videoPublicId,
+          courseId,
+          sectionId,
+          lessonId,
+        );
+      } catch (transcribeError) {
+        // Non-blocking - transcription is a best-effort feature
+        console.warn(
+          `Failed to trigger transcription for lesson ${lessonId}:`,
+          transcribeError,
+        );
+      }
+    }
 
     // New Content Published — notify students with access to this section
     // Only notify if the lesson has a real video (not empty)
@@ -233,9 +112,13 @@ export class LessonsService {
       }
     }
 
-    return updated
-      .toObject()
-      .sections.map((sec: any) => new SectionSerializer(sec));
+    // Return sections along with the created lesson ID for frontend convenience
+    return {
+      sections: updated
+        .toObject()
+        .sections.map((sec: any) => new SectionSerializer(sec)),
+      createdLessonId: lessonId,
+    };
   }
 
   async getLessonById(
