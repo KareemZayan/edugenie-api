@@ -65,7 +65,7 @@ export class LessonsService {
           'sections._id': new Types.ObjectId(sectionId),
         },
         { $push: { 'sections.$.lessons': placeholderData } },
-        { returnDocument: 'after', runValidators: true },
+        { returnDocument: 'after', runValidators: false },
       )
       .exec();
 
