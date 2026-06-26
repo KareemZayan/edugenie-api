@@ -24,35 +24,35 @@ export class CloudinaryService {
   }
 
   generateSignature(folderPath: string, context?: string) {
-  const timestamp = Math.round(Date.now() / 1000);
+    const timestamp = Math.round(Date.now() / 1000);
 
-  const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
-  const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-  const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
+    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
 
-  const paramsToSign: Record<string, any> = {
-    timestamp,
-    folder: folderPath,
-    // raw_convert removed — transcription is now triggered explicitly,
-    // after the lesson exists, via triggerTranscription()
-  };
+    const paramsToSign: Record<string, any> = {
+      timestamp,
+      folder: folderPath,
+      // raw_convert removed — transcription is now triggered explicitly,
+      // after the lesson exists, via triggerTranscription()
+    };
 
-  if (context) {
-    paramsToSign.context = context;
+    if (context) {
+      paramsToSign.context = context;
+    }
+
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      apiSecret as string,
+    );
+    return {
+      signature,
+      timestamp,
+      apiKey,
+      cloudName,
+      raw_convert: '', // no longer sent for signing; kept in shape only if frontend still reads it
+    };
   }
-
-  const signature = cloudinary.utils.api_sign_request(
-    paramsToSign,
-    apiSecret as string,
-  );
-  return {
-    signature,
-    timestamp,
-    apiKey,
-    cloudName,
-    raw_convert: '', // no longer sent for signing; kept in shape only if frontend still reads it
-  };
-}
 
   async deleteAsset(
     publicId: string,
@@ -175,107 +175,91 @@ export class CloudinaryService {
    * a real lessonId that was not available at upload time (draft system).
    */
   async triggerTranscription(
-  publicId: string,
-  courseId: string,
-  sectionId: string,
-  lessonId: string,
-): Promise<{ queued: boolean }> {
-  try {
-    // Get the asset's current URL so we can resubmit it through `upload`
-    // (raw_convert only fires via `upload`, not `explicit`)
-    const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
+    publicId: string,
+    courseId: string,
+    sectionId: string,
+    lessonId: string,
+  ): Promise<{ queued: boolean }> {
+    try {
+      const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
 
-    const result = await cloudinary.uploader.upload(existing.secure_url, {
-      resource_type: 'video',
-      type: 'upload',
-      public_id: publicId,
-      overwrite: true,
-      invalidate: true,
-      raw_convert: 'google_speech',
-    } as any);
+      const result = await cloudinary.uploader.explicit(publicId, {
+        resource_type: 'video',
+        type: 'upload',
+        raw_convert: 'google_speech',
+        ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+      } as any);
 
-    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId}): ${JSON.stringify(result?.info || 'queued')}`);
-
-    // Overwriting bumps the version number — keep the stored URL in sync
-    if (result?.secure_url) {
-      await this.courseModel.updateOne(
-        { _id: new Types.ObjectId(courseId) },
-        { $set: { 'sections.$[s].lessons.$[l].videoUrl': result.secure_url } },
-        {
-          arrayFilters: [
-            { 's._id': new Types.ObjectId(sectionId) },
-            { 'l._id': new Types.ObjectId(lessonId) },
-          ],
-        },
-      );
+      this.logger.log(`Triggered transcription for ${publicId} (lesson ${lessonId}): ${JSON.stringify(result?.info || 'queued')}`);
+      return { queued: true };
+    } catch (error: any) {
+      this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
+      return { queued: false };
     }
-
-    return { queued: true };
-  } catch (error: any) {
-    this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
-    return { queued: false };
   }
-}
 
-async getTranscriptionStatus(publicId: string): Promise<{
-  videoReady: boolean;
-  transcriptReady: boolean;
-  transcriptText: string | null;
-}> {
-  const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-  const transcriptUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${publicId}.transcript`;
-
-  try {
-    const response = await fetch(transcriptUrl);
-
-    if (response.status === 404) {
-      return { videoReady: true, transcriptReady: false, transcriptText: null };
+  async testTranscription(publicId: string) {
+    try {
+      const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
+      const result = await cloudinary.uploader.explicit(publicId, {
+        resource_type: 'video',
+        type: 'upload',
+        raw_convert: 'google_speech',
+        ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+      } as any);
+      return { success: true, result };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error?.message,
+        http_code: error?.http_code,
+        error: JSON.stringify(error),
+      };
     }
+  }
 
-    if (response.ok) {
-      const json = await response.json() as any;
-      let transcriptText: string | null = null;
+  async getTranscriptionStatus(publicId: string): Promise<{
+    videoReady: boolean;
+    transcriptReady: boolean;
+    transcriptText: string | null;
+  }> {
+    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const transcriptUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${publicId}.transcript`;
 
-      if (Array.isArray(json)) {
-        transcriptText = json
-          .map((r: any) => r.transcript || r.alternatives?.[0]?.transcript || '')
-          .filter(Boolean)
-          .join(' ')
-          .trim() || null;
-      } else if (json?.results && Array.isArray(json.results)) {
-        transcriptText = json.results
-          .map((r: any) => r.alternatives?.[0]?.transcript || '')
-          .filter(Boolean)
-          .join(' ')
-          .trim() || null;
+    try {
+      const response = await fetch(transcriptUrl);
+
+      if (response.status === 404) {
+        return { videoReady: true, transcriptReady: false, transcriptText: null };
       }
 
-      if (transcriptText) {
-        return { videoReady: true, transcriptReady: true, transcriptText };
+      if (response.ok) {
+        const json = await response.json() as any;
+        let transcriptText: string | null = null;
+
+        if (Array.isArray(json)) {
+          transcriptText = json
+            .map((r: any) => r.transcript || r.alternatives?.[0]?.transcript || '')
+            .filter(Boolean)
+            .join(' ')
+            .trim() || null;
+        } else if (json?.results && Array.isArray(json.results)) {
+          transcriptText = json.results
+            .map((r: any) => r.alternatives?.[0]?.transcript || '')
+            .filter(Boolean)
+            .join(' ')
+            .trim() || null;
+        }
+
+        if (transcriptText) {
+          return { videoReady: true, transcriptReady: true, transcriptText };
+        }
       }
+    } catch (err) {
+      this.logger.warn(`Transcript fetch failed for ${publicId}:`, err);
     }
-  } catch (err) {
-    this.logger.warn(`Transcript fetch failed for ${publicId}:`, err);
+
+    return { videoReady: true, transcriptReady: false, transcriptText: null };
   }
 
-  return { videoReady: true, transcriptReady: false, transcriptText: null };
-}
-
-async testTranscription(publicId: string) {
-  try {
-    const result = await cloudinary.uploader.explicit(publicId, {
-      resource_type: 'video',
-      type: 'upload',
-      raw_convert: 'google_speech',
-    } as any);
-    return { success: true, result };
-  } catch (error: any) {
-    return {
-      success: false,
-      message: error?.message,
-      http_code: error?.http_code,
-      error: JSON.stringify(error),
-    };
-  }
-}
 }
