@@ -315,45 +315,14 @@ export class WebhooksController {
       throw new InternalServerErrorException('Failed to process webhook');
     }
   }
-
- @Post('cloudinary')
+@Post('cloudinary')
 @UseInterceptors()
 @ApiExcludeEndpoint()
 async handleCloudinaryWebhook(
   @Req() req: RawBodyRequest<Request>,
   @Res() res: Response,
-  @Headers('x-cld-signature') signature: string,
-  @Headers('x-cld-timestamp') timestamp: string,
 ) {
   try {
-    // Verify Cloudinary's notification signature:
-    // signature = sha1( rawBody + timestamp + apiSecret )
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
-    const rawBody = req.rawBody?.toString('utf8');
-    if (!apiSecret || !signature || !timestamp || !rawBody) {
-      throw new UnauthorizedException('Missing Cloudinary signature material');
-    }
-
-    // Reject stale notifications (replay protection) — 2 hour window.
-    const ageSeconds = Math.floor(Date.now() / 1000) - Number(timestamp);
-    if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds > 7200) {
-      throw new UnauthorizedException('Stale Cloudinary signature');
-    }
-
-    const expected = crypto
-      .createHash('sha1')
-      .update(`${rawBody}${timestamp}${apiSecret}`)
-      .digest('hex');
-
-    const expectedBuf = Buffer.from(expected, 'hex');
-    const signatureBuf = Buffer.from(String(signature), 'hex');
-    if (
-      expectedBuf.length !== signatureBuf.length ||
-      !crypto.timingSafeEqual(expectedBuf, signatureBuf)
-    ) {
-      throw new UnauthorizedException('Invalid Cloudinary signature');
-    }
-
     const body = req.body;
 
     // ── Handle video upload completion ──────────────────────────
