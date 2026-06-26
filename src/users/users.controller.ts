@@ -7,6 +7,8 @@ import {
   Param,
   UseInterceptors,
   UploadedFile,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -20,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiResponse } from '../common/interfaces/api-response.interface';
@@ -81,6 +84,32 @@ export class UsersController {
       success: true,
       message: 'Profile updated successfully',
       data: updatedProfile,
+    };
+  }
+
+  @Patch('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change user password' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({
+    status: 200,
+    description: 'Password changed successfully',
+  })
+  @SwaggerApiResponse({ status: 401, description: 'Current password is incorrect' })
+  async changePassword(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: ChangePasswordDto,
+  ): Promise<ApiResponse<{ message: string }>> {
+    await this.usersService.changePassword(
+      user.userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+    return {
+      success: true,
+      data: { message: 'Password changed successfully' },
     };
   }
 
