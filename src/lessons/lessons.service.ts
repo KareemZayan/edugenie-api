@@ -213,7 +213,7 @@ if (lessonId && createLessonDto.videoUrl && createLessonDto.videoPublicId) {
 
   // If a new video is being attached, clear the stale transcript so polling re-checks Cloudinary
 if (updateLessonDto.videoPublicId) {
-  updateFields['sections.$[s].lessons.$[l].transcript'] = '';
+  updateFields['sections.$[s].lessons.$[l].transcript'] = undefined;
 }
   const updated = await this.courseModel
     .findOneAndUpdate(
