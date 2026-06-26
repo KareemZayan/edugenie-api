@@ -61,28 +61,24 @@ export class LessonsService {
     const createdLesson = lessons[lessons.length - 1];
     const lessonId = createdLesson?._id?.toString();
 
-    // Trigger transcription if lesson has video
-    // This is done AFTER lesson creation to ensure we have a real lessonId
-    if (
-      lessonId &&
-      createLessonDto.videoUrl &&
-      createLessonDto.videoPublicId
-    ) {
-      try {
-        await this.cloudinaryService.triggerTranscription(
-          createLessonDto.videoPublicId,
-          courseId,
-          sectionId,
-          lessonId,
-        );
-      } catch (transcribeError) {
-        // Non-blocking - transcription is a best-effort feature
-        console.warn(
-          `Failed to trigger transcription for lesson ${lessonId}:`,
-          transcribeError,
-        );
-      }
-    }
+    // after: const lessonId = createdLesson?._id?.toString();
+
+if (lessonId && createLessonDto.videoUrl && createLessonDto.videoPublicId) {
+  try {
+    await this.cloudinaryService.triggerTranscription(
+      createLessonDto.videoPublicId,
+      courseId,
+      sectionId,
+      lessonId,
+    );
+  } catch (transcribeError) {
+    // Non-blocking - transcription is a best-effort feature
+    console.warn(
+      `Failed to trigger transcription for lesson ${lessonId}:`,
+      transcribeError,
+    );
+  }
+}
 
     // New Content Published — notify students with access to this section
     // Only notify if the lesson has a real video (not empty)
@@ -202,54 +198,77 @@ export class LessonsService {
   }
 
   async updateLesson(
-    courseId: string,
-    sectionId: string,
-    lessonId: string,
-    instructorId: string,
-    updateLessonDto: UpdateLessonDto,
-  ) {
-    if (!updateLessonDto || Object.keys(updateLessonDto).length === 0) {
-      throw new BadRequestException(
-        'Update data (Request Body) cannot be empty',
+  courseId: string,
+  sectionId: string,
+  lessonId: string,
+  instructorId: string,
+  updateLessonDto: UpdateLessonDto,
+) {
+  if (!updateLessonDto || Object.keys(updateLessonDto).length === 0) {
+    throw new BadRequestException(
+      'Update data (Request Body) cannot be empty',
+    );
+  }
+
+  const updateFields: Record<string, any> = {};
+
+
+  Object.keys(updateLessonDto).forEach((key) => {
+    const safeKey = key as keyof UpdateLessonDto;
+    updateFields[`sections.$[s].lessons.$[l].${safeKey}`] =
+      updateLessonDto[safeKey];
+  });
+
+  // If a new video is being attached, clear the stale transcript so polling re-checks Cloudinary
+if (updateLessonDto.videoPublicId) {
+  updateFields['sections.$[s].lessons.$[l].transcript'] = '';
+}
+  const updated = await this.courseModel
+    .findOneAndUpdate(
+      {
+        _id: new Types.ObjectId(courseId),
+        instructorId: new Types.ObjectId(instructorId),
+      },
+      { $set: updateFields },
+      {
+        arrayFilters: [
+          { 's._id': new Types.ObjectId(sectionId) },
+          { 'l._id': new Types.ObjectId(lessonId) },
+        ],
+        returnDocument: 'after',
+        runValidators: true,
+      },
+    )
+    .exec();
+
+  if (!updated)
+    throw new BadRequestException(
+      'Update failed: Course/Section not found or Unauthorized',
+    );
+
+  await this.coursesService.syncMetadata(courseId);
+
+  // If the video was changed/added in this update, (re)trigger transcription
+  if (updateLessonDto.videoUrl && updateLessonDto.videoPublicId) {
+    try {
+      await this.cloudinaryService.triggerTranscription(
+        updateLessonDto.videoPublicId,
+        courseId,
+        sectionId,
+        lessonId,
+      );
+    } catch (transcribeError) {
+      console.warn(
+        `Failed to trigger transcription for lesson ${lessonId}:`,
+        transcribeError,
       );
     }
-
-    const updateFields: Record<string, any> = {};
-
-    Object.keys(updateLessonDto).forEach((key) => {
-      const safeKey = key as keyof UpdateLessonDto;
-      updateFields[`sections.$[s].lessons.$[l].${safeKey}`] =
-        updateLessonDto[safeKey];
-    });
-
-    const updated = await this.courseModel
-      .findOneAndUpdate(
-        {
-          _id: new Types.ObjectId(courseId),
-          instructorId: new Types.ObjectId(instructorId),
-        },
-        { $set: updateFields },
-        {
-          arrayFilters: [
-            { 's._id': new Types.ObjectId(sectionId) },
-            { 'l._id': new Types.ObjectId(lessonId) },
-          ],
-          returnDocument: 'after',
-          runValidators: true,
-        },
-      )
-      .exec();
-
-    if (!updated)
-      throw new BadRequestException(
-        'Update failed: Course/Section not found or Unauthorized',
-      );
-
-    await this.coursesService.syncMetadata(courseId);
-    return updated
-      .toObject()
-      .sections.map((sec: any) => new SectionSerializer(sec));
   }
+
+  return updated
+    .toObject()
+    .sections.map((sec: any) => new SectionSerializer(sec));
+}
 
   async removeLesson(
     courseId: string,
