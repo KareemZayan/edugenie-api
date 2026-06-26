@@ -12,6 +12,7 @@ import { Course } from '../courses/schema/course.schema';
 import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { MyCourseItem } from './interfaces/my-course-item.interface';
 
 @Injectable()
 export class EnrollmentsService {
@@ -156,6 +157,37 @@ export class EnrollmentsService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  // "My Courses": flat list of enrolled courses for the student dashboard
+  async getMyCourses(userId: string): Promise<MyCourseItem[]> {
+    const enrollments = await this.enrollmentModel
+      .find({ studentId: new Types.ObjectId(userId) })
+      // Join with Course to surface the card data (title + thumbnail)
+      .populate('courseId', 'title thumbnail')
+      .sort({ createdAt: -1 }) // most recently enrolled first
+      .exec();
+
+    return enrollments
+      // Skip enrollments whose course has since been deleted
+      .filter((enrollment) => enrollment.courseId)
+      .map((enrollment) => {
+        const course = enrollment.courseId as unknown as {
+          _id: Types.ObjectId;
+          title: string;
+          thumbnail: string;
+        };
+        const enrolledAt = (enrollment as unknown as { createdAt: Date })
+          .createdAt;
+
+        return {
+          courseId: course._id.toString(),
+          title: course.title,
+          thumbnail: course.thumbnail,
+          progressPercent: enrollment.progressPercentage,
+          enrolledAt: enrolledAt ? enrolledAt.toISOString() : '',
+        };
+      });
   }
 
   // 2. Open a specific course: Get the progress to see which videos to unlock

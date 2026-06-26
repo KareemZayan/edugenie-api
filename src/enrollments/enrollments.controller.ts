@@ -22,6 +22,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
+import { ApiResponse } from '../common/interfaces/api-response.interface';
+import { MyCourseItem } from './interfaces/my-course-item.interface';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.STUDENT)
@@ -45,6 +47,24 @@ export class EnrollmentsController {
     @Query() query: PaginateQueryDto,
   ) {
     return this.enrollmentsService.getMyEnrollments(user.userId, query);
+  }
+
+  // Student dashboard: flat list of enrolled courses
+  @Get('my-courses')
+  @ApiOperation({ summary: 'Get courses the current user is enrolled in' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 200, description: 'List of enrolled courses' })
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async getMyCourses(
+    @CurrentUser() user: { userId: string },
+  ): Promise<ApiResponse<MyCourseItem[]>> {
+    const courses = await this.enrollmentsService.getMyCourses(user.userId);
+    return {
+      success: true,
+      data: courses,
+    };
   }
 
   // Get progress for one specific course
