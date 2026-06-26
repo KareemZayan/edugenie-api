@@ -53,7 +53,7 @@ export class LessonsService {
       videoUrl: '',  // Will be updated by webhook when video uploads
       videoPublicId: '', // Will be updated by webhook when video uploads
       videoDuration: 0,  // Will be updated by webhook when video uploads
-      transcript: '',
+      transcript: null,  // Will be set when transcription completes
       isFree: false,
     };
 
@@ -425,7 +425,7 @@ export class LessonsService {
       throw new NotFoundException('Lesson not found');
     }
 
-    if (lesson.transcript) {
+    if (lesson.transcript && lesson.transcript.length > 0) {
       return {
         transcriptReady: true,
         transcript: lesson.transcript,
