@@ -144,6 +144,9 @@ export class CoursesController {
     @Query('search') search?: string,
     @Query('minPrice') minPrice?: number,
     @Query('maxPrice') maxPrice?: number,
+    @Query('minRating') minRating?: number,
+    @Query('maxDuration') maxDuration?: number,
+    @Query('sort') sort?: string,
   ): Promise<ApiResponse<PaginatedResponse<CourseResponse>>> {
     const result = await this.coursesService.findAll({
       skip: skip ? +skip : 0,
@@ -153,6 +156,9 @@ export class CoursesController {
       search,
       minPrice: minPrice ? +minPrice : undefined,
       maxPrice: maxPrice ? +maxPrice : undefined,
+      minRating: minRating ? +minRating : undefined,
+      maxDuration: maxDuration ? +maxDuration : undefined,
+      sort,
     });
     return { success: true, data: result };
   }
