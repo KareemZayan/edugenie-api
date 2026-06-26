@@ -109,4 +109,24 @@ export class CloudinaryController {
 
     return { success: true };
   }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Post('trigger-transcription')
+  @ApiOperation({ summary: 'Manually trigger transcription for a video' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async triggerTranscription(
+    @Body() body: { publicId: string; courseId: string; sectionId: string; lessonId: string },
+  ) {
+    return this.cloudinaryService.triggerTranscription(
+      body.publicId,
+      body.courseId,
+      body.sectionId,
+      body.lessonId,
+    );
+  }
 }

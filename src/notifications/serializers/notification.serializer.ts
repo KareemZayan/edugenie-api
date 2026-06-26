@@ -44,7 +44,6 @@ export class NotificationSerializer {
     }
     if (doc.userId) {
       this.userId = doc.userId.toString();
-      delete (this as any).userId;
     }
   }
 }

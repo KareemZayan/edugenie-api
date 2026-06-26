@@ -26,11 +26,72 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { ReorderLessonsDto } from './dto/reorder-lessons.dto';
+import { CreateLessonPlaceholderDto } from './dto/create-lesson-placeholder.dto';
 
 @Controller('courses/:courseId/sections/:sectionId/lessons')
 @ApiTags('Lessons')
 export class LessonsController {
   constructor(private readonly lessonsService: LessonsService) {}
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Post('placeholder')
+  @ApiOperation({ summary: 'Create placeholder lesson (pre-create for video upload)' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @ApiParam({ name: 'courseId', type: String })
+  @ApiParam({ name: 'sectionId', type: String })
+  @ApiBody({ type: CreateLessonPlaceholderDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  createLessonPlaceholder(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() dto: CreateLessonPlaceholderDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const instructorId = user?.userId;
+
+    return this.lessonsService.addLessonPlaceholder(
+      courseId,
+      sectionId,
+      instructorId,
+      dto.title,
+      dto.description,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Post(':lessonId/complete-video')
+  @ApiOperation({ summary: 'Mark lesson video as complete and trigger notifications' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiParam({ name: 'courseId', type: String })
+  @ApiParam({ name: 'sectionId', type: String })
+  @ApiParam({ name: 'lessonId', type: String })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  completeLessonVideo(
+    @Param('courseId') courseId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: { videoUrl: string; videoPublicId: string; videoDuration: number },
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.lessonsService.markLessonVideoComplete(
+      courseId,
+      sectionId,
+      lessonId,
+      user.userId,
+      body.videoUrl,
+      body.videoPublicId,
+      body.videoDuration,
+    );
+  }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
