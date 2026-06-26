@@ -266,61 +266,113 @@ export class WebhooksController {
     }
   }
 
-  @Post('cloudinary')
-  @UseInterceptors()
-  @ApiExcludeEndpoint()
-  async handleCloudinaryWebhook(
-    @Req() req: RawBodyRequest<Request>,
-    @Res() res: Response,
-  ) {
-    try {
-      const body = req.body;
+ @Post('cloudinary')
+@UseInterceptors()
+@ApiExcludeEndpoint()
+async handleCloudinaryWebhook(
+  @Req() req: RawBodyRequest<Request>,
+  @Res() res: Response,
+) {
+  try {
+    const body = req.body;
 
-      if (body.notification_type === 'upload' && body.duration) {
-        const publicId = body.public_id;
-        const durationSecs = Math.round(parseFloat(body.duration));
+    // ── Handle video upload completion ──────────────────────────
+    if (body.notification_type === 'upload' && body.duration) {
+      const publicId = body.public_id;
+      const durationSecs = Math.round(parseFloat(body.duration));
 
-        const course = await this.courseModel.findOne({
-          'sections.lessons.videoPublicId': publicId,
-        });
+      const course = await this.courseModel.findOne({
+        'sections.lessons.videoPublicId': publicId,
+      });
 
-        if (course) {
-          let durationDiff = 0;
-
-          course.sections.forEach((section) => {
-            section.lessons.forEach((lesson) => {
-              if (lesson.videoPublicId === publicId) {
-                const oldDuration = lesson.videoDuration || 0;
-                lesson.videoDuration = durationSecs;
-                durationDiff = durationSecs - oldDuration;
-              }
-            });
+      if (course) {
+        let durationDiff = 0;
+        course.sections.forEach((section) => {
+          section.lessons.forEach((lesson) => {
+            if (lesson.videoPublicId === publicId) {
+              const oldDuration = lesson.videoDuration || 0;
+              lesson.videoDuration = durationSecs;
+              durationDiff = durationSecs - oldDuration;
+            }
           });
-
-          if (durationDiff !== 0) {
-            course.totalHours += durationDiff / 3600;
-            await course.save();
-          }
+        });
+        if (durationDiff !== 0) {
+          course.totalHours += durationDiff / 3600;
+          await course.save();
         }
       }
+    }
 
-      res.status(200).send();
-    } catch (error) {
-      console.error('Cloudinary webhook processing failed:', error);
+    // ── Handle transcription completion ─────────────────────────
+    if (
+      body.notification_type === 'raw_convert' &&
+      body.status === 'complete' &&
+      body.output_public_id
+    ) {
+      const transcriptPublicId: string = body.output_public_id; // e.g. "edugenie/.../video.transcript"
+      // The source video public_id is the transcript path minus the ".transcript" suffix
+      const videoPublicId = transcriptPublicId.replace(/\.transcript$/, '');
 
       try {
-        await this.webhookFailureLogModel.create({
-          service: 'cloudinary',
-          endpoint: '/webhooks/cloudinary',
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
-      } catch (logError) {
-        console.error('Failed to save webhook failure log:', logError);
-      }
+        const { default: fetch } = await import('node-fetch').catch(() => ({ default: globalThis.fetch }));
+        const transcriptUrl: string = body.secure_url || body.url;
+        let transcriptText: string | null = null;
 
-      throw new InternalServerErrorException(
-        'Failed to process Cloudinary webhook',
-      );
+        if (transcriptUrl) {
+          const response = await fetch(transcriptUrl);
+          if (response.ok) {
+            const json = await response.json() as any;
+            if (json.results && Array.isArray(json.results)) {
+              transcriptText = json.results
+                .map((r: any) => r.alternatives?.[0]?.transcript || '')
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+            } else if (Array.isArray(json)) {
+              transcriptText = json
+                .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+            }
+          }
+        }
+
+        if (transcriptText) {
+          // Find the lesson by videoPublicId and save transcript
+          await this.courseModel.updateOne(
+            { 'sections.lessons.videoPublicId': videoPublicId },
+            {
+              $set: {
+                'sections.$[].lessons.$[l].transcript': transcriptText,
+              },
+            },
+            {
+              arrayFilters: [
+                { 'l.videoPublicId': videoPublicId },
+              ],
+            },
+          );
+          console.log(`Transcript saved for video: ${videoPublicId}`);
+        }
+      } catch (transcriptError) {
+        console.error('Failed to save transcript from webhook:', transcriptError);
+      }
     }
+
+    res.status(200).send();
+  } catch (error) {
+    console.error('Cloudinary webhook processing failed:', error);
+    try {
+      await this.webhookFailureLogModel.create({
+        service: 'cloudinary',
+        endpoint: '/webhooks/cloudinary',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    } catch (logError) {
+      console.error('Failed to save webhook failure log:', logError);
+    }
+    throw new InternalServerErrorException('Failed to process Cloudinary webhook');
   }
+}
 }

@@ -175,112 +175,72 @@ export class CloudinaryService {
    * a real lessonId that was not available at upload time (draft system).
    */
   async triggerTranscription(
-    publicId: string,
-    courseId: string,
-    sectionId: string,
-    lessonId: string,
-  ): Promise<{ queued: boolean }> {
-    try {
-      await (cloudinary.uploader as any).explicit(publicId, {
-        resource_type: 'video',
-        type: 'upload',
-        raw_convert: 'google_speech',
-        context: `courseId=${courseId}|sectionId=${sectionId}|lessonId=${lessonId}`,
-      });
-      this.logger.log(
-        `Triggered transcription for video ${publicId} (lesson ${lessonId})`,
-      );
-      return { queued: true };
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to trigger transcription for ${publicId}:`,
-        error?.message || error,
-      );
-      return { queued: false };
-    }
+  publicId: string,
+  courseId: string,
+  sectionId: string,
+  lessonId: string,
+): Promise<{ queued: boolean }> {
+  try {
+    await (cloudinary.uploader as any).explicit(publicId, {
+      resource_type: 'video',
+      type: 'upload',
+      raw_convert: 'google_speech',
+      context: `courseId=${courseId}|sectionId=${sectionId}|lessonId=${lessonId}`,
+      notification_url: this.configService.get<string>('CLOUDINARY_WEBHOOK_URL'),
+    });
+    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId})`);
+    return { queued: true };
+  } catch (error: any) {
+    this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
+    return { queued: false };
   }
+}
 
   async getTranscriptionStatus(publicId: string): Promise<{
-    videoReady: boolean;
-    transcriptReady: boolean;
-    transcriptText: string | null;
-  }> {
-    let videoReady = false;
-    let transcriptReady = false;
-    let transcriptText: string | null = null;
+  videoReady: boolean;
+  transcriptReady: boolean;
+  transcriptText: string | null;
+}> {
+  // Check video exists
+  try {
+    await cloudinary.api.resource(publicId, { resource_type: 'video' });
+  } catch {
+    return { videoReady: false, transcriptReady: false, transcriptText: null };
+  }
 
-    try {
-  const rawResource = await cloudinary.api.resource(
-    publicId,                       // ✅ same public_id as the video
-    { resource_type: 'raw' },
-  );
-  if (rawResource && rawResource.secure_url) {
-    const response = await fetch(rawResource.secure_url);
-    if (response.ok) {
-      const text = await response.text();
-      if (text && text.trim() !== '') {
-        const json = JSON.parse(text);
-        transcriptReady = true;
-        if (Array.isArray(json)) {
-          transcriptText = json.map((res: any) => res.transcript || '').join(' ').trim();
-        } else if (json && json.results && Array.isArray(json.results)) {
-          const parts = json.results.map((res: any) =>
-            res.alternatives?.[0]?.transcript || ''
-          );
-          transcriptText = parts.join(' ').trim();
-        } else {
-          transcriptText = JSON.stringify(json);
+  // Check for transcript raw file
+  try {
+    const raw = await cloudinary.api.resource(`${publicId}.transcript`, {
+      resource_type: 'raw',
+    });
+
+    if (raw?.secure_url) {
+      const response = await fetch(raw.secure_url);
+      if (response.ok) {
+        const json = await response.json() as any;
+        let transcriptText: string | null = null;
+
+        if (json.results && Array.isArray(json.results)) {
+          const parts = json.results
+            .map((r: any) => r.alternatives?.[0]?.transcript || '')
+            .filter(Boolean);
+          if (parts.length > 0) transcriptText = parts.join(' ').trim();
+        } else if (Array.isArray(json)) {
+          const parts = json
+            .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
+            .filter(Boolean);
+          if (parts.length > 0) transcriptText = parts.join(' ').trim();
+        }
+
+        if (transcriptText) {
+          return { videoReady: true, transcriptReady: true, transcriptText };
         }
       }
     }
+  } catch {
+    // 404 = transcript not ready yet, normal
   }
-} catch (error: any) {
-      this.logger.error(
-        `Failed to check video resource ${publicId}:`,
-        error?.message || error,
-      );
-    }
 
-    try {
-      const rawResource = await cloudinary.api.resource(
-        `${publicId}.transcript`,
-        { resource_type: 'raw' },
-      );
-      if (rawResource && rawResource.secure_url) {
-        const response = await fetch(rawResource.secure_url);
-        if (response.ok) {
-          const text = await response.text();
-          if (text && text.trim() !== '') {
-            const json = JSON.parse(text);
-            transcriptReady = true;
-            // Extract transcript text
-            if (Array.isArray(json)) {
-              transcriptText = json
-                .map((res: any) => res.transcript || '')
-                .join(' ')
-                .trim();
-            } else if (json && json.results && Array.isArray(json.results)) {
-              const parts = json.results.map((res: any) => {
-                if (
-                  res.alternatives &&
-                  res.alternatives.length > 0 &&
-                  res.alternatives[0].transcript
-                ) {
-                  return res.alternatives[0].transcript;
-                }
-                return '';
-              });
-              transcriptText = parts.join(' ').trim();
-            } else {
-              transcriptText = JSON.stringify(json);
-            }
-          }
-        }
-      }
-    } catch (error: any) {
-      // 404 means the transcript is not ready yet, this is normal behavior.
-    }
-
-    return { videoReady, transcriptReady, transcriptText };
-  }
+  return { videoReady: true, transcriptReady: false, transcriptText: null };
+}
 }
