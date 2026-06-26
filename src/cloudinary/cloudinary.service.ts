@@ -100,6 +100,10 @@ export class CloudinaryService {
     return expectedSignature === signature;
   }
 
+  /**
+   * Process the Cloudinary webhook when a video upload completes.
+   * Updates the lesson with video data and triggers transcription.
+   */
   async processUploadWebhook(payload: Record<string, unknown>) {
     const public_id = payload.public_id as string | undefined;
     const secure_url = payload.secure_url as string | undefined;
@@ -107,7 +111,6 @@ export class CloudinaryService {
     const context = payload.context as Record<string, string> | undefined;
     if (!public_id) return;
 
-    // ✅ NEW: get IDs from context instead of parsing
     const courseId = context?.courseId;
     const sectionId = context?.sectionId;
     const lessonId = context?.lessonId;
@@ -145,13 +148,54 @@ export class CloudinaryService {
       );
 
       if (updated.modifiedCount > 0) {
-        this.logger.log(`Updated lesson ${lessonId}`);
+        this.logger.log(`Updated lesson ${lessonId} with video data`);
         await this.coursesService.syncMetadata(courseId);
+
+        // Trigger transcription for the newly uploaded video
+        // This handles the case where transcription wasn't set up at upload time
+        // (e.g., when draft IDs were used)
+        try {
+          await this.triggerTranscription(public_id, courseId, sectionId, lessonId);
+        } catch (transcribeError) {
+          // Non-blocking - transcription is a best-effort feature
+          this.logger.warn(`Failed to trigger transcription for lesson ${lessonId}:`, transcribeError);
+        }
       } else {
         this.logger.warn(`No lesson found for ${lessonId}`);
       }
     } catch (error) {
       this.logger.error(`Webhook update failed`, error);
+    }
+  }
+
+  /**
+   * Retroactively schedule google_speech transcription on an already-uploaded
+   * Cloudinary video. Called after addLesson/updateLesson when we finally have
+   * a real lessonId that was not available at upload time (draft system).
+   */
+  async triggerTranscription(
+    publicId: string,
+    courseId: string,
+    sectionId: string,
+    lessonId: string,
+  ): Promise<{ queued: boolean }> {
+    try {
+      await (cloudinary.uploader as any).explicit(publicId, {
+        resource_type: 'video',
+        type: 'upload',
+        raw_convert: 'google_speech',
+        context: `courseId=${courseId}|sectionId=${sectionId}|lessonId=${lessonId}`,
+      });
+      this.logger.log(
+        `Triggered transcription for video ${publicId} (lesson ${lessonId})`,
+      );
+      return { queued: true };
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to trigger transcription for ${publicId}:`,
+        error?.message || error,
+      );
+      return { queued: false };
     }
   }
 
