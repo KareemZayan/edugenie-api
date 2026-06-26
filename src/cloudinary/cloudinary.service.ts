@@ -183,12 +183,8 @@ export class CloudinaryService {
     try {
       const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
       const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
-
-      const newPublicId = `${publicId}_transcribed_${Date.now()}`;
-
-      // Preserve the original folder — Dynamic Folder Mode doesn't derive
-      // asset_folder from public_id slashes automatically.
       const folderPath = publicId.substring(0, publicId.lastIndexOf('/'));
+      const newPublicId = `${publicId}_transcribed_${Date.now()}`;
 
       const result = await cloudinary.uploader.upload(existing.secure_url, {
         resource_type: 'video',
@@ -199,7 +195,6 @@ export class CloudinaryService {
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
 
-      // Update the lesson to point at the new asset
       if (result?.secure_url && result?.public_id) {
         await this.courseModel.updateOne(
           { _id: new Types.ObjectId(courseId) },
@@ -217,8 +212,10 @@ export class CloudinaryService {
           },
         );
 
-        // Clean up the old asset now that the lesson points to the new one
         cloudinary.uploader.destroy(publicId, { resource_type: 'video' }).catch(() => { });
+
+        // NEW: poll internally until the transcript is ready, then save it ourselves
+        this.pollAndSaveTranscript(result.public_id, courseId, sectionId, lessonId);
       }
 
       this.logger.log(`Triggered transcription via new asset ${newPublicId}: ${JSON.stringify(result?.info)}`);
@@ -227,6 +224,48 @@ export class CloudinaryService {
       this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
       return { queued: false };
     }
+  }
+
+  private async pollAndSaveTranscript(
+    publicId: string,
+    courseId: string,
+    sectionId: string,
+    lessonId: string,
+    attempt = 0,
+  ): Promise<void> {
+    const MAX_ATTEMPTS = 20;       // ~20 * 10s = ~3.3 minutes max
+    const INTERVAL_MS = 10_000;
+
+    if (attempt >= MAX_ATTEMPTS) {
+      this.logger.warn(`Gave up polling transcript for ${publicId} after ${MAX_ATTEMPTS} attempts`);
+      return;
+    }
+
+    const status = await this.getTranscriptionStatus(publicId);
+
+    if (status.transcriptReady && status.transcriptText) {
+      await this.courseModel.updateOne(
+        { _id: new Types.ObjectId(courseId) },
+        {
+          $set: {
+            'sections.$[s].lessons.$[l].transcript': status.transcriptText,
+          },
+        },
+        {
+          arrayFilters: [
+            { 's._id': new Types.ObjectId(sectionId) },
+            { 'l._id': new Types.ObjectId(lessonId) },
+          ],
+        },
+      );
+      this.logger.log(`Saved transcript for lesson ${lessonId}`);
+      return;
+    }
+
+    setTimeout(
+      () => this.pollAndSaveTranscript(publicId, courseId, sectionId, lessonId, attempt + 1),
+      INTERVAL_MS,
+    );
   }
 
   async testTranscription(publicId: string) {
