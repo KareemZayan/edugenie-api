@@ -41,7 +41,8 @@ export class AdminCoursesService {
     const [courses, total] = await Promise.all([
       this.courseModel
         .find({ courseStatus: CourseStatus.UNDER_REVIEW })
-        .populate('instructorId', 'firstName lastName')
+        .populate('instructorId', 'firstName lastName email avatar')
+        .populate('categoryId', 'name')
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -53,11 +54,28 @@ export class AdminCoursesService {
 
     const data = courses.map((course) => {
       const instructor = course.instructorId as any;
+      const category = course.categoryId as any;
       return {
         courseId: course._id.toString(),
         title: course.title,
+        thumbnail: course.thumbnail,
+        thumbnailPublicId: course.thumbnailPublicId,
+        level: course.level,
+        price: course.price,
+        totalHours: course.totalHours,
+        category:
+          category && category._id
+            ? { id: category._id.toString(), name: category.name }
+            : null,
         instructorId: instructor._id.toString(),
         instructorName: `${instructor.firstName} ${instructor.lastName}`,
+        instructor: {
+          id: instructor._id.toString(),
+          firstName: instructor.firstName,
+          lastName: instructor.lastName,
+          email: instructor.email,
+          avatar: instructor.avatar,
+        },
         submittedAt: (course as any).updatedAt,
         totalSections: course.sections.length,
         totalLessons: course.sections.reduce(
@@ -90,7 +108,8 @@ export class AdminCoursesService {
     const [courses, total] = await Promise.all([
       this.courseModel
         .find({ courseStatus: CourseStatus.REJECTED })
-        .populate('instructorId', 'firstName lastName')
+        .populate('instructorId', 'firstName lastName email avatar')
+        .populate('categoryId', 'name')
         .populate('rejectedBy', 'firstName lastName')
         .sort({ rejectedAt: -1 })
         .skip(skip)
@@ -103,14 +122,33 @@ export class AdminCoursesService {
 
     const data = courses.map((course) => {
       const instructor = course.instructorId as any;
+      const category = course.categoryId as any;
       const admin = course.rejectedBy as any;
       return {
         courseId: course._id.toString(),
         title: course.title,
+        thumbnail: course.thumbnail,
+        thumbnailPublicId: course.thumbnailPublicId,
+        level: course.level,
+        price: course.price,
+        totalHours: course.totalHours,
+        category:
+          category && category._id
+            ? { id: category._id.toString(), name: category.name }
+            : null,
         instructorId: instructor?._id?.toString() || '',
         instructorName: instructor
           ? `${instructor.firstName} ${instructor.lastName}`
           : 'Unknown',
+        instructor: instructor
+          ? {
+              id: instructor._id.toString(),
+              firstName: instructor.firstName,
+              lastName: instructor.lastName,
+              email: instructor.email,
+              avatar: instructor.avatar,
+            }
+          : null,
         rejectionReason: course.rejectionReason || 'No reason provided',
         rejectedBy: admin
           ? `${admin.firstName} ${admin.lastName}`

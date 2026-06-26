@@ -138,7 +138,10 @@ export class EnrollmentsService {
     const data = await this.enrollmentModel
       .find({ studentId: new Types.ObjectId(studentId) })
       // Populate course info so the frontend can display the course cards
-      .populate('courseId', 'title thumbnail totalLessons')
+      .populate(
+        'courseId',
+        'title thumbnail thumbnailPublicId price level totalLessons',
+      )
       .sort({ updatedAt: -1 }) // Show recently watched courses first
       .skip(skip)
       .limit(limit)
@@ -163,8 +166,8 @@ export class EnrollmentsService {
   async getMyCourses(userId: string): Promise<MyCourseItem[]> {
     const enrollments = await this.enrollmentModel
       .find({ studentId: new Types.ObjectId(userId) })
-      // Join with Course to surface the card data (title + thumbnail)
-      .populate('courseId', 'title thumbnail')
+      // Join with Course to surface the card data (title + thumbnail + meta)
+      .populate('courseId', 'title thumbnail thumbnailPublicId price level')
       .sort({ createdAt: -1 }) // most recently enrolled first
       .exec();
 
@@ -176,6 +179,9 @@ export class EnrollmentsService {
           _id: Types.ObjectId;
           title: string;
           thumbnail: string;
+          thumbnailPublicId: string;
+          price: number;
+          level: string;
         };
         const enrolledAt = (enrollment as unknown as { createdAt: Date })
           .createdAt;
@@ -184,6 +190,9 @@ export class EnrollmentsService {
           courseId: course._id.toString(),
           title: course.title,
           thumbnail: course.thumbnail,
+          thumbnailPublicId: course.thumbnailPublicId,
+          price: course.price,
+          level: course.level,
           progressPercent: enrollment.progressPercentage,
           enrolledAt: enrolledAt ? enrolledAt.toISOString() : '',
         };

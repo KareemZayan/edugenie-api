@@ -63,9 +63,33 @@ export class CoursesService {
     search?: string;
     minPrice?: number;
     maxPrice?: number;
+    minRating?: number;
+    maxDuration?: number;
+    sort?: string;
   }): Promise<PaginatedResponse<CourseSerializer>> {
-    const { skip, limit, categoryId, level, search, minPrice, maxPrice } =
-      filterDto;
+    const {
+      skip,
+      limit,
+      categoryId,
+      level,
+      search,
+      minPrice,
+      maxPrice,
+      minRating,
+      maxDuration,
+      sort,
+    } = filterDto;
+
+    // Map the storefront's sort option to a Mongo sort spec.
+    const sortMap: Record<string, Record<string, 1 | -1>> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      'price-asc': { price: 1 },
+      'price-desc': { price: -1 },
+      rating: { ratingAverage: -1 },
+      popular: { totalEnrollments: -1 },
+    };
+    const sortSpec = sortMap[sort ?? ''] ?? { createdAt: -1 };
 
     let categoryIdObj;
     if (categoryId) {
@@ -117,12 +141,15 @@ export class CoursesService {
           ...(maxPrice !== undefined && { $lte: maxPrice }),
         },
       }),
+      ...(minRating !== undefined && { ratingAverage: { $gte: minRating } }),
+      ...(maxDuration !== undefined && { totalHours: { $lte: maxDuration } }),
     };
 
     const [data, total] = await Promise.all([
       this.courseModel
         .find(query)
         .select('-sections -description -requirements -goals')
+        .sort(sortSpec)
         .skip(skip)
         .limit(limit)
         .populate('instructorId', 'firstName lastName email avatar')
@@ -151,8 +178,11 @@ export class CoursesService {
     instructorId: string,
   ): Promise<CourseSerializer[]> {
     if (!instructorId) return [];
+    // The instructor course-list view only renders card metadata, so exclude
+    // the heavy embedded sections/lessons tree from the payload.
     const courses = await this.courseModel
       .find({ instructorId: new Types.ObjectId(instructorId) })
+      .select('-sections')
       .sort({ createdAt: -1 })
       .exec();
     return courses.map((c) => new CourseSerializer(c.toObject()));
@@ -182,43 +212,63 @@ export class CoursesService {
       this.courseModel.countDocuments(query),
     ]);
 
-    const data = await Promise.all(
-      courses.map(async (c) => {
-        const courseObjId = c._id;
+    // Batch the per-course stats into two grouped aggregations instead of
+    // running three queries per course (the previous N+1). Each student can
+    // only have one enrollment per course (unique {studentId, courseId} index),
+    // so the enrollment doc count equals the distinct-student count.
+    const courseIds = courses.map((c) => c._id);
 
-        const totalStudentsResult = await this.enrollmentModel.distinct(
-          'studentId',
-          { courseId: courseObjId },
-        );
-        const totalStudents = totalStudentsResult.length;
+    const [enrollmentStats, revenueStats] = await Promise.all([
+      this.enrollmentModel.aggregate<{
+        _id: Types.ObjectId;
+        totalStudents: number;
+        completedCount: number;
+      }>([
+        { $match: { courseId: { $in: courseIds } } },
+        {
+          $group: {
+            _id: '$courseId',
+            totalStudents: { $sum: 1 },
+            completedCount: {
+              $sum: { $cond: ['$isCourseCompleted', 1, 0] },
+            },
+          },
+        },
+      ]),
+      this.earningModel.aggregate<{ _id: Types.ObjectId; total: number }>([
+        { $match: { courseId: { $in: courseIds } } },
+        { $group: { _id: '$courseId', total: { $sum: '$amount' } } },
+      ]),
+    ]);
 
-        const revenueResult = await this.earningModel.aggregate([
-          { $match: { courseId: courseObjId } },
-          { $group: { _id: null, total: { $sum: '$amount' } } },
-        ]);
-        const totalRevenue = revenueResult[0]?.total || 0;
-
-        const completedCount = await this.enrollmentModel.countDocuments({
-          courseId: courseObjId,
-          isCourseCompleted: true,
-        });
-        const completionRate =
-          totalStudents > 0
-            ? Math.round((completedCount / totalStudents) * 100)
-            : 0;
-
-        return {
-          id: c._id.toString(),
-          title: c.title,
-          thumbnail: c.thumbnail,
-          status: c.courseStatus,
-          totalStudents,
-          totalRevenue,
-          rating: c.ratingAverage || 0,
-          completionRate,
-        };
-      }),
+    const enrollmentByCourse = new Map(
+      enrollmentStats.map((s) => [s._id.toString(), s]),
     );
+    const revenueByCourse = new Map(
+      revenueStats.map((s) => [s._id.toString(), s.total]),
+    );
+
+    const data = courses.map((c) => {
+      const stats = enrollmentByCourse.get(c._id.toString());
+      const totalStudents = stats?.totalStudents || 0;
+      const completedCount = stats?.completedCount || 0;
+      const totalRevenue = revenueByCourse.get(c._id.toString()) || 0;
+      const completionRate =
+        totalStudents > 0
+          ? Math.round((completedCount / totalStudents) * 100)
+          : 0;
+
+      return {
+        id: c._id.toString(),
+        title: c.title,
+        thumbnail: c.thumbnail,
+        status: c.courseStatus,
+        totalStudents,
+        totalRevenue,
+        rating: c.ratingAverage || 0,
+        completionRate,
+      };
+    });
 
     const totalPages = Math.ceil(total / limit);
 

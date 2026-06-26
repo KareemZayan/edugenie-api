@@ -607,11 +607,26 @@ export interface AdminDashboardOverviewResponse {
   platformRevenue: number;
 }
 
+export interface CourseListInstructor {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  avatar?: string;
+}
+
 export interface PendingCourseListItem {
   courseId: string;
   title: string;
+  thumbnail: string;
+  thumbnailPublicId: string;
+  level: string;
+  price: number;
+  totalHours: number;
+  category: { id: string; name: string } | null;
   instructorId: string;
   instructorName: string;
+  instructor: CourseListInstructor | null;
   submittedAt: Date;
   totalSections: number;
   totalLessons: number;
@@ -622,8 +637,15 @@ export interface PendingCourseListResponse extends PaginatedResponse<PendingCour
 export interface RejectedCourseListItem {
   courseId: string;
   title: string;
+  thumbnail: string;
+  thumbnailPublicId: string;
+  level: string;
+  price: number;
+  totalHours: number;
+  category: { id: string; name: string } | null;
   instructorId: string;
   instructorName: string;
+  instructor: CourseListInstructor | null;
   rejectionReason: string;
   rejectedBy: string;
   rejectedAt: Date;
