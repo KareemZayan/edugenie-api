@@ -210,13 +210,31 @@ export class CloudinaryService {
     let transcriptText: string | null = null;
 
     try {
-      const videoResource = await cloudinary.api.resource(publicId, {
-        resource_type: 'video',
-      });
-      if (videoResource) {
-        videoReady = true;
+  const rawResource = await cloudinary.api.resource(
+    publicId,                       // ✅ same public_id as the video
+    { resource_type: 'raw' },
+  );
+  if (rawResource && rawResource.secure_url) {
+    const response = await fetch(rawResource.secure_url);
+    if (response.ok) {
+      const text = await response.text();
+      if (text && text.trim() !== '') {
+        const json = JSON.parse(text);
+        transcriptReady = true;
+        if (Array.isArray(json)) {
+          transcriptText = json.map((res: any) => res.transcript || '').join(' ').trim();
+        } else if (json && json.results && Array.isArray(json.results)) {
+          const parts = json.results.map((res: any) =>
+            res.alternatives?.[0]?.transcript || ''
+          );
+          transcriptText = parts.join(' ').trim();
+        } else {
+          transcriptText = JSON.stringify(json);
+        }
       }
-    } catch (error: any) {
+    }
+  }
+} catch (error: any) {
       this.logger.error(
         `Failed to check video resource ${publicId}:`,
         error?.message || error,
