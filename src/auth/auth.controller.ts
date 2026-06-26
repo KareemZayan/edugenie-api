@@ -39,6 +39,7 @@ export class AuthController {
   async register(
     @Body() createUserDto: CreateUserDto,
   ): Promise<ApiResponse<AuthResponse>> {
+    console.log('DEBUG (API): register endpoint received:', createUserDto);
     const result = await this.authService.register(createUserDto);
     return {
       success: true,
@@ -97,8 +98,10 @@ export class AuthController {
     @Body('token') token: string,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
+    console.log('verify-exchange-token called with token:', token);
     const { token: jwtToken, user: userData } =
       await this.authService.verifyExchangeToken(token);
+    console.log('jwtToken to be set in cookie:', jwtToken);
 
     response.cookie('jwt', jwtToken, {
       httpOnly: true,
@@ -157,6 +160,7 @@ export class AuthController {
       role: string;
     },
   ) {
+    console.log('generateHandoffCode - user payload:', user);
     const userId = user.userId || user.id || user._id;
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
@@ -195,9 +199,6 @@ export class AuthController {
     };
   }
 
-  // Returns the invitee details for a valid admin-invite token so the accept
-  // page can show who is being onboarded. Public, but throttled.
-  @HttpCode(HttpStatus.OK)
   @Post('validate-invite')
   @ApiOperation({ summary: 'Validate admin invite token' })
   async validateInvite(

@@ -1,3 +1,9 @@
+export interface TranscriptionStatusResponse {
+  videoReady: boolean;
+  transcriptReady: boolean;
+  transcript: string | null;
+}
+
 // ── 1. Enums ────────────────────────────────────────────────
 export enum UserRole {
   STUDENT = 'student',
@@ -137,27 +143,16 @@ export interface ChangeRoleResponse {
 // ── 5. Categories Module ────────────────────────────────────
 export interface CreateCategoryRequest {
   name: string;
-  slug: string;
-  description?: string;
 }
 
 export interface UpdateCategoryRequest {
   name?: string;
-  slug?: string;
-  description?: string;
 }
 
 export interface CategoryResponse {
   id: string;
   name: string;
-  slug: string;
-  description?: string;
-  imageUrl?: string;
-  icon?: string;
-  isActive: boolean;
   courseCount?: number;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 // ── 6. Courses Module ───────────────────────────────────────
@@ -178,8 +173,10 @@ export interface CourseResponse {
   thumbnail: string;
   level: string;
   courseStatus: string;
-  instructor: Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'avatar'> | string;
-  category: { id: string; name: string; slug: string } | string;
+  instructor:
+    | Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'>
+    | string;
+  category: { id: string; name: string } | string;
   goals: string[];
   requirements: string[];
   ratingAverage: number;
@@ -339,6 +336,14 @@ export interface NotificationResponse {
   updatedAt: Date;
 }
 
+export interface NotificationListResponse extends PaginatedResponse<NotificationResponse> {
+  unreadCount: number;
+}
+
+export interface UnreadCountResponse {
+  unreadCount: number;
+}
+
 // ── 14. Quizzes Extended Module ─────────────────────────────
 export interface SubmitAnswerRequest {
   questionId: string;
@@ -477,7 +482,10 @@ export interface DashboardOverviewResponse {
   nextPayoutDate: Date;
 }
 
-export type AttentionItemType = 'course_rejected' | 'low_review' | 'quiz_pending_review';
+export type AttentionItemType =
+  | 'course_rejected'
+  | 'low_review'
+  | 'quiz_pending_review';
 
 export interface AttentionItem {
   type: AttentionItemType;
@@ -611,6 +619,18 @@ export interface PendingCourseListItem {
 
 export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> {}
 
+export interface RejectedCourseListItem {
+  courseId: string;
+  title: string;
+  instructorId: string;
+  instructorName: string;
+  rejectionReason: string;
+  rejectedBy: string;
+  rejectedAt: Date;
+}
+
+export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> {}
+
 export interface CourseReviewDetailResponse {
   courseId: string;
   title: string;
@@ -650,6 +670,7 @@ export interface AdminUserListItem {
   email: string;
   firstName: string;
   lastName: string;
+  avatar?: string;
   role: string;
   status: string;
   createdAt: Date;
@@ -813,4 +834,19 @@ export interface SystemHealthResponse {
     errorMessage: string;
     occurredAt: Date;
   } | null;
+}
+
+// ── 20. Handoff Auth Module ─────────────────────────────────
+export interface HandoffCodeResponse {
+  code: string;
+  expiresIn: number;
+}
+
+export interface RedeemCodeRequest {
+  code: string;
+}
+
+export interface RedeemCodeResponse {
+  success: boolean;
+  data: { userId: string; userRole: string };
 }

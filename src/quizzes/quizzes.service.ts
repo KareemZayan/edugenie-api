@@ -1,4 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Quiz } from './schema/quiz.schema';
@@ -16,7 +23,7 @@ import {
   QuizForStudentResponse,
   QuizStartResponse,
   QuizSubmitResponse,
-  QuizAttemptsHistoryResponse
+  QuizAttemptsHistoryResponse,
 } from '../common/interfaces/frontend-contracts';
 
 @Injectable()
@@ -24,12 +31,14 @@ export class QuizzesService {
   constructor(
     @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
     @InjectModel(QuizAttempt.name) private quizAttemptModel: Model<QuizAttempt>,
-    @InjectModel(Notification.name) private notificationModel: Model<Notification>,
+    @InjectModel(Notification.name)
+    private notificationModel: Model<Notification>,
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private enrollmentsService: EnrollmentsService,
-    @Inject(forwardRef(() => ProgressService)) private progressService: ProgressService,
-  ) { }
+    @Inject(forwardRef(() => ProgressService))
+    private progressService: ProgressService,
+  ) {}
 
   async saveQuizConfig(dto: CreateQuizDto) {
     const quiz = await this.quizModel.create({
@@ -43,27 +52,44 @@ export class QuizzesService {
 
     return {
       message: 'Quiz configuration saved! AI generation is now pending.',
-      quiz: new QuizSerializer(quiz.toObject() as unknown as Partial<QuizSerializer>),
+      quiz: new QuizSerializer(
+        quiz.toObject() as unknown as Partial<QuizSerializer>,
+      ),
     };
   }
 
-  async getQuizForStudent(sectionId: string, studentId: string): Promise<QuizForStudentResponse> {
-    const hasAccess = await this.enrollmentsService.canAccessSection(studentId, sectionId);
+  async getQuizForStudent(
+    sectionId: string,
+    studentId: string,
+  ): Promise<QuizForStudentResponse> {
+    const hasAccess = await this.enrollmentsService.canAccessSection(
+      studentId,
+      sectionId,
+    );
     if (!hasAccess) {
-      throw new ForbiddenException('You must purchase this section to access its quiz');
+      throw new ForbiddenException(
+        'You must purchase this section to access its quiz',
+      );
     }
 
-    const quiz = await this.quizModel.findOne({ sectionId: new Types.ObjectId(sectionId) });
+    const quiz = await this.quizModel.findOne({
+      sectionId: new Types.ObjectId(sectionId),
+    });
     if (!quiz) {
       throw new NotFoundException('Quiz not found for this section');
     }
 
-    if (quiz.generationStatus !== QuizGenerationStatus.COMPLETED || !quiz.questions.length) {
+    if (
+      quiz.generationStatus !== QuizGenerationStatus.COMPLETED ||
+      !quiz.questions.length
+    ) {
       throw new BadRequestException('Quiz is not ready yet');
     }
 
     if (quiz.status !== 'approved') {
-      throw new BadRequestException('Quiz is currently pending instructor review');
+      throw new BadRequestException(
+        'Quiz is currently pending instructor review',
+      );
     }
 
     const attemptCount = await this.quizAttemptModel.countDocuments({
@@ -73,13 +99,19 @@ export class QuizzesService {
     });
 
     if (attemptCount >= quiz.maxAttempts) {
-      throw new ForbiddenException('You have used all available attempts for this quiz');
+      throw new ForbiddenException(
+        'You have used all available attempts for this quiz',
+      );
     }
 
     const questions = quiz.questions.map((q, index) => {
       // In this system, questions don't have explicit string IDs mapped to them yet,
       // but mongoose creates an _id for subdocuments. Let's safely extract it.
-      const qObj = q as unknown as { _id?: Types.ObjectId; questionText: string; options: string[] };
+      const qObj = q as unknown as {
+        _id?: Types.ObjectId;
+        questionText: string;
+        options: string[];
+      };
       return {
         questionId: qObj._id ? qObj._id.toString() : index.toString(),
         text: qObj.questionText,
@@ -101,23 +133,38 @@ export class QuizzesService {
     };
   }
 
-  async startAttempt(sectionId: string, studentId: string): Promise<QuizStartResponse> {
-    const hasAccess = await this.enrollmentsService.canAccessSection(studentId, sectionId);
+  async startAttempt(
+    sectionId: string,
+    studentId: string,
+  ): Promise<QuizStartResponse> {
+    const hasAccess = await this.enrollmentsService.canAccessSection(
+      studentId,
+      sectionId,
+    );
     if (!hasAccess) {
-      throw new ForbiddenException('You must purchase this section to access its quiz');
+      throw new ForbiddenException(
+        'You must purchase this section to access its quiz',
+      );
     }
 
-    const quiz = await this.quizModel.findOne({ sectionId: new Types.ObjectId(sectionId) });
+    const quiz = await this.quizModel.findOne({
+      sectionId: new Types.ObjectId(sectionId),
+    });
     if (!quiz) {
       throw new NotFoundException('Quiz not found for this section');
     }
 
-    if (quiz.generationStatus !== QuizGenerationStatus.COMPLETED || !quiz.questions.length) {
+    if (
+      quiz.generationStatus !== QuizGenerationStatus.COMPLETED ||
+      !quiz.questions.length
+    ) {
       throw new BadRequestException('Quiz is not ready yet');
     }
 
     if (quiz.status !== 'approved') {
-      throw new BadRequestException('Quiz is currently pending instructor review');
+      throw new BadRequestException(
+        'Quiz is currently pending instructor review',
+      );
     }
 
     const existing = await this.quizAttemptModel.findOne({
@@ -183,7 +230,11 @@ export class QuizzesService {
     };
   }
 
-  async submitAttempt(sectionId: string, dto: SubmitQuizDto, studentId: string): Promise<QuizSubmitResponse> {
+  async submitAttempt(
+    sectionId: string,
+    dto: SubmitQuizDto,
+    studentId: string,
+  ): Promise<QuizSubmitResponse> {
     const attempt = await this.quizAttemptModel.findById(dto.attemptId);
     if (!attempt) {
       throw new NotFoundException('Attempt not found');
@@ -210,15 +261,19 @@ export class QuizzesService {
             passed: false,
             correctAnswers: 0,
             submittedAt: new Date(),
-          }
-        }
+          },
+        },
       );
 
       if (expiredUpdate.modifiedCount === 0) {
-        throw new BadRequestException('This attempt was already submitted by another concurrent request');
+        throw new BadRequestException(
+          'This attempt was already submitted by another concurrent request',
+        );
       }
 
-      throw new BadRequestException('Time limit exceeded — this attempt has expired and been recorded as failed');
+      throw new BadRequestException(
+        'Time limit exceeded — this attempt has expired and been recorded as failed',
+      );
     }
 
     const quiz = await this.quizModel.findById(attempt.quizId);
@@ -237,13 +292,16 @@ export class QuizzesService {
       }) as { _id?: Types.ObjectId; correctAnswers: string[] } | undefined;
 
       if (!question) {
-        throw new BadRequestException(`Invalid questionId: ${submittedAnswer.questionId}`);
+        throw new BadRequestException(
+          `Invalid questionId: ${submittedAnswer.questionId}`,
+        );
       }
 
       const correctSorted = [...question.correctAnswers].sort();
       const submittedSorted = [...submittedAnswer.selectedOptionIds].sort();
 
-      const isCorrect = correctSorted.length === submittedSorted.length &&
+      const isCorrect =
+        correctSorted.length === submittedSorted.length &&
         correctSorted.every((val, index) => val === submittedSorted[index]);
 
       if (isCorrect) {
@@ -264,12 +322,14 @@ export class QuizzesService {
           correctAnswers: correctCount,
           submittedAt: new Date(),
           status: 'submitted',
-        }
-      }
+        },
+      },
     );
 
     if (updateResult.modifiedCount === 0) {
-      throw new BadRequestException('This attempt was already submitted by another concurrent request');
+      throw new BadRequestException(
+        'This attempt was already submitted by another concurrent request',
+      );
     }
 
     // Update the local instance just in case we need it
@@ -277,26 +337,36 @@ export class QuizzesService {
 
     let nextSectionUnlocked = false;
 
-
     if (passed) {
       // Notify Progress tracking that the quiz has been passed
-      const progressResult = await this.progressService.markQuizPassed(studentId, sectionId);
+      const progressResult = await this.progressService.markQuizPassed(
+        studentId,
+        sectionId,
+      );
       nextSectionUnlocked = progressResult.nextSectionUnlocked;
 
       // Check if course completed
-      const sectionObj = await this.courseModel.findOne({ 'sections._id': new Types.ObjectId(sectionId) }).select('_id').lean<{ _id: Types.ObjectId }>();
+      const sectionObj = await this.courseModel
+        .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
+        .select('_id')
+        .lean<{ _id: Types.ObjectId }>();
       if (sectionObj) {
         // Verify overall course completion logic from enrollments service or run it here
         const courseId = sectionObj._id;
         const course = await this.courseModel.findById(courseId);
         if (course) {
-          const allSections = course.sections.map(s => s._id.toString());
+          const allSections = course.sections.map((s) => s._id.toString());
           if (progressResult.isCourseCompleted) {
-            const enrollment = await this.enrollmentModel.findOneAndUpdate(
-              { courseId: courseId, studentId: new Types.ObjectId(studentId) },
-              { $set: { isCourseCompleted: true } },
-              { new: true }
-            ).exec();
+            const enrollment = await this.enrollmentModel
+              .findOneAndUpdate(
+                {
+                  courseId: courseId,
+                  studentId: new Types.ObjectId(studentId),
+                },
+                { $set: { isCourseCompleted: true } },
+                { new: true },
+              )
+              .exec();
 
             if (enrollment) {
               await this.notificationModel.create({
@@ -319,7 +389,7 @@ export class QuizzesService {
     });
 
     const remainingAttempts = Math.max(0, quiz.maxAttempts - totalAttempts);
-    const progressReset = (!passed && remainingAttempts === 0);
+    const progressReset = !passed && remainingAttempts === 0;
 
     return {
       passed,
@@ -333,27 +403,45 @@ export class QuizzesService {
     };
   }
 
-  async getAttemptHistory(sectionId: string, studentId: string): Promise<QuizAttemptsHistoryResponse> {
-    const hasAccess = await this.enrollmentsService.canAccessSection(studentId, sectionId);
+  async getAttemptHistory(
+    sectionId: string,
+    studentId: string,
+  ): Promise<QuizAttemptsHistoryResponse> {
+    const hasAccess = await this.enrollmentsService.canAccessSection(
+      studentId,
+      sectionId,
+    );
     if (!hasAccess) {
-      throw new ForbiddenException('You must purchase this section to access its quiz history');
+      throw new ForbiddenException(
+        'You must purchase this section to access its quiz history',
+      );
     }
 
-    const quiz = await this.quizModel.findOne({ sectionId: new Types.ObjectId(sectionId) });
+    const quiz = await this.quizModel.findOne({
+      sectionId: new Types.ObjectId(sectionId),
+    });
     if (!quiz) {
       throw new NotFoundException('Quiz not found for this section');
     }
 
-    const attempts = await this.quizAttemptModel.find({
-      studentId: new Types.ObjectId(studentId),
-      quizId: quiz._id,
-    }).sort({ attemptNumber: 1 }).select('attemptNumber score passed submittedAt status').exec();
+    const attempts = await this.quizAttemptModel
+      .find({
+        studentId: new Types.ObjectId(studentId),
+        quizId: quiz._id,
+      })
+      .sort({ attemptNumber: 1 })
+      .select('attemptNumber score passed submittedAt status')
+      .exec();
 
-    const submittedCount = attempts.filter(a => a.status !== 'in_progress').length;
-    const canRetry = submittedCount < quiz.maxAttempts && !attempts.some(a => a.passed === true);
+    const submittedCount = attempts.filter(
+      (a) => a.status !== 'in_progress',
+    ).length;
+    const canRetry =
+      submittedCount < quiz.maxAttempts &&
+      !attempts.some((a) => a.passed === true);
 
     return {
-      attempts: attempts.map(a => ({
+      attempts: attempts.map((a) => ({
         attemptNumber: a.attemptNumber,
         score: a.score,
         passed: a.passed,
@@ -364,15 +452,18 @@ export class QuizzesService {
   }
 
   async findPendingReviewForInstructor(instructorId: string) {
-    const courses = await this.courseModel.find({ instructorId: new Types.ObjectId(instructorId) }).select('sections title').exec();
-    
+    const courses = await this.courseModel
+      .find({ instructorId: new Types.ObjectId(instructorId) })
+      .select('sections title')
+      .exec();
+
     const sectionIds: Types.ObjectId[] = [];
     const sectionToCourseMap = new Map<string, string>();
     const sectionToTitleMap = new Map<string, string>();
 
-    courses.forEach(c => {
+    courses.forEach((c) => {
       if (c.sections) {
-        c.sections.forEach(s => {
+        c.sections.forEach((s) => {
           sectionIds.push(s._id);
           sectionToCourseMap.set(s._id.toString(), c.title);
           sectionToTitleMap.set(s._id.toString(), s.title);
@@ -380,18 +471,23 @@ export class QuizzesService {
       }
     });
 
-    const pendingQuizzes = await this.quizModel.find({ 
-      sectionId: { $in: sectionIds }, 
-      status: 'pending_review' 
-    }).exec();
+    const pendingQuizzes = await this.quizModel
+      .find({
+        sectionId: { $in: sectionIds },
+        status: 'pending_review',
+      })
+      .exec();
 
-    const data = pendingQuizzes.map(q => ({
+    const data = pendingQuizzes.map((q) => ({
       quizId: q._id.toString(),
       sectionId: q.sectionId.toString(),
       sectionTitle: sectionToTitleMap.get(q.sectionId.toString()) || 'Unknown',
       courseTitle: sectionToCourseMap.get(q.sectionId.toString()) || 'Unknown',
       questionCount: q.questions ? q.questions.length : 0,
-      generatedAt: (q as unknown as { updatedAt?: Date; createdAt?: Date }).updatedAt || (q as unknown as { createdAt?: Date }).createdAt || new Date(), // generation updates the document
+      generatedAt:
+        (q as unknown as { updatedAt?: Date; createdAt?: Date }).updatedAt ||
+        (q as unknown as { createdAt?: Date }).createdAt ||
+        new Date(), // generation updates the document
     }));
 
     return { data };
@@ -401,7 +497,10 @@ export class QuizzesService {
     const quiz = await this.quizModel.findById(quizId).exec();
     if (!quiz) throw new NotFoundException('Quiz not found');
 
-    const course = await this.courseModel.findOne({ 'sections._id': quiz.sectionId }).select('instructorId').exec();
+    const course = await this.courseModel
+      .findOne({ 'sections._id': quiz.sectionId })
+      .select('instructorId')
+      .exec();
     if (!course) throw new NotFoundException('Course for this quiz not found');
 
     // OWNERSHIP CHECK ENFORCED
@@ -413,9 +512,16 @@ export class QuizzesService {
       quizId: quiz._id.toString(),
       sectionId: quiz.sectionId.toString(),
       questions: quiz.questions.map((q, index: number) => {
-        const questionObj = q as unknown as { _id?: Types.ObjectId; questionText: string; options: string[]; correctAnswers: string[] };
+        const questionObj = q as unknown as {
+          _id?: Types.ObjectId;
+          questionText: string;
+          options: string[];
+          correctAnswers: string[];
+        };
         return {
-          questionId: questionObj._id ? questionObj._id.toString() : index.toString(),
+          questionId: questionObj._id
+            ? questionObj._id.toString()
+            : index.toString(),
           text: questionObj.questionText,
           options: questionObj.options.map((opt: string) => ({
             optionId: opt,
@@ -427,11 +533,18 @@ export class QuizzesService {
     };
   }
 
-  async approveQuiz(quizId: string, instructorId: string, dto: Record<string, unknown>) {
+  async approveQuiz(
+    quizId: string,
+    instructorId: string,
+    dto: Record<string, unknown>,
+  ) {
     const quiz = await this.quizModel.findById(quizId).exec();
     if (!quiz) throw new NotFoundException('Quiz not found');
 
-    const course = await this.courseModel.findOne({ 'sections._id': quiz.sectionId }).select('instructorId').exec();
+    const course = await this.courseModel
+      .findOne({ 'sections._id': quiz.sectionId })
+      .select('instructorId')
+      .exec();
     if (!course) throw new NotFoundException('Course for this quiz not found');
 
     // OWNERSHIP CHECK ENFORCED
@@ -439,7 +552,14 @@ export class QuizzesService {
       throw new ForbiddenException('You do not own this quiz');
     }
 
-    const editedQuestions = dto.editedQuestions as Array<{ questionText: string; type: string; options: string[]; correctAnswers: string[] }> | undefined;
+    const editedQuestions = dto.editedQuestions as
+      | Array<{
+          questionText: string;
+          type: string;
+          options: string[];
+          correctAnswers: string[];
+        }>
+      | undefined;
     if (editedQuestions && editedQuestions.length > 0) {
       quiz.questions = editedQuestions as unknown as typeof quiz.questions;
     }
@@ -454,4 +574,3 @@ export class QuizzesService {
     };
   }
 }
-

@@ -29,6 +29,13 @@ import {
 import * as crypto from 'crypto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/enums/notification-type.enum';
+import {
+  getFingerprint,
+  parseDevice,
+  getLocationFromIp,
+} from './utils/login-device.util';
 
 @Injectable()
 export class AuthService {
@@ -37,6 +44,7 @@ export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private notificationsService: NotificationsService,
     @InjectModel(ExchangeToken.name)
     private exchangeTokenModel: Model<ExchangeTokenDocument>,
     @InjectModel(HandoffCode.name)
@@ -146,19 +154,63 @@ export class AuthService {
       token = this.jwtService.sign(payload);
     }
 
-    // NOTE: the new-device-login notification feature lives on `main` and
-    // depends on UsersService.updateLastLogin / NotificationsService.create /
-    // the NotificationType enum, which don't exist on this branch yet. The
-    // `ip`/`userAgent` params are kept so the controller contract is unchanged;
-    // the feature re-activates automatically once `main` is merged.
-    void ip;
-    void userAgent;
+    // Don't block the login response on geo lookups / notification creation
+    this.checkLoginDevice(user, ip, userAgent).catch((err) =>
+      this.logger.error('Login device check failed', err),
+    );
 
     return {
       token,
       isExchangeToken,
       user: new UserSerializer(user.toObject()),
     };
+  }
+
+  private async checkLoginDevice(
+    user: any,
+    ip: string,
+    userAgent: string,
+  ): Promise<void> {
+    const fingerprint = getFingerprint(userAgent);
+
+    // First login ever recorded for this user — just store baseline, no notification
+    if (!user.lastLoginFingerprint) {
+      await this.usersService.updateLastLogin(user._id, {
+        fingerprint,
+        ip,
+        device: parseDevice(userAgent),
+        location: await getLocationFromIp(ip),
+      });
+      return;
+    }
+
+    // Same device/IP as last time — nothing to do
+    if (user.lastLoginFingerprint === fingerprint) {
+      return;
+    }
+
+    // New device/IP detected
+    const device = parseDevice(userAgent);
+    const location = await getLocationFromIp(ip);
+
+    await this.usersService.updateLastLogin(user._id, {
+      fingerprint,
+      ip,
+      device,
+      location,
+    });
+
+    const message = `A new login was detected from ${location} on ${device}. If this wasn't you, secure your account.`;
+
+    await this.notificationsService.create(
+      user._id,
+      'New Login Detected',
+      message,
+      NotificationType.NEW_LOGIN_ATTEMPT,
+    );
+
+    // TODO: wire to real mailer once email infra is set up
+    this.logger.warn(`[EMAIL STUB] Would email ${user.email}: ${message}`);
   }
 
   async generateHandoffCode(userId: string, userRole: string): Promise<string> {
@@ -278,7 +330,7 @@ export class AuthService {
 
     return {
       token,
-      user: new UserSerializer(user.toObject()),
+      user: new UserSerializer((user as any).toObject()),
     };
   }
 }

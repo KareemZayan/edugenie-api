@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
@@ -15,7 +19,7 @@ export class SectionsService {
     @InjectModel(Course.name) private readonly courseModel: Model<Course>,
     private readonly coursesService: CoursesService,
     private readonly enrollmentsService: EnrollmentsService,
-  ) { }
+  ) {}
 
   async addSection(
     courseId: string,
@@ -38,7 +42,9 @@ export class SectionsService {
 
     // Trigger metadata sync (recalculates course total price, hours, and lessons)
     await this.coursesService.syncMetadata(courseId);
-    return updated.sections.map((s) => new SectionSerializer(s.toObject() as any));
+    return updated.sections.map(
+      (s) => new SectionSerializer(s.toObject() as any),
+    );
   }
 
   async updateSection(
@@ -75,7 +81,9 @@ export class SectionsService {
 
     // Trigger metadata sync
     await this.coursesService.syncMetadata(courseId);
-    return updated.sections.map((s) => new SectionSerializer(s.toObject() as any));
+    return updated.sections.map(
+      (s) => new SectionSerializer(s.toObject() as any),
+    );
   }
 
   async removeSection(
@@ -99,18 +107,28 @@ export class SectionsService {
 
     // Trigger metadata sync
     await this.coursesService.syncMetadata(courseId);
-    return updated.sections.map((s) => new SectionSerializer(s.toObject() as any));
+    return updated.sections.map(
+      (s) => new SectionSerializer(s.toObject() as any),
+    );
   }
 
   // Phase 9: New Endpoints
-  async getPurchaseInfo(sectionId: string, studentId: string): Promise<SectionPurchaseInfo> {
-    const course = await this.courseModel.findOne({ 'sections._id': new Types.ObjectId(sectionId) }).exec();
+  async getPurchaseInfo(
+    sectionId: string,
+    studentId: string,
+  ): Promise<SectionPurchaseInfo> {
+    const course = await this.courseModel
+      .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
+      .exec();
     if (!course) throw new NotFoundException('Section not found');
 
-    const section = course.sections.find(s => s._id.toString() === sectionId);
+    const section = course.sections.find((s) => s._id.toString() === sectionId);
     if (!section) throw new NotFoundException('Section not found');
 
-    const isAlreadyOwned = await this.enrollmentsService.canAccessSection(studentId, sectionId);
+    const isAlreadyOwned = await this.enrollmentsService.canAccessSection(
+      studentId,
+      sectionId,
+    );
 
     return {
       sectionId: section._id.toString(),
@@ -123,26 +141,36 @@ export class SectionsService {
     };
   }
 
-  async setPrice(courseId: string, sectionId: string, instructorId: string, price: number | null) {
+  async setPrice(
+    courseId: string,
+    sectionId: string,
+    instructorId: string,
+    price: number | null,
+  ) {
     if (price !== null && price < 0) {
       throw new BadRequestException('Price cannot be negative');
     }
 
-    const updated = await this.courseModel.findOneAndUpdate(
-      {
-        _id: new Types.ObjectId(courseId),
-        instructorId: new Types.ObjectId(instructorId),
-        'sections._id': new Types.ObjectId(sectionId),
-      },
-      {
-        $set: { 'sections.$.price': price },
-      },
-      { returnDocument: 'after', runValidators: true }
-    ).exec();
+    const updated = await this.courseModel
+      .findOneAndUpdate(
+        {
+          _id: new Types.ObjectId(courseId),
+          instructorId: new Types.ObjectId(instructorId),
+          'sections._id': new Types.ObjectId(sectionId),
+        },
+        {
+          $set: { 'sections.$.price': price },
+        },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
 
     if (!updated) {
       throw new NotFoundException('Section not found or unauthorized');
     }
+
+    // NEW: sync course.price to reflect the new section price
+    await this.coursesService.syncMetadata(courseId);
 
     return { success: true, message: 'Section price updated successfully' };
   }
@@ -183,6 +211,8 @@ export class SectionsService {
 
     await this.coursesService.syncMetadata(courseId);
 
-    return course.sections.map((s) => new SectionSerializer(s.toObject() as any));
+    return course.sections.map(
+      (s) => new SectionSerializer(s.toObject() as any),
+    );
   }
 }

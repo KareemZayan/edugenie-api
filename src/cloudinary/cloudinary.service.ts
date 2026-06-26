@@ -24,28 +24,35 @@ export class CloudinaryService {
   }
 
   generateSignature(folderPath: string, context?: string) {
-    const timestamp = Math.round(Date.now() / 1000);
-  
-    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
-    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-  
-    const paramsToSign: Record<string, any> = {
-      timestamp,
-      folder: folderPath,
-    };
-  
-    if (context) {
-      paramsToSign.context = context;
-    }
-  
-    const signature = cloudinary.utils.api_sign_request(
-      paramsToSign,
-      apiSecret as string,
-    );
-  
-    return { signature, timestamp, apiKey, cloudName };
+  const timestamp = Math.round(Date.now() / 1000);
+
+  const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+  const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+  const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
+
+  const paramsToSign: Record<string, any> = {
+    timestamp,
+    folder: folderPath,
+    // raw_convert removed — transcription is now triggered explicitly,
+    // after the lesson exists, via triggerTranscription()
+  };
+
+  if (context) {
+    paramsToSign.context = context;
   }
+
+  const signature = cloudinary.utils.api_sign_request(
+    paramsToSign,
+    apiSecret as string,
+  );
+  return {
+    signature,
+    timestamp,
+    apiKey,
+    cloudName,
+    raw_convert: '', // no longer sent for signing; kept in shape only if frontend still reads it
+  };
+}
 
   async deleteAsset(
     publicId: string,
@@ -94,6 +101,10 @@ export class CloudinaryService {
     return expectedSignature === signature;
   }
 
+  /**
+   * Process the Cloudinary webhook when a video upload completes.
+   * Updates the lesson with video data and triggers transcription.
+   */
   async processUploadWebhook(payload: Record<string, unknown>) {
     const public_id = payload.public_id as string | undefined;
     const secure_url = payload.secure_url as string | undefined;
@@ -101,7 +112,6 @@ export class CloudinaryService {
     const context = payload.context as Record<string, string> | undefined;
     if (!public_id) return;
 
-    // ✅ NEW: get IDs from context instead of parsing
     const courseId = context?.courseId;
     const sectionId = context?.sectionId;
     const lessonId = context?.lessonId;
@@ -139,8 +149,18 @@ export class CloudinaryService {
       );
 
       if (updated.modifiedCount > 0) {
-        this.logger.log(`Updated lesson ${lessonId}`);
+        this.logger.log(`Updated lesson ${lessonId} with video data`);
         await this.coursesService.syncMetadata(courseId);
+
+        // Trigger transcription for the newly uploaded video
+        // This handles the case where transcription wasn't set up at upload time
+        // (e.g., when draft IDs were used)
+        try {
+          await this.triggerTranscription(public_id, courseId, sectionId, lessonId);
+        } catch (transcribeError) {
+          // Non-blocking - transcription is a best-effort feature
+          this.logger.warn(`Failed to trigger transcription for lesson ${lessonId}:`, transcribeError);
+        }
       } else {
         this.logger.warn(`No lesson found for ${lessonId}`);
       }
@@ -148,4 +168,79 @@ export class CloudinaryService {
       this.logger.error(`Webhook update failed`, error);
     }
   }
+
+  /**
+   * Retroactively schedule google_speech transcription on an already-uploaded
+   * Cloudinary video. Called after addLesson/updateLesson when we finally have
+   * a real lessonId that was not available at upload time (draft system).
+   */
+  async triggerTranscription(
+  publicId: string,
+  courseId: string,
+  sectionId: string,
+  lessonId: string,
+): Promise<{ queued: boolean }> {
+  try {
+    await (cloudinary.uploader as any).explicit(publicId, {
+      resource_type: 'video',
+      type: 'upload',
+      raw_convert: 'google_speech',
+      context: `courseId=${courseId}|sectionId=${sectionId}|lessonId=${lessonId}`,
+      notification_url: this.configService.get<string>('CLOUDINARY_WEBHOOK_URL'),
+    });
+    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId})`);
+    return { queued: true };
+  } catch (error: any) {
+    this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
+    return { queued: false };
+  }
+}
+
+  async getTranscriptionStatus(publicId: string): Promise<{
+  videoReady: boolean;
+  transcriptReady: boolean;
+  transcriptText: string | null;
+}> {
+  // Check video exists
+  try {
+    await cloudinary.api.resource(publicId, { resource_type: 'video' });
+  } catch {
+    return { videoReady: false, transcriptReady: false, transcriptText: null };
+  }
+
+  // Check for transcript raw file
+  try {
+    const raw = await cloudinary.api.resource(`${publicId}.transcript`, {
+      resource_type: 'raw',
+    });
+
+    if (raw?.secure_url) {
+      const response = await fetch(raw.secure_url);
+      if (response.ok) {
+        const json = await response.json() as any;
+        let transcriptText: string | null = null;
+
+        if (json.results && Array.isArray(json.results)) {
+          const parts = json.results
+            .map((r: any) => r.alternatives?.[0]?.transcript || '')
+            .filter(Boolean);
+          if (parts.length > 0) transcriptText = parts.join(' ').trim();
+        } else if (Array.isArray(json)) {
+          const parts = json
+            .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
+            .filter(Boolean);
+          if (parts.length > 0) transcriptText = parts.join(' ').trim();
+        }
+
+        if (transcriptText) {
+          return { videoReady: true, transcriptReady: true, transcriptText };
+        }
+      }
+    }
+  } catch {
+    // 404 = transcript not ready yet, normal
+  }
+
+  return { videoReady: true, transcriptReady: false, transcriptText: null };
+}
 }

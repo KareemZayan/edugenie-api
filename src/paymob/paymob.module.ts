@@ -7,4 +7,4 @@ import { PaymobService } from './paymob.service';
   providers: [PaymobService],
   exports: [PaymobService],
 })
-export class PaymobModule { }
+export class PaymobModule {}

@@ -11,13 +11,22 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { User } from '../users/schema/user.schema';
 import { Earning, EarningDocument } from '../earnings/schema/earning.schema';
-import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
-import { PlatformConfig, PlatformConfigDocument } from './schema/platform-config.schema';
-import { WebhookFailureLog, WebhookFailureLogDocument } from './schema/webhook-failure-log.schema';
-import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
-import { AdminInvite, AdminInviteDocument } from './schema/admin-invite.schema';
-import { MailService } from '../mail/mail.service';
-import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
+import {
+  AuditLog,
+  AuditLogDocument,
+} from '../audit-logs/schemas/audit-log.schema';
+import {
+  PlatformConfig,
+  PlatformConfigDocument,
+} from './schema/platform-config.schema';
+import {
+  WebhookFailureLog,
+  WebhookFailureLogDocument,
+} from './schema/webhook-failure-log.schema';
+import {
+  Notification,
+  NotificationDocument,
+} from '../notifications/schema/notification.schema';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
@@ -25,6 +34,12 @@ import { ProcessPayoutDto } from './dto/process-payout.dto';
 import { UpdatePlatformConfigDto } from './dto/update-platform-config.dto';
 import { AuditLogsFilterDto } from './dto/audit-logs-filter.dto';
 import { AdminActivityQueryDto } from './dto/admin-activity-query.dto';
+import {
+  AdminInvite,
+  AdminInviteDocument,
+} from './schema/admin-invite.schema';
+import { MailService } from '../mail/mail.service';
+import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
 import {
   SuperAdminDashboardOverviewResponse,
   AdminListItem,
@@ -42,10 +57,14 @@ export class SuperAdminService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Earning.name) private earningModel: Model<EarningDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
-    @InjectModel(PlatformConfig.name) private platformConfigModel: Model<PlatformConfigDocument>,
-    @InjectModel(WebhookFailureLog.name) private webhookFailureLogModel: Model<WebhookFailureLogDocument>,
-    @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
-    @InjectModel(AdminInvite.name) private adminInviteModel: Model<AdminInviteDocument>,
+    @InjectModel(PlatformConfig.name)
+    private platformConfigModel: Model<PlatformConfigDocument>,
+    @InjectModel(WebhookFailureLog.name)
+    private webhookFailureLogModel: Model<WebhookFailureLogDocument>,
+    @InjectModel(Notification.name)
+    private notificationModel: Model<NotificationDocument>,
+    @InjectModel(AdminInvite.name)
+    private adminInviteModel: Model<AdminInviteDocument>,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
   ) {}
@@ -245,16 +264,29 @@ export class SuperAdminService {
       pendingPayoutsResult,
       webhookFailures,
     ] = await Promise.all([
-      this.earningModel.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]).exec(),
-      this.earningModel.aggregate([
-        { $match: { status: { $ne: EarningStatus.PAID_OUT } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]).exec(),
-      this.userModel.countDocuments({ role: UserRole.ADMIN, status: UserStatus.ACTIVE }).exec(),
-      this.earningModel.aggregate([
-        { $match: { status: EarningStatus.PENDING } },
-        { $group: { _id: '$instructorId', oldestDate: { $min: '$createdAt' } } },
-      ]).exec(),
+      this.earningModel
+        .aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+        .exec(),
+      this.earningModel
+        .aggregate([
+          { $match: { status: { $ne: EarningStatus.PAID_OUT } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ])
+        .exec(),
+      this.userModel
+        .countDocuments({ role: UserRole.ADMIN, status: UserStatus.ACTIVE })
+        .exec(),
+      this.earningModel
+        .aggregate([
+          { $match: { status: EarningStatus.PENDING } },
+          {
+            $group: {
+              _id: '$instructorId',
+              oldestDate: { $min: '$createdAt' },
+            },
+          },
+        ])
+        .exec(),
       this.webhookFailureLogModel
         .find({ occurredAt: { $gte: twentyFourHoursAgo } })
         .sort({ occurredAt: -1 })
@@ -266,17 +298,23 @@ export class SuperAdminService {
     const pendingPayouts = pendingPayoutsResult.length;
 
     const criticalAlerts: any[] = [];
-    
+
     // Group webhook failures by service
     if (webhookFailures.length > 0) {
-      const serviceGroups = webhookFailures.reduce((acc, curr) => {
-        acc[curr.service] = acc[curr.service] || { count: 0, lastOccurredAt: curr.occurredAt };
-        acc[curr.service].count += 1;
-        if (curr.occurredAt > acc[curr.service].lastOccurredAt) {
-          acc[curr.service].lastOccurredAt = curr.occurredAt;
-        }
-        return acc;
-      }, {} as Record<string, { count: number; lastOccurredAt: Date }>);
+      const serviceGroups = webhookFailures.reduce(
+        (acc, curr) => {
+          acc[curr.service] = acc[curr.service] || {
+            count: 0,
+            lastOccurredAt: curr.occurredAt,
+          };
+          acc[curr.service].count += 1;
+          if (curr.occurredAt > acc[curr.service].lastOccurredAt) {
+            acc[curr.service].lastOccurredAt = curr.occurredAt;
+          }
+          return acc;
+        },
+        {} as Record<string, { count: number; lastOccurredAt: Date }>,
+      );
 
       for (const [service, data] of Object.entries(serviceGroups)) {
         criticalAlerts.push({
@@ -314,17 +352,19 @@ export class SuperAdminService {
   async getAdmins(): Promise<AdminListItem[]> {
     // Only fetch ADMIN role, not SUPERADMIN
     const admins = await this.userModel.find({ role: UserRole.ADMIN }).exec();
-    
+
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
     const adminList = await Promise.all(
       admins.map(async (admin) => {
-        const actionsThisMonth = await this.auditLogModel.countDocuments({
-          performedBy: admin._id,
-          createdAt: { $gte: startOfMonth },
-        }).exec();
+        const actionsThisMonth = await this.auditLogModel
+          .countDocuments({
+            performedBy: admin._id,
+            createdAt: { $gte: startOfMonth },
+          })
+          .exec();
 
         return {
           id: admin._id.toString(),
@@ -336,13 +376,16 @@ export class SuperAdminService {
           lastActiveAt: null,
           actionsThisMonth,
         };
-      })
+      }),
     );
 
     return adminList;
   }
 
-  async getAdminActivity(adminId: string, query: AdminActivityQueryDto): Promise<AdminActivityPaginatedResponse> {
+  async getAdminActivity(
+    adminId: string,
+    query: AdminActivityQueryDto,
+  ): Promise<AdminActivityPaginatedResponse> {
     const admin = await this.userModel.findById(adminId).exec();
     if (!admin || admin.role !== UserRole.ADMIN) {
       throw new NotFoundException('Admin not found');
@@ -360,7 +403,9 @@ export class SuperAdminService {
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.auditLogModel.countDocuments({ performedBy: new Types.ObjectId(adminId) }).exec(),
+      this.auditLogModel
+        .countDocuments({ performedBy: new Types.ObjectId(adminId) })
+        .exec(),
     ]);
 
     const data = logs.map((log) => {
@@ -393,7 +438,9 @@ export class SuperAdminService {
     };
   }
 
-  async getPendingPayouts(query: AdminActivityQueryDto): Promise<PendingPayoutPaginatedResponse> {
+  async getPendingPayouts(
+    query: AdminActivityQueryDto,
+  ): Promise<PendingPayoutPaginatedResponse> {
     const page = query.page || 1;
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
@@ -412,24 +459,28 @@ export class SuperAdminService {
       },
     ];
 
-    const allGrouped = await this.earningModel.aggregate(aggregationPipeline).exec();
+    const allGrouped = await this.earningModel
+      .aggregate(aggregationPipeline)
+      .exec();
     const total = allGrouped.length;
 
-    const paginatedGrouped = await this.earningModel.aggregate([
-      ...aggregationPipeline,
-      { $sort: { periodStart: 1 } },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'instructor',
+    const paginatedGrouped = await this.earningModel
+      .aggregate([
+        ...aggregationPipeline,
+        { $sort: { periodStart: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: 'users',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'instructor',
+          },
         },
-      },
-      { $unwind: '$instructor' },
-    ]).exec();
+        { $unwind: '$instructor' },
+      ])
+      .exec();
 
     const data = paginatedGrouped.map((item) => ({
       instructorId: item._id.toString(),
@@ -465,42 +516,61 @@ export class SuperAdminService {
 
     try {
       const instructorObjId = new Types.ObjectId(instructorId);
-      
+
       const pendingEarnings = await this.earningModel
         .find({ instructorId: instructorObjId, status: EarningStatus.PENDING })
         .session(session)
         .exec();
 
       if (pendingEarnings.length === 0) {
-        throw new BadRequestException('No pending earnings for this instructor');
+        throw new BadRequestException(
+          'No pending earnings for this instructor',
+        );
       }
 
       const totalAmount = pendingEarnings.reduce((sum, e) => sum + e.amount, 0);
 
       if (totalAmount < config.minimumPayoutThreshold) {
-        throw new BadRequestException('Total pending amount is below the minimum payout threshold');
+        throw new BadRequestException(
+          'Total pending amount is below the minimum payout threshold',
+        );
       }
 
       await this.earningModel.updateMany(
         { instructorId: instructorObjId, status: EarningStatus.PENDING },
         { $set: { status: EarningStatus.PAID_OUT } },
-        { session }
+        { session },
       );
 
-      await this.auditLogModel.create([{
-        action: 'PAYOUT_PROCESSED',
-        performedBy: new Types.ObjectId(superAdminId),
-        targetUser: instructorObjId,
-        details: { amount: totalAmount, earningsCount: pendingEarnings.length, method: dto.method, reference: dto.reference },
-      }], { session });
+      await this.auditLogModel.create(
+        [
+          {
+            action: 'PAYOUT_PROCESSED',
+            performedBy: new Types.ObjectId(superAdminId),
+            targetUser: instructorObjId,
+            details: {
+              amount: totalAmount,
+              earningsCount: pendingEarnings.length,
+              method: dto.method,
+              reference: dto.reference,
+            },
+          },
+        ],
+        { session },
+      );
 
-      await this.notificationModel.create([{
-        userId: instructorObjId,
-        title: 'Payout Processed',
-        message: `Your payout of ${totalAmount} EGP has been processed successfully. Reference: ${dto.reference}`,
-        type: 'PAYOUT_PROCESSED',
-        isRead: false,
-      }], { session });
+      await this.notificationModel.create(
+        [
+          {
+            userId: instructorObjId,
+            title: 'Payout Processed',
+            message: `Your payout of ${totalAmount} EGP has been processed successfully. Reference: ${dto.reference}`,
+            type: 'PAYOUT_PROCESSED',
+            isRead: false,
+          },
+        ],
+        { session },
+      );
 
       await session.commitTransaction();
       session.endSession();
@@ -580,7 +650,9 @@ export class SuperAdminService {
     };
   }
 
-  async getAuditLogs(query: AuditLogsFilterDto): Promise<AuditLogPaginatedResponse> {
+  async getAuditLogs(
+    query: AuditLogsFilterDto,
+  ): Promise<AuditLogPaginatedResponse> {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
@@ -621,11 +693,15 @@ export class SuperAdminService {
         action: log.action,
         performedBy: {
           id: performedByObj ? performedByObj._id.toString() : 'Unknown',
-          name: performedByObj ? `${performedByObj.firstName} ${performedByObj.lastName}` : 'System',
+          name: performedByObj
+            ? `${performedByObj.firstName} ${performedByObj.lastName}`
+            : 'System',
         },
         targetUser: {
           id: targetUserObj ? targetUserObj._id.toString() : 'Unknown',
-          name: targetUserObj ? `${targetUserObj.firstName} ${targetUserObj.lastName}` : 'System',
+          name: targetUserObj
+            ? `${targetUserObj.firstName} ${targetUserObj.lastName}`
+            : 'System',
         },
         details: log.details,
         createdAt: (log as any).createdAt,
@@ -663,8 +739,8 @@ export class SuperAdminService {
 
     return {
       apiStatus,
-      // NOTE: apiStatus/averageResponseTimeMs require either a timing interceptor or external monitoring 
-      // (Datadog, Sentry, etc.) — this implementation returns webhookFailuresLast24h only with apiStatus 
+      // NOTE: apiStatus/averageResponseTimeMs require either a timing interceptor or external monitoring
+      // (Datadog, Sentry, etc.) — this implementation returns webhookFailuresLast24h only with apiStatus
       // hardcoded to a basic self-check value based on webhook failures
       averageResponseTimeMs: null,
       errorRateLast24h: null,

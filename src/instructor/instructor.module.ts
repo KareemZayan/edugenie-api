@@ -2,12 +2,18 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { InstructorController } from './instructor.controller';
 import { InstructorService } from './instructor.service';
+import { InstructorSummaryService } from './instructor-summary.service';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
-import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import { Earning, EarningSchema } from '../orders/schema/earning.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
 import { Review, ReviewSchema } from '../reviews/schema/review.schema';
 import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
 import { Progress, ProgressSchema } from '../progress/schema/progress.schema';
+import { User, UserSchema } from '../users/schema/user.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -18,9 +24,12 @@ import { Progress, ProgressSchema } from '../progress/schema/progress.schema';
       { name: Review.name, schema: ReviewSchema },
       { name: Quiz.name, schema: QuizSchema },
       { name: Progress.name, schema: ProgressSchema },
+      { name: User.name, schema: UserSchema },
     ]),
+    NotificationsModule,
   ],
   controllers: [InstructorController],
-  providers: [InstructorService],
+  providers: [InstructorService, InstructorSummaryService],
+  exports: [InstructorService],
 })
 export class InstructorModule {}

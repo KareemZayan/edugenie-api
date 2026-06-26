@@ -15,8 +15,14 @@ import { v2 as cloudinary } from 'cloudinary';
 import { UserSerializer } from './serializers/user.serializer';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
-import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
-import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
+import {
+  Notification,
+  NotificationDocument,
+} from '../notifications/schema/notification.schema';
+import {
+  AuditLog,
+  AuditLogDocument,
+} from '../audit-logs/schemas/audit-log.schema';
 import { ChangeUserRoleDto } from './dto/change-user-role.dto';
 import { ChangeRoleResponse } from './interfaces/change-role-response.interface';
 
@@ -24,7 +30,8 @@ import { ChangeRoleResponse } from './interfaces/change-role-response.interface'
 export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
-    @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+    @InjectModel(Notification.name)
+    private notificationModel: Model<NotificationDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
   ) {}
 
@@ -44,11 +51,6 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.userModel.findOne({ email }).exec();
-  }
-
-  async findById(userId: string | Types.ObjectId): Promise<User | null> {
-    if (!Types.ObjectId.isValid(userId)) return null;
-    return this.userModel.findById(userId).exec();
   }
 
   async emailExists(email: string): Promise<boolean> {
@@ -106,6 +108,10 @@ export class UsersService {
     return user ?? null;
   }
 
+  async findById(id: string | Types.ObjectId): Promise<User | null> {
+    return this.userModel.findById(id).exec();
+  }
+
   async getProfile(userId: string): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
@@ -114,14 +120,45 @@ export class UsersService {
     return new UserSerializer(user.toObject());
   }
 
-  async updateProfile(userId: string, updateUserDto: UpdateUserDto): Promise<UserSerializer> {
+  async updateProfile(
+    userId: string,
+    updateUserDto: UpdateUserDto,
+    file?: any,
+  ): Promise<UserSerializer> {
     const user = await this.userModel.findById(userId).exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    // Avatar update and deletion flow
-    if (updateUserDto.avatar !== undefined) {
+    if (file) {
+      try {
+        const result: any = await new Promise((resolve, reject) => {
+          cloudinary.uploader
+            .upload_stream({ folder: 'avatars' }, (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            })
+            .end(file.buffer);
+        });
+
+        if (user.avatarPublicId) {
+          try {
+            await cloudinary.uploader.destroy(user.avatarPublicId);
+          } catch (error) {
+            Logger.error(
+              `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
+              error instanceof Error ? error.stack : 'Unknown error',
+              'UsersService',
+            );
+          }
+        }
+
+        updateUserDto.avatar = result.secure_url;
+        updateUserDto.avatarPublicId = result.public_id;
+      } catch (error) {
+        throw new BadRequestException('Failed to upload image');
+      }
+    } else if (updateUserDto.avatar !== undefined) {
       // Check if user already has an avatar public ID
       if (user.avatarPublicId) {
         const isAvatarDeleted = updateUserDto.avatar === null;
@@ -136,7 +173,7 @@ export class UsersService {
             Logger.error(
               `Failed to delete Cloudinary image: ${user.avatarPublicId}`,
               error instanceof Error ? error.stack : 'Unknown error',
-              'UsersService'
+              'UsersService',
             );
           }
         }
@@ -164,6 +201,7 @@ export class UsersService {
 
     return new UserSerializer(updatedUser.toObject());
   }
+
   async changeUserRole(
     targetUserId: string,
     dto: ChangeUserRoleDto,
@@ -235,5 +273,22 @@ export class UsersService {
       changedAt: new Date(),
       changedBy: requestingSuperAdminId,
     };
+  }
+
+  async updateLastLogin(
+    userId: Types.ObjectId | string,
+    data: { fingerprint: string; ip: string; device: string; location: string },
+  ): Promise<void> {
+    await this.userModel
+      .findByIdAndUpdate(userId, {
+        $set: {
+          lastLoginFingerprint: data.fingerprint,
+          lastLoginIp: data.ip,
+          lastLoginDevice: data.device,
+          lastLoginLocation: data.location,
+          lastLoginAt: new Date(),
+        },
+      })
+      .exec();
   }
 }

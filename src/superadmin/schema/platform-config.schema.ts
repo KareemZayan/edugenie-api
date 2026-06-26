@@ -21,4 +21,5 @@ export class PlatformConfig {
   updatedBy: Types.ObjectId | null;
 }
 
-export const PlatformConfigSchema = SchemaFactory.createForClass(PlatformConfig);
+export const PlatformConfigSchema =
+  SchemaFactory.createForClass(PlatformConfig);

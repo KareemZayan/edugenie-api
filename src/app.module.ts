@@ -30,8 +30,10 @@ import { EarningsModule } from './earnings/earnings.module';
 import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
 import { SuperAdminModule } from './superadmin/superadmin.module';
+import { ScheduleModule } from '@nestjs/schedule';
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: Joi.object({
@@ -64,10 +66,12 @@ import { SuperAdminModule } from './superadmin/superadmin.module';
       }),
       inject: [ConfigService],
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000, // 1 minute
-      limit: 100, // global limit
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 1 minute
+        limit: 100, // global limit
+      },
+    ]),
     MailModule,
     AuthModule,
     UsersModule,
@@ -103,4 +107,4 @@ import { SuperAdminModule } from './superadmin/superadmin.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

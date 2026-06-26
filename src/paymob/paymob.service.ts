@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -16,31 +20,39 @@ export class PaymobService {
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
   ) {
-    this.secretKey = this.configService.get<string>('PAYMOB_SECRET_KEY') || 'dummy_secret_key';
-    this.hmacSecret = this.configService.get<string>('PAYMOB_HMAC_SECRET') || 'dummy_hmac_secret';
-    this.integrationId = this.configService.get<string>('PAYMOB_INTEGRATION_ID') || '4856475';
+    this.secretKey =
+      this.configService.get<string>('PAYMOB_SECRET_KEY') || 'dummy_secret_key';
+    this.hmacSecret =
+      this.configService.get<string>('PAYMOB_HMAC_SECRET') ||
+      'dummy_hmac_secret';
+    this.integrationId =
+      this.configService.get<string>('PAYMOB_INTEGRATION_ID') || '4856475';
   }
 
-  async createPaymentUrl(amountCents: number, orderId: string, billingData?: any): Promise<{ clientSecret: string, paymentUrl?: string }> {
+  async createPaymentUrl(
+    amountCents: number,
+    orderId: string,
+    billingData?: any,
+  ): Promise<{ clientSecret: string; paymentUrl?: string }> {
     try {
       const intentionPayload = {
         amount: amountCents,
         currency: 'EGP',
         payment_methods: [Number(this.integrationId)],
         billing_data: billingData || {
-          first_name: "Test",
-          last_name: "User",
-          email: "test@example.com",
-          phone_number: "+201000000000",
-          apartment: "NA",
-          floor: "NA",
-          street: "NA",
-          building: "NA",
-          shipping_method: "NA",
-          postal_code: "NA",
-          city: "NA",
-          country: "NA",
-          state: "NA"
+          first_name: 'Test',
+          last_name: 'User',
+          email: 'test@example.com',
+          phone_number: '+201000000000',
+          apartment: 'NA',
+          floor: 'NA',
+          street: 'NA',
+          building: 'NA',
+          shipping_method: 'NA',
+          postal_code: 'NA',
+          city: 'NA',
+          country: 'NA',
+          state: 'NA',
         },
         special_reference: orderId,
       };
@@ -48,16 +60,21 @@ export class PaymobService {
       const response = await firstValueFrom(
         this.httpService.post(this.intentionApiUrl, intentionPayload, {
           headers: {
-            'Authorization': `Token ${this.secretKey}`,
+            Authorization: `Token ${this.secretKey}`,
             'Content-Type': 'application/json',
           },
-        })
+        }),
       );
 
       return { clientSecret: response.data.client_secret };
     } catch (error: any) {
-      console.error('Paymob Intention API Error:', error?.response?.data || error.message);
-      throw new InternalServerErrorException('Failed to initialize payment intention');
+      console.error(
+        'Paymob Intention API Error:',
+        error?.response?.data || error.message,
+      );
+      throw new InternalServerErrorException(
+        'Failed to initialize payment intention',
+      );
     }
   }
 

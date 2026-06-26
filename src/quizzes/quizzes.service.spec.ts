@@ -50,9 +50,18 @@ describe('QuizzesService', () => {
       providers: [
         QuizzesService,
         { provide: getModelToken(Quiz.name), useValue: mockQuizModel },
-        { provide: getModelToken(QuizAttempt.name), useValue: mockQuizAttemptModel },
-        { provide: getModelToken(Notification.name), useValue: mockNotificationModel },
-        { provide: getModelToken(Enrollment.name), useValue: mockEnrollmentModel },
+        {
+          provide: getModelToken(QuizAttempt.name),
+          useValue: mockQuizAttemptModel,
+        },
+        {
+          provide: getModelToken(Notification.name),
+          useValue: mockNotificationModel,
+        },
+        {
+          provide: getModelToken(Enrollment.name),
+          useValue: mockEnrollmentModel,
+        },
         { provide: getModelToken(Course.name), useValue: mockCourseModel },
         { provide: EnrollmentsService, useValue: mockEnrollmentsService },
         { provide: ProgressService, useValue: mockProgressService },
@@ -104,9 +113,16 @@ describe('QuizzesService', () => {
       mockQuizModel.findById.mockResolvedValue(mockQuiz);
       mockQuizAttemptModel.countDocuments.mockResolvedValue(1);
 
-      mockProgressService.markQuizPassed.mockResolvedValue({ nextSectionUnlocked: true, isCourseCompleted: false });
+      mockProgressService.markQuizPassed.mockResolvedValue({
+        nextSectionUnlocked: true,
+        isCourseCompleted: false,
+      });
       mockCourseModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }) })
+        select: jest
+          .fn()
+          .mockReturnValue({
+            lean: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+          }),
       });
 
       const dto = {
@@ -164,7 +180,11 @@ describe('QuizzesService', () => {
         ],
       };
 
-      await expect(service.submitAttempt(sectionId, dto, studentId)).rejects.toThrow('Time limit exceeded — this attempt has expired and been recorded as failed');
+      await expect(
+        service.submitAttempt(sectionId, dto, studentId),
+      ).rejects.toThrow(
+        'Time limit exceeded — this attempt has expired and been recorded as failed',
+      );
 
       expect(mockQuizAttemptModel.updateOne).toHaveBeenCalled();
     });

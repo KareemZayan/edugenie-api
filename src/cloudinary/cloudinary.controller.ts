@@ -8,6 +8,15 @@ import {
   UnauthorizedException,
   HttpCode,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse as SwaggerApiResponse,
+  ApiConsumes,
+  ApiBody,
+  ApiCookieAuth,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { IsNotEmpty, IsString, IsIn, IsOptional } from 'class-validator';
 import { SignUploadDto } from './dto/sign-upload.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -27,12 +36,28 @@ class DeleteAssetDto {
 }
 
 @Controller('cloudinary')
+@ApiTags('Cloudinary')
 export class CloudinaryController {
   constructor(private readonly cloudinaryService: CloudinaryService) {}
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Post('sign')
+  @ApiOperation({ summary: 'Sign upload request' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
   signUploadRequest(@Body() body: SignUploadDto) {
     return this.cloudinaryService.generateSignature(body.folder, body.context);
   }
@@ -40,6 +65,12 @@ export class CloudinaryController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Delete('delete')
+  @ApiOperation({ summary: 'Delete asset' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
   deleteAsset(@Body() body: DeleteAssetDto) {
     return this.cloudinaryService.deleteAsset(
       body.publicId,
@@ -49,6 +80,10 @@ export class CloudinaryController {
 
   @Post('webhook')
   @HttpCode(200)
+  @ApiOperation({ summary: 'Handle webhook' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
   async handleWebhook(
     @Headers('x-cld-signature') signature: string,
     @Headers('x-cld-timestamp') timestamp: string,
@@ -73,5 +108,25 @@ export class CloudinaryController {
     }
 
     return { success: true };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @Post('trigger-transcription')
+  @ApiOperation({ summary: 'Manually trigger transcription for a video' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async triggerTranscription(
+    @Body() body: { publicId: string; courseId: string; sectionId: string; lessonId: string },
+  ) {
+    return this.cloudinaryService.triggerTranscription(
+      body.publicId,
+      body.courseId,
+      body.sectionId,
+      body.lessonId,
+    );
   }
 }

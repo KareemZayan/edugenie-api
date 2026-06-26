@@ -12,7 +12,10 @@ import {
   ExchangeTokenSchema,
 } from './schemas/exchange-token.schema';
 import { HandoffCode, HandoffCodeSchema } from './schemas/handoff-code.schema';
-import { AdminInvite, AdminInviteSchema } from '../superadmin/schema/admin-invite.schema';
+import {
+  AdminInvite,
+  AdminInviteSchema,
+} from '../superadmin/schema/admin-invite.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({

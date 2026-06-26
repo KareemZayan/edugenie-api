@@ -72,6 +72,21 @@ export class User extends Document {
 
   @Prop({ type: Types.ObjectId, ref: 'User', default: null })
   deactivatedBy?: Types.ObjectId | null;
+
+  @Prop({ type: String, default: null })
+  lastLoginFingerprint?: string | null;
+
+  @Prop({ type: String, default: null })
+  lastLoginIp?: string | null;
+
+  @Prop({ type: String, default: null })
+  lastLoginDevice?: string | null;
+
+  @Prop({ type: String, default: null })
+  lastLoginLocation?: string | null;
+
+  @Prop({ type: Date, default: null })
+  lastLoginAt?: Date | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

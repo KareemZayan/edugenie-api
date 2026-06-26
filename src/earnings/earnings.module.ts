@@ -9,8 +9,8 @@ import { Course, CourseSchema } from '../courses/schema/course.schema';
   imports: [
     MongooseModule.forFeature([
       { name: Earning.name, schema: EarningSchema },
-      { name: Course.name, schema: CourseSchema }
-    ])
+      { name: Course.name, schema: CourseSchema },
+    ]),
   ],
   controllers: [EarningsController],
   providers: [EarningsService],

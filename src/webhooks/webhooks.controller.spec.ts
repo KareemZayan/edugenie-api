@@ -9,6 +9,7 @@ import { Course } from '../courses/schema/course.schema';
 import { Lesson } from '../lessons/schema/lesson.schema';
 import { WebhookFailureLog } from '../superadmin/schema/webhook-failure-log.schema';
 import { PlatformConfig } from '../superadmin/schema/platform-config.schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UnauthorizedException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
@@ -20,6 +21,7 @@ describe('WebhooksController', () => {
   let earningModel: any;
   let courseModel: any;
   let platformConfigModel: any;
+  let notificationsService: any;
 
   // Builds a Paymob-style verified transaction payload for the given order.
   const buildPayload = (orderId: string, totalAmount: number) => ({
@@ -57,6 +59,7 @@ describe('WebhooksController', () => {
     };
     enrollmentModel.findOne = jest.fn().mockReturnThis();
     enrollmentModel.session = jest.fn();
+    enrollmentModel.countDocuments = jest.fn().mockResolvedValue(0);
 
     earningModel = function (data: any) {
       Object.assign(this, data);
@@ -66,6 +69,11 @@ describe('WebhooksController', () => {
     courseModel = {
       findById: jest.fn().mockReturnThis(),
       session: jest.fn(),
+      find: jest.fn().mockReturnValue({
+        select: jest
+          .fn()
+          .mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
+      }),
     };
 
     platformConfigModel = {
@@ -73,17 +81,26 @@ describe('WebhooksController', () => {
       session: jest.fn().mockResolvedValue({ instructorSharePercent: 80 }),
     };
 
+    notificationsService = { create: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [WebhooksController],
       providers: [
         { provide: PaymobService, useValue: paymobService },
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: getModelToken(Order.name), useValue: orderModel },
         { provide: getModelToken(Enrollment.name), useValue: enrollmentModel },
         { provide: getModelToken(Earning.name), useValue: earningModel },
         { provide: getModelToken(Course.name), useValue: courseModel },
         { provide: getModelToken(Lesson.name), useValue: {} },
-        { provide: getModelToken(WebhookFailureLog.name), useValue: { create: jest.fn() } },
-        { provide: getModelToken(PlatformConfig.name), useValue: platformConfigModel },
+        {
+          provide: getModelToken(WebhookFailureLog.name),
+          useValue: { create: jest.fn() },
+        },
+        {
+          provide: getModelToken(PlatformConfig.name),
+          useValue: platformConfigModel,
+        },
       ],
     }).compile();
 
