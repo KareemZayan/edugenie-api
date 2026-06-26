@@ -7,6 +7,7 @@ import {
   UseGuards,
   UnauthorizedException,
   HttpCode,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -135,8 +136,8 @@ export class CloudinaryController {
     );
   }
 
-  @Get('test-transcript/*path')
-async testTranscript(@Param('path') publicId: string) {
+  @Get('test-transcript')
+async testTranscript(@Query('publicId') publicId: string) {
   return this.cloudinaryService.testTranscription(publicId);
 }
 }
