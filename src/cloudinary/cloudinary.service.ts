@@ -182,15 +182,19 @@ export class CloudinaryService {
   ): Promise<{ queued: boolean }> {
     try {
       const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
+      const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
 
-      const result = await cloudinary.uploader.explicit(publicId, {
+      const result = await cloudinary.uploader.upload(existing.secure_url, {
         resource_type: 'video',
         type: 'upload',
+        public_id: publicId,
+        overwrite: true,
+        invalidate: true,
         raw_convert: 'google_speech',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
 
-      this.logger.log(`Triggered transcription for ${publicId} (lesson ${lessonId}): ${JSON.stringify(result?.info || 'queued')}`);
+      this.logger.log(`Triggered transcription for ${publicId}: ${JSON.stringify(result?.info)}`);
       return { queued: true };
     } catch (error: any) {
       this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
@@ -201,12 +205,18 @@ export class CloudinaryService {
   async testTranscription(publicId: string) {
     try {
       const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
-      const result = await cloudinary.uploader.explicit(publicId, {
+      const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
+
+      const result = await cloudinary.uploader.upload(existing.secure_url, {
         resource_type: 'video',
         type: 'upload',
+        public_id: publicId,
+        overwrite: true,
+        invalidate: true,
         raw_convert: 'google_speech',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
+
       return { success: true, result };
     } catch (error: any) {
       return {
