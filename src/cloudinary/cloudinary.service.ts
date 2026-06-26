@@ -201,48 +201,46 @@ export class CloudinaryService {
   transcriptReady: boolean;
   transcriptText: string | null;
 }> {
-  // Step 1: confirm video exists
+  // Check video exists
   try {
     await cloudinary.api.resource(publicId, { resource_type: 'video' });
   } catch {
     return { videoReady: false, transcriptReady: false, transcriptText: null };
   }
 
-  // Step 2: look for transcript raw file at {publicId}.transcript
+  // Construct transcript URL directly — no API call needed
+  // Format: https://res.cloudinary.com/{cloud}/raw/upload/{publicId}.transcript
+  const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+  const transcriptUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${publicId}.transcript`;
+
   try {
-    const raw = await cloudinary.api.resource(`${publicId}.transcript`, {
-      resource_type: 'raw',
-    });
+    const response = await fetch(transcriptUrl);
+    if (response.ok) {
+      const json = await response.json() as any;
+      let transcriptText: string | null = null;
 
-    if (raw?.secure_url) {
-      const response = await fetch(raw.secure_url);
-      if (response.ok) {
-        const json = await response.json() as any;
-        let transcriptText: string | null = null;
+      if (Array.isArray(json)) {
+        // Format: [{ transcript: "...", words: [...] }]
+        transcriptText = json
+          .map((r: any) => r.transcript || r.alternatives?.[0]?.transcript || '')
+          .filter(Boolean)
+          .join(' ')
+          .trim() || null;
+      } else if (json?.results && Array.isArray(json.results)) {
+        // Google Speech nested format
+        transcriptText = json.results
+          .map((r: any) => r.alternatives?.[0]?.transcript || '')
+          .filter(Boolean)
+          .join(' ')
+          .trim() || null;
+      }
 
-        if (json?.results && Array.isArray(json.results)) {
-          const parts = json.results
-            .map((r: any) => r.alternatives?.[0]?.transcript || '')
-            .filter(Boolean);
-          if (parts.length > 0) {
-            transcriptText = parts.join(' ').trim();
-          }
-        } else if (Array.isArray(json)) {
-          const parts = json
-            .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
-            .filter(Boolean);
-          if (parts.length > 0) {
-            transcriptText = parts.join(' ').trim();
-          }
-        }
-
-        if (transcriptText) {
-          return { videoReady: true, transcriptReady: true, transcriptText };
-        }
+      if (transcriptText) {
+        return { videoReady: true, transcriptReady: true, transcriptText };
       }
     }
   } catch {
-    // 404 = not ready yet, normal
+    // transcript not ready yet
   }
 
   return { videoReady: true, transcriptReady: false, transcriptText: null };
