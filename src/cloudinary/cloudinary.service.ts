@@ -181,13 +181,35 @@ export class CloudinaryService {
   lessonId: string,
 ): Promise<{ queued: boolean }> {
   try {
-    const result = await cloudinary.uploader.explicit(publicId, {
+    // Get the asset's current URL so we can resubmit it through `upload`
+    // (raw_convert only fires via `upload`, not `explicit`)
+    const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
+
+    const result = await cloudinary.uploader.upload(existing.secure_url, {
       resource_type: 'video',
       type: 'upload',
+      public_id: publicId,
+      overwrite: true,
+      invalidate: true,
       raw_convert: 'google_speech',
     } as any);
 
-    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId}): ${JSON.stringify(result?.info || result?.status || 'queued')}`);
+    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId}): ${JSON.stringify(result?.info || 'queued')}`);
+
+    // Overwriting bumps the version number — keep the stored URL in sync
+    if (result?.secure_url) {
+      await this.courseModel.updateOne(
+        { _id: new Types.ObjectId(courseId) },
+        { $set: { 'sections.$[s].lessons.$[l].videoUrl': result.secure_url } },
+        {
+          arrayFilters: [
+            { 's._id': new Types.ObjectId(sectionId) },
+            { 'l._id': new Types.ObjectId(lessonId) },
+          ],
+        },
+      );
+    }
+
     return { queued: true };
   } catch (error: any) {
     this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
