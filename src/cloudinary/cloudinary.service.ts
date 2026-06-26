@@ -184,14 +184,17 @@ export class CloudinaryService {
       const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
       const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
 
-      // Use a NEW public_id — Cloudinary only runs add-ons on genuinely new assets,
-      // never on overwrite of an existing one.
       const newPublicId = `${publicId}_transcribed_${Date.now()}`;
+
+      // Preserve the original folder — Dynamic Folder Mode doesn't derive
+      // asset_folder from public_id slashes automatically.
+      const folderPath = publicId.substring(0, publicId.lastIndexOf('/'));
 
       const result = await cloudinary.uploader.upload(existing.secure_url, {
         resource_type: 'video',
         type: 'upload',
         public_id: newPublicId,
+        asset_folder: folderPath,
         raw_convert: 'google_speech',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
