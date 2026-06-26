@@ -181,14 +181,13 @@ export class CloudinaryService {
   lessonId: string,
 ): Promise<{ queued: boolean }> {
   try {
-    // Use uploader.explicit with eager_async for reliability
-    await cloudinary.api.update(publicId, {
+    const result = await cloudinary.uploader.explicit(publicId, {
       resource_type: 'video',
+      type: 'upload',
       raw_convert: 'google_speech',
-      notification_url: this.configService.get<string>('CLOUDINARY_WEBHOOK_URL'),
     } as any);
 
-    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId})`);
+    this.logger.log(`Triggered transcription for video ${publicId} (lesson ${lessonId}): ${JSON.stringify(result?.info || result?.status || 'queued')}`);
     return { queued: true };
   } catch (error: any) {
     this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
@@ -196,38 +195,32 @@ export class CloudinaryService {
   }
 }
 
-  async getTranscriptionStatus(publicId: string): Promise<{
+async getTranscriptionStatus(publicId: string): Promise<{
   videoReady: boolean;
   transcriptReady: boolean;
   transcriptText: string | null;
 }> {
-  // Check video exists
-  try {
-    await cloudinary.api.resource(publicId, { resource_type: 'video' });
-  } catch {
-    return { videoReady: false, transcriptReady: false, transcriptText: null };
-  }
-
-  // Construct transcript URL directly — no API call needed
-  // Format: https://res.cloudinary.com/{cloud}/raw/upload/{publicId}.transcript
   const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
   const transcriptUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${publicId}.transcript`;
 
   try {
     const response = await fetch(transcriptUrl);
+
+    if (response.status === 404) {
+      return { videoReady: true, transcriptReady: false, transcriptText: null };
+    }
+
     if (response.ok) {
       const json = await response.json() as any;
       let transcriptText: string | null = null;
 
       if (Array.isArray(json)) {
-        // Format: [{ transcript: "...", words: [...] }]
         transcriptText = json
           .map((r: any) => r.transcript || r.alternatives?.[0]?.transcript || '')
           .filter(Boolean)
           .join(' ')
           .trim() || null;
       } else if (json?.results && Array.isArray(json.results)) {
-        // Google Speech nested format
         transcriptText = json.results
           .map((r: any) => r.alternatives?.[0]?.transcript || '')
           .filter(Boolean)
@@ -239,8 +232,8 @@ export class CloudinaryService {
         return { videoReady: true, transcriptReady: true, transcriptText };
       }
     }
-  } catch {
-    // transcript not ready yet
+  } catch (err) {
+    this.logger.warn(`Transcript fetch failed for ${publicId}:`, err);
   }
 
   return { videoReady: true, transcriptReady: false, transcriptText: null };
