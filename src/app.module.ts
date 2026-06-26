@@ -57,6 +57,7 @@ import { ScheduleModule } from '@nestjs/schedule';
         DASHBOARD_URL: Joi.string().default('http://localhost:4200'),
         STUDENT_APP_URL: Joi.string().default('http://localhost:3000'),
         CORS_ORIGINS: Joi.string().optional(),
+        CLOUDINARY_WEBHOOK_URL: Joi.string().uri().optional(),
       }),
     }),
     MongooseModule.forRootAsync({
