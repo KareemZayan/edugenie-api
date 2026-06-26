@@ -184,17 +184,41 @@ export class CloudinaryService {
       const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
       const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
 
+      // Use a NEW public_id — Cloudinary only runs add-ons on genuinely new assets,
+      // never on overwrite of an existing one.
+      const newPublicId = `${publicId}_transcribed_${Date.now()}`;
+
       const result = await cloudinary.uploader.upload(existing.secure_url, {
         resource_type: 'video',
         type: 'upload',
-        public_id: publicId,
-        overwrite: true,
-        invalidate: true,
+        public_id: newPublicId,
         raw_convert: 'google_speech',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
 
-      this.logger.log(`Triggered transcription for ${publicId}: ${JSON.stringify(result?.info)}`);
+      // Update the lesson to point at the new asset
+      if (result?.secure_url && result?.public_id) {
+        await this.courseModel.updateOne(
+          { _id: new Types.ObjectId(courseId) },
+          {
+            $set: {
+              'sections.$[s].lessons.$[l].videoUrl': result.secure_url,
+              'sections.$[s].lessons.$[l].videoPublicId': result.public_id,
+            },
+          },
+          {
+            arrayFilters: [
+              { 's._id': new Types.ObjectId(sectionId) },
+              { 'l._id': new Types.ObjectId(lessonId) },
+            ],
+          },
+        );
+
+        // Clean up the old asset now that the lesson points to the new one
+        cloudinary.uploader.destroy(publicId, { resource_type: 'video' }).catch(() => { });
+      }
+
+      this.logger.log(`Triggered transcription via new asset ${newPublicId}: ${JSON.stringify(result?.info)}`);
       return { queued: true };
     } catch (error: any) {
       this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
