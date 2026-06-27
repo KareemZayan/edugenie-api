@@ -261,14 +261,21 @@ export class CoursesService {
       return {
         id: c._id.toString(),
         title: c.title,
+        description: c.description ?? '',
         thumbnail: c.thumbnail,
-        status: c.courseStatus,
+        level: c.level ?? '',
+        price: c.price ?? 0,
+        status: c.courseStatus,              // ← keeps InstructorCourseListItem happy
+        courseStatus: c.courseStatus,
+        totalEnrollments: totalStudents,
         totalStudents,
         totalRevenue,
         rating: c.ratingAverage || 0,
         completionRate,
-        totalHours: c.totalHours || 0,       // ✅ add this
-        totalLessons: c.totalLessons || 0,   // ✅ and thi
+        totalHours: c.totalHours || 0,
+        totalLessons: c.totalLessons || 0,
+        createdAt: (c as any).createdAt,     // ← cast to avoid TS error
+        updatedAt: (c as any).updatedAt,     // ← cast to avoid TS error
       };
     });
 
