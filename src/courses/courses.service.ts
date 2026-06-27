@@ -35,7 +35,7 @@ export class CoursesService {
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly notificationsService: NotificationsService,
-  ) { }
+  ) {}
 
   async create(
     dto: CreateCourseDto,
@@ -261,21 +261,12 @@ export class CoursesService {
       return {
         id: c._id.toString(),
         title: c.title,
-        description: c.description ?? '',
         thumbnail: c.thumbnail,
-        level: c.level ?? '',
-        price: c.price ?? 0,
-        status: c.courseStatus,              // ← keeps InstructorCourseListItem happy
-        courseStatus: c.courseStatus,
-        totalEnrollments: totalStudents,
+        status: c.courseStatus,
         totalStudents,
         totalRevenue,
         rating: c.ratingAverage || 0,
         completionRate,
-        totalHours: c.totalHours || 0,
-        totalLessons: c.totalLessons || 0,
-        createdAt: (c as any).createdAt,     // ← cast to avoid TS error
-        updatedAt: (c as any).updatedAt,     // ← cast to avoid TS error
       };
     });
 
@@ -647,18 +638,18 @@ export class CoursesService {
         createdAt: c.createdAt,
         category: c.categoryId
           ? {
-            _id: c.categoryId._id?.toString() || c.categoryId.toString(),
-            name: c.categoryId.name,
-          }
+              _id: c.categoryId._id?.toString() || c.categoryId.toString(),
+              name: c.categoryId.name,
+            }
           : null,
         instructor: c.instructorId
           ? {
-            _id: c.instructorId._id?.toString() || c.instructorId.toString(),
-            firstName: c.instructorId.firstName,
-            lastName: c.instructorId.lastName,
-            avatar: c.instructorId.avatar,
-            email: c.instructorId.email,
-          }
+              _id: c.instructorId._id?.toString() || c.instructorId.toString(),
+              firstName: c.instructorId.firstName,
+              lastName: c.instructorId.lastName,
+              avatar: c.instructorId.avatar,
+              email: c.instructorId.email,
+            }
           : null,
       };
     });
