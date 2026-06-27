@@ -11,6 +11,9 @@ import {
     AttachmentParentType,
 } from './schema/attachment.schema';
 import { Course } from '../courses/schema/course.schema';
+import { Enrollment } from '../enrollments/schema/enrollment.schema';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
+import { UserRole } from '../common/enums/user-role.enum';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
 import { AttachmentSerializer } from './serializers/attachments.serializer'; 
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
@@ -24,6 +27,8 @@ export class AttachmentsService {
         @InjectModel(Attachment.name)
         private readonly attachmentModel: Model<Attachment>,
         @InjectModel(Course.name) private readonly courseModel: Model<Course>,
+        @InjectModel(Enrollment.name)
+        private readonly enrollmentModel: Model<Enrollment>,
         private readonly cloudinaryService: CloudinaryService,
         private readonly enrollmentsService: EnrollmentsService,
     ) { }
@@ -143,8 +148,11 @@ export class AttachmentsService {
             );
         }
 
+        const isPublic = parentType === AttachmentParentType.LESSON ? false : (dto.isPublic ?? false);
+
         const created = await this.attachmentModel.create({
             ...dto,
+            isPublic,
             parentType,
             courseId: new Types.ObjectId(courseId),
             sectionId:
@@ -172,24 +180,10 @@ export class AttachmentsService {
         courseId: string,
         sectionId?: string,
         lessonId?: string,
-        requestingStudentId?: string,
+        requestingUser?: { userId: string; role: UserRole },
     ): Promise<AttachmentSerializer[]> {
-        if (parentType !== AttachmentParentType.COURSE) {
-            if (!sectionId) {
-                throw new BadRequestException('sectionId is required for this scope');
-            }
-            if (!requestingStudentId) {
-                throw new ForbiddenException('Authentication required');
-            }
-            const hasAccess = await this.enrollmentsService.canAccessSection(
-                requestingStudentId,
-                sectionId,
-            );
-            if (!hasAccess) {
-                throw new ForbiddenException(
-                    'You must be enrolled to view these attachments',
-                );
-            }
+        if (parentType !== AttachmentParentType.COURSE && !sectionId) {
+            throw new BadRequestException('sectionId is required for this scope');
         }
 
         const parentFilter = this.buildParentFilter(
@@ -204,7 +198,104 @@ export class AttachmentsService {
             .sort({ createdAt: 1 })
             .exec();
 
-        return attachments.map((a) => new AttachmentSerializer(a.toObject()));
+        if (attachments.length === 0) {
+            return [];
+        }
+
+        const requestingUserId = requestingUser?.userId;
+        const requestingUserRole = requestingUser?.role;
+
+        const isAdminOrSuperAdmin =
+            requestingUserRole === UserRole.ADMIN ||
+            requestingUserRole === UserRole.SUPERADMIN;
+
+        // Fetch course to find the instructor
+        const course = await this.courseModel
+            .findById(courseId)
+            .select('instructorId')
+            .exec();
+        if (!course) {
+            throw new NotFoundException('Course not found');
+        }
+
+        const isInstructor =
+            requestingUserId &&
+            course.instructorId.toString() === requestingUserId;
+
+        // Fetch enrollment context if we have an authenticated student
+        let enrollment = null;
+        if (requestingUserId && !isAdminOrSuperAdmin && !isInstructor) {
+            enrollment = await this.enrollmentModel.findOne({
+                studentId: new Types.ObjectId(requestingUserId),
+                courseId: new Types.ObjectId(courseId),
+            });
+        }
+
+        // Lesson attachments are strictly enrollment-only
+        if (parentType === AttachmentParentType.LESSON) {
+            const hasAccessToLesson =
+                isAdminOrSuperAdmin ||
+                isInstructor ||
+                !!(
+                    enrollment &&
+                    (enrollment.type === PurchaseType.FULL_COURSE ||
+                        (sectionId &&
+                            enrollment.sectionIds
+                                ?.map((id: any) => id.toString())
+                                .includes(sectionId)))
+                );
+            if (!hasAccessToLesson) {
+                throw new ForbiddenException(
+                    'You must be enrolled to view these attachments',
+                );
+            }
+        }
+
+        const filtered = attachments.filter((attachment) => {
+            // Public course/section attachments are visible to anyone
+            if (attachment.isPublic && parentType !== AttachmentParentType.LESSON) {
+                return true;
+            }
+
+            // Restricted attachments require authentication
+            if (!requestingUserId) {
+                return false;
+            }
+
+            // Admins, Super Admins, and course Instructor can access any attachment
+            if (isAdminOrSuperAdmin || isInstructor) {
+                return true;
+            }
+
+            // Other users require a valid enrollment
+            if (!enrollment) {
+                return false;
+            }
+
+            // Course-level: restricted files require full course enrollment
+            if (parentType === AttachmentParentType.COURSE) {
+                return enrollment.type === PurchaseType.FULL_COURSE;
+            }
+
+            // Section/Lesson-level: restricted files require full course or section access
+            if (
+                parentType === AttachmentParentType.SECTION ||
+                parentType === AttachmentParentType.LESSON
+            ) {
+                if (enrollment.type === PurchaseType.FULL_COURSE) {
+                    return true;
+                }
+                if (sectionId && enrollment.sectionIds) {
+                    return enrollment.sectionIds
+                        .map((id: any) => id.toString())
+                        .includes(sectionId);
+                }
+            }
+
+            return false;
+        });
+
+        return filtered.map((a) => new AttachmentSerializer(a.toObject()));
     }
 
     /**

@@ -44,6 +44,10 @@ export class AttachmentSerializer {
   fileSize: number;
 
   @Expose()
+  @ApiProperty({ example: false })
+  isPublic: boolean;
+
+  @Expose()
   @ApiProperty({ example: '2026-01-15T10:30:00.000Z' })
   createdAt: Date;
 

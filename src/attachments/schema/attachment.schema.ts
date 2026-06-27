@@ -76,6 +76,9 @@ export class Attachment {
     // server-side sanity check on create.
     @Prop({ required: true, min: 0 })
     fileSize!: number;
+
+    @Prop({ type: Boolean, default: false })
+    isPublic!: boolean;
 }
 
 export const AttachmentSchema = SchemaFactory.createForClass(Attachment);
