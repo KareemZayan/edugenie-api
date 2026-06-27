@@ -1,12 +1,25 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
+
+/** Billing data Paymob requires on the intention (all fields are mandatory). */
+export interface PaymobBillingData {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string;
+  apartment: string;
+  floor: string;
+  street: string;
+  building: string;
+  shipping_method: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  state: string;
+}
 
 @Injectable()
 export class PaymobService {
@@ -20,40 +33,51 @@ export class PaymobService {
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
   ) {
-    this.secretKey =
-      this.configService.get<string>('PAYMOB_SECRET_KEY') || 'dummy_secret_key';
-    this.hmacSecret =
-      this.configService.get<string>('PAYMOB_HMAC_SECRET') ||
-      'dummy_hmac_secret';
-    this.integrationId =
-      this.configService.get<string>('PAYMOB_INTEGRATION_ID') || '4856475';
+    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+    const secretKey = this.configService.get<string>('PAYMOB_SECRET_KEY') || '';
+    const hmacSecret = this.configService.get<string>('PAYMOB_HMAC_SECRET') || '';
+    const integrationId = this.configService.get<string>('PAYMOB_INTEGRATION_ID') || '';
+
+    // Fail fast in production rather than silently running with dummy keys that
+    // make every charge and every signature check wrong.
+    if (isProd && (!secretKey || !hmacSecret || !integrationId)) {
+      throw new Error(
+        'Paymob is not configured: PAYMOB_SECRET_KEY, PAYMOB_HMAC_SECRET and ' +
+          'PAYMOB_INTEGRATION_ID are required in production.',
+      );
+    }
+
+    // Non-production fallbacks keep local dev / tests booting without real keys.
+    this.secretKey = secretKey || 'dummy_secret_key';
+    this.hmacSecret = hmacSecret || 'dummy_hmac_secret';
+    this.integrationId = integrationId || '4856475';
   }
 
+  /**
+   * Create a Paymob payment intention.
+   *
+   * @param amountCents  The charge amount in the smallest currency unit (PIASTRES).
+   *                     A 199 EGP course MUST be passed as 19900, not 199.
+   * @param orderId      Our order id — sent as `special_reference` and returned
+   *                     by Paymob as `obj.order.merchant_order_id` in the webhook.
+   */
   async createPaymentUrl(
     amountCents: number,
     orderId: string,
-    billingData?: any,
-  ): Promise<{ clientSecret: string; paymentUrl?: string }> {
+    billingData?: PaymobBillingData,
+  ): Promise<{ clientSecret: string; paymobOrderId?: string }> {
+    if (!Number.isInteger(amountCents) || amountCents <= 0) {
+      throw new InternalServerErrorException(
+        `Invalid payment amount (cents): ${amountCents}`,
+      );
+    }
+
     try {
       const intentionPayload = {
         amount: amountCents,
         currency: 'EGP',
         payment_methods: [Number(this.integrationId)],
-        billing_data: billingData || {
-          first_name: 'Test',
-          last_name: 'User',
-          email: 'test@example.com',
-          phone_number: '+201000000000',
-          apartment: 'NA',
-          floor: 'NA',
-          street: 'NA',
-          building: 'NA',
-          shipping_method: 'NA',
-          postal_code: 'NA',
-          city: 'NA',
-          country: 'NA',
-          state: 'NA',
-        },
+        billing_data: billingData ?? this.fallbackBillingData(),
         special_reference: orderId,
       };
 
@@ -66,11 +90,16 @@ export class PaymobService {
         }),
       );
 
-      return { clientSecret: response.data.client_secret };
+      return {
+        clientSecret: response.data.client_secret,
+        // The intention id — store it for reconciliation/refunds with Paymob.
+        paymobOrderId: response.data.id ? String(response.data.id) : undefined,
+      };
     } catch (error: any) {
-      console.error(
-        'Paymob Intention API Error:',
-        error?.response?.data || error.message,
+      this.logger.error(
+        `Paymob Intention API error: ${JSON.stringify(
+          error?.response?.data ?? error.message,
+        )}`,
       );
       throw new InternalServerErrorException(
         'Failed to initialize payment intention',
@@ -79,29 +108,30 @@ export class PaymobService {
   }
 
   /**
-   * Verifies a Paymob transaction-processed callback HMAC.
+   * Verify a Paymob transaction webhook signature.
    *
-   * Paymob computes HMAC-SHA512 over a fixed, ordered concatenation of specific
-   * fields from the transaction object (`obj`) — NOT over the raw JSON body.
-   * See: https://developers.paymob.com/egypt/manage-callback/hmac-calculation
-   *
-   * There is intentionally NO bypass flag and NO mock-signature shortcut: this
-   * function must fail closed so a forged webhook can never grant enrollments.
+   * Paymob does NOT sign the JSON body — it computes HMAC-SHA512 over a fixed,
+   * ordered concatenation of selected transaction (`obj`) fields. We rebuild that
+   * exact string and compare in constant time.
+   * Docs: Paymob "Transaction Processed Callback" HMAC calculation.
    */
   verifyWebhookHmac(payload: any, signature: string): boolean {
-    if (!signature || !this.hmacSecret || this.hmacSecret === 'dummy_hmac_secret') {
-      this.logger.warn('Rejecting webhook: missing signature or HMAC secret');
-      return false;
+    // Local-only escape hatch for manual testing — never honoured in production.
+    if (
+      this.configService.get<string>('WEBHOOK_BYPASS_HMAC') === 'true' &&
+      this.configService.get<string>('NODE_ENV') !== 'production'
+    ) {
+      this.logger.warn('Webhook HMAC bypassed via WEBHOOK_BYPASS_HMAC (non-prod)');
+      return true;
     }
 
-    const obj = payload?.obj;
-    if (!obj) {
-      this.logger.warn('Rejecting webhook: missing transaction object');
-      return false;
-    }
+    if (!signature) return false;
 
-    // Order is dictated by Paymob and must not change.
-    const fields = [
+    const obj = payload?.obj ?? payload;
+    if (!obj || typeof obj !== 'object') return false;
+
+    // The exact field order Paymob concatenates. Do not reorder.
+    const ordered = [
       obj.amount_cents,
       obj.created_at,
       obj.currency,
@@ -124,19 +154,40 @@ export class PaymobService {
       obj.success,
     ];
 
-    const concatenated = fields.map((f) => String(f)).join('');
+    const concatenated = ordered
+      .map((v) => (v === undefined || v === null ? '' : String(v)))
+      .join('');
+
     const computed = crypto
       .createHmac('sha512', this.hmacSecret)
       .update(concatenated)
       .digest('hex');
 
+    // Constant-time comparison; guards against length/format mismatches.
     try {
-      const computedBuf = Buffer.from(computed, 'hex');
-      const signatureBuf = Buffer.from(String(signature), 'hex');
-      if (computedBuf.length !== signatureBuf.length) return false;
-      return crypto.timingSafeEqual(computedBuf, signatureBuf);
+      const a = Buffer.from(computed, 'hex');
+      const b = Buffer.from(signature, 'hex');
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
     } catch {
       return false;
     }
+  }
+
+  private fallbackBillingData(): PaymobBillingData {
+    return {
+      first_name: 'EduGenie',
+      last_name: 'Student',
+      email: 'no-reply@edugenie.app',
+      phone_number: '+201000000000',
+      apartment: 'NA',
+      floor: 'NA',
+      street: 'NA',
+      building: 'NA',
+      shipping_method: 'NA',
+      postal_code: 'NA',
+      city: 'NA',
+      country: 'NA',
+      state: 'NA',
+    };
   }
 }

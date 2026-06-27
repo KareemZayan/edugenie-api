@@ -56,8 +56,12 @@ export class WebhooksController {
   async handlePaymobWebhook(
     @Req() req: Request,
     @Res() res: Response,
-    @Headers('hmac') hmacSignature: string,
+    @Headers('hmac') hmacHeader: string,
   ) {
+    // Paymob appends the HMAC as a query parameter (`?hmac=...`) on the
+    // processed callback; fall back to the header for other configs / tests.
+    const hmacSignature =
+      (req.query?.hmac as string | undefined) || hmacHeader;
     if (!hmacSignature) {
       throw new UnauthorizedException('Missing HMAC signature');
     }

@@ -8,6 +8,7 @@ import {
   EnrollmentSchema,
 } from '../enrollments/schema/enrollment.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
+import { User, UserSchema } from '../users/schema/user.schema';
 import { CartModule } from '../cart/cart.module';
 import { PaymobModule } from '../paymob/paymob.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -18,6 +19,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Order.name, schema: OrderSchema },
       { name: Enrollment.name, schema: EnrollmentSchema },
       { name: Course.name, schema: CourseSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     CartModule,
     PaymobModule,
