@@ -9,8 +9,11 @@ import { InstructorCoursesController } from './instructor-courses.controller';
 import { Course, CourseSchema } from './schema/course.schema';
 import { Earning, EarningSchema } from '../orders/schema/earning.schema';
 import { Category, CategorySchema } from '../categories/schema/category.schema';
+import { User, UserSchema } from '../users/schema/user.schema';
 import { ProgressModule } from '../progress/progress.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -18,6 +21,7 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
       { name: Course.name, schema: CourseSchema },
       { name: Category.name, schema: CategorySchema },
       { name: Earning.name, schema: EarningSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     CacheModule.register({
       ttl: 60000, // cache for 1 minute
@@ -25,9 +29,10 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
     }),
     ProgressModule,
     EnrollmentsModule,
+    NotificationsModule,
   ],
   controllers: [CoursesController, InstructorCoursesController],
   providers: [CoursesService],
   exports: [CoursesService],
 })
-export class CoursesModule { }
+export class CoursesModule {}

@@ -1,4 +1,8 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
@@ -26,9 +30,11 @@ export class InstructorService {
     @InjectModel(Review.name) private reviewModel: Model<Review>,
     @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
     @InjectModel(Progress.name) private progressModel: Model<Progress>,
-  ) {}
+  ) { }
 
-  async getDashboardOverview(instructorId: string): Promise<DashboardOverviewResponse> {
+  async getDashboardOverview(
+    instructorId: string,
+  ): Promise<DashboardOverviewResponse> {
     const instructorObjId = new Types.ObjectId(instructorId);
 
     // 1. Total Earnings
@@ -46,13 +52,23 @@ export class InstructorService {
     sixtyDaysAgo.setDate(now.getDate() - 60);
 
     const recentEarningsResult = await this.earningModel.aggregate([
-      { $match: { instructorId: instructorObjId, createdAt: { $gte: thirtyDaysAgo } } },
+      {
+        $match: {
+          instructorId: instructorObjId,
+          createdAt: { $gte: thirtyDaysAgo },
+        },
+      },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
     const recentEarnings = recentEarningsResult[0]?.total || 0;
 
     const previousEarningsResult = await this.earningModel.aggregate([
-      { $match: { instructorId: instructorObjId, createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } },
+      {
+        $match: {
+          instructorId: instructorObjId,
+          createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo },
+        },
+      },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
     const previousEarnings = previousEarningsResult[0]?.total || 0;
@@ -61,11 +77,15 @@ export class InstructorService {
     if (previousEarnings === 0) {
       earningsChangePercent = recentEarnings > 0 ? 100 : 0;
     } else {
-      earningsChangePercent = ((recentEarnings - previousEarnings) / previousEarnings) * 100;
+      earningsChangePercent =
+        ((recentEarnings - previousEarnings) / previousEarnings) * 100;
     }
 
     // 3. Get instructor courses
-    const courses = await this.courseModel.find({ instructorId: instructorObjId }).select('_id').exec();
+    const courses = await this.courseModel
+      .find({ instructorId: instructorObjId })
+      .select('_id')
+      .exec();
     const courseIds = courses.map((c) => c._id);
     const totalCourses = courseIds.length;
 
@@ -73,7 +93,10 @@ export class InstructorService {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(now.getDate() - 7);
 
-    const totalStudentsResult = await this.enrollmentModel.distinct('studentId', { courseId: { $in: courseIds } });
+    const totalStudentsResult = await this.enrollmentModel.distinct(
+      'studentId',
+      { courseId: { $in: courseIds } },
+    );
     const totalStudents = totalStudentsResult.length;
 
     const newStudentsResult = await this.enrollmentModel.distinct('studentId', {
@@ -112,13 +135,18 @@ export class InstructorService {
     };
   }
 
-  async getAttentionItems(instructorId: string): Promise<AttentionItemsResponse> {
+  async getAttentionItems(
+    instructorId: string,
+  ): Promise<AttentionItemsResponse> {
     const instructorObjId = new Types.ObjectId(instructorId);
     const items: AttentionItem[] = [];
 
     // 1. Rejected Courses
     const rejectedCourses = await this.courseModel
-      .find({ instructorId: instructorObjId, courseStatus: CourseStatus.REJECTED })
+      .find({
+        instructorId: instructorObjId,
+        courseStatus: CourseStatus.REJECTED,
+      })
       .select('_id title rejectionReason rejectedAt createdAt')
       .exec();
 
@@ -128,12 +156,19 @@ export class InstructorService {
         courseId: c._id.toString(),
         courseTitle: c.title,
         rejectionReason: c.rejectionReason,
-        createdAt: (c as unknown as { rejectedAt?: Date; createdAt?: Date }).rejectedAt || (c as unknown as { createdAt?: Date }).createdAt || new Date(),
+        createdAt:
+          (c as unknown as { rejectedAt?: Date; createdAt?: Date })
+            .rejectedAt ||
+          (c as unknown as { createdAt?: Date }).createdAt ||
+          new Date(),
       });
     });
 
     // 2. Low Reviews
-    const courses = await this.courseModel.find({ instructorId: instructorObjId }).select('_id title sections').exec();
+    const courses = await this.courseModel
+      .find({ instructorId: instructorObjId })
+      .select('_id title sections')
+      .exec();
     const courseIds = courses.map((c) => c._id);
     const courseMap = new Map(courses.map((c) => [c._id.toString(), c]));
 
@@ -141,17 +176,23 @@ export class InstructorService {
     fourteenDaysAgo.setDate(new Date().getDate() - 14);
 
     const lowReviews = await this.reviewModel
-      .find({ courseId: { $in: courseIds }, rating: { $lte: 2 }, createdAt: { $gte: fourteenDaysAgo } })
+      .find({
+        courseId: { $in: courseIds },
+        rating: { $lte: 2 },
+        createdAt: { $gte: fourteenDaysAgo },
+      })
       .exec();
 
     lowReviews.forEach((r) => {
       items.push({
         type: 'low_review',
         courseId: r.courseId.toString(),
-        courseTitle: courseMap.get(r.courseId.toString())?.title || 'Unknown Course',
+        courseTitle:
+          courseMap.get(r.courseId.toString())?.title || 'Unknown Course',
         reviewId: r._id.toString(),
         rating: r.rating,
-        createdAt: (r as unknown as { createdAt?: Date }).createdAt || new Date(),
+        createdAt:
+          (r as unknown as { createdAt?: Date }).createdAt || new Date(),
       });
     });
 
@@ -176,8 +217,10 @@ export class InstructorService {
       items.push({
         type: 'quiz_pending_review',
         sectionId: q.sectionId.toString(),
-        courseTitle: sectionToCourseMap.get(q.sectionId.toString()) || 'Unknown Course',
-        createdAt: (q as unknown as { createdAt?: Date }).createdAt || new Date(),
+        courseTitle:
+          sectionToCourseMap.get(q.sectionId.toString()) || 'Unknown Course',
+        createdAt:
+          (q as unknown as { createdAt?: Date }).createdAt || new Date(),
       });
     });
 
@@ -198,7 +241,10 @@ export class InstructorService {
     // Verify courseId if provided
     let filterCourseIds: Types.ObjectId[] = [];
     if (courseId) {
-      const course = await this.courseModel.findById(courseId).select('instructorId').exec();
+      const course = await this.courseModel
+        .findById(courseId)
+        .select('instructorId')
+        .exec();
       if (!course) {
         throw new NotFoundException('Course not found');
       }
@@ -208,15 +254,30 @@ export class InstructorService {
       }
       filterCourseIds.push(new Types.ObjectId(courseId));
     } else {
-      const courses = await this.courseModel.find({ instructorId: instructorObjId }).select('_id').exec();
+      const courses = await this.courseModel
+        .find({ instructorId: instructorObjId })
+        .select('_id')
+        .exec();
       filterCourseIds = courses.map((c) => c._id);
     }
 
     if (filterCourseIds.length === 0) {
-      return { data: [], meta: { total: 0, page, limit, totalPages: 0, hasNextPage: false, hasPrevPage: false } };
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      };
     }
 
-    const query: Record<string, unknown> = { courseId: { $in: filterCourseIds } };
+    const query: Record<string, unknown> = {
+      courseId: { $in: filterCourseIds },
+    };
     if (accessType) {
       query.type = accessType;
     }
@@ -237,7 +298,12 @@ export class InstructorService {
     const totalPages = Math.ceil(total / limit);
 
     const data: InstructorStudentListItem[] = enrollments.map((e) => {
-      const student = e.studentId as unknown as { _id: Types.ObjectId; firstName: string; lastName: string; email: string };
+      const student = e.studentId as unknown as {
+        _id: Types.ObjectId;
+        firstName: string;
+        lastName: string;
+        email: string;
+      };
       return {
         studentId: student._id.toString(),
         studentName: `${student.firstName} ${student.lastName}`,
@@ -246,7 +312,8 @@ export class InstructorService {
         accessType: e.type as 'full_course' | 'sections',
         accessibleSections: e.sectionIds.map((id) => id.toString()),
         progressPercent: e.progressPercentage || 0,
-        enrolledAt: (e as unknown as { createdAt?: Date }).createdAt || new Date(),
+        enrolledAt:
+          (e as unknown as { createdAt?: Date }).createdAt || new Date(),
       };
     });
 

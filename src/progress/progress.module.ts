@@ -5,7 +5,15 @@ import { ProgressService } from './progress.service';
 import { Progress, ProgressSchema } from './schema/progress.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
-import { QuizAttempt, QuizAttemptSchema } from '../quizzes/schema/quiz-attempt.schema';
+import {
+  QuizAttempt,
+  QuizAttemptSchema,
+} from '../quizzes/schema/quiz-attempt.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -14,7 +22,9 @@ import { QuizAttempt, QuizAttemptSchema } from '../quizzes/schema/quiz-attempt.s
       { name: Course.name, schema: CourseSchema },
       { name: Quiz.name, schema: QuizSchema },
       { name: QuizAttempt.name, schema: QuizAttemptSchema },
-    ])
+      { name: Enrollment.name, schema: EnrollmentSchema },
+    ]),
+    NotificationsModule,
   ],
   controllers: [ProgressController],
   providers: [ProgressService],

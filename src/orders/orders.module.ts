@@ -3,22 +3,29 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { Order, OrderSchema } from './schema/order.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
+import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { CartModule } from '../cart/cart.module';
 import { PaymobModule } from '../paymob/paymob.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
       { name: Enrollment.name, schema: EnrollmentSchema },
-      { name: User.name, schema: UserSchema }
+      { name: Course.name, schema: CourseSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     CartModule,
-    PaymobModule
+    PaymobModule,
+    NotificationsModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService]
+  providers: [OrdersService],
 })
-export class OrdersModule { }
+export class OrdersModule {}

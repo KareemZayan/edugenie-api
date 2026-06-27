@@ -1,0 +1,1 @@
+export const STUDENT_MILESTONES = [100, 500, 1000, 5000, 10000];

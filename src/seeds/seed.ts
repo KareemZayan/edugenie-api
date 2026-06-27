@@ -7,7 +7,7 @@ import * as bcrypt from 'bcrypt';
 
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule);
-  
+
   const userModel = app.get<Model<any>>(getModelToken('User'));
   const categoryModel = app.get<Model<any>>(getModelToken('Category'));
   const courseModel = app.get<Model<any>>(getModelToken('Course'));
@@ -17,15 +17,27 @@ async function bootstrap() {
   // 1. Seed Categories
   await categoryModel.deleteMany({});
   const categories = await categoryModel.insertMany([
-    { name: 'Web Development', slug: 'web-development', description: 'Learn to build websites.' },
-    { name: 'Data Science', slug: 'data-science', description: 'Analyze data and build AI models.' },
-    { name: 'Business', slug: 'business', description: 'Master marketing and management.' },
+    {
+      name: 'Web Development',
+      slug: 'web-development',
+      description: 'Learn to build websites.',
+    },
+    {
+      name: 'Data Science',
+      slug: 'data-science',
+      description: 'Analyze data and build AI models.',
+    },
+    {
+      name: 'Business',
+      slug: 'business',
+      description: 'Master marketing and management.',
+    },
   ]);
 
   // 2. Seed Users
   await userModel.deleteMany({});
   const passwordHash = await bcrypt.hash('password123', 10);
-  
+
   const admin = await userModel.create({
     email: 'admin@edugenie.com',
     password: passwordHash,
@@ -65,7 +77,7 @@ async function bootstrap() {
     courseStatus: 'published',
     totalLessons: 0,
     totalHours: 0,
-    sections: []
+    sections: [],
   });
 
   console.log('Seeding complete!');

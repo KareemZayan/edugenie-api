@@ -18,6 +18,7 @@ export class WebhookFailureLog {
   occurredAt: Date;
 }
 
-export const WebhookFailureLogSchema = SchemaFactory.createForClass(WebhookFailureLog);
+export const WebhookFailureLogSchema =
+  SchemaFactory.createForClass(WebhookFailureLog);
 
 WebhookFailureLogSchema.index({ service: 1, occurredAt: -1 });

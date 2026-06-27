@@ -1,4 +1,12 @@
 import { Controller, Post, Body, Param, UseGuards } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse as SwaggerApiResponse,
+  ApiBody,
+  ApiCookieAuth,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { QuizzesService } from './quizzes.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -12,12 +20,24 @@ import { QuizSerializer } from './serializers/quiz.serializer';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('quizzes')
+@ApiTags('Quizzes')
 export class QuizzesController {
-  constructor(private readonly quizzesService: QuizzesService) { }
+  constructor(private readonly quizzesService: QuizzesService) {}
 
   @Roles(UserRole.INSTRUCTOR)
   @Post('generate')
-  async generateQuizConfig(@Body() dto: CreateQuizDto): Promise<{ message: string; quiz: QuizSerializer }> {
+  @ApiOperation({ summary: 'Generate quiz config' })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiBody({ type: CreateQuizDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async generateQuizConfig(
+    @Body() dto: CreateQuizDto,
+  ): Promise<{ message: string; quiz: QuizSerializer }> {
     return this.quizzesService.saveQuizConfig(dto);
   }
 }

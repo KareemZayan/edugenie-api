@@ -1,17 +1,31 @@
+import { ApiProperty } from '@nestjs/swagger';
+
 import { Exclude, Expose, Type } from 'class-transformer';
 
 export class CartItemSerializer {
-  @Expose() id: string;
-  @Expose() itemType: string;
-  @Expose() courseId: any;
-  @Expose() sectionId?: string;
-  @Expose() price: number;
+  @Expose()
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  id: string;
+  @Expose()
+  @ApiProperty({ example: 'string_example' })
+  itemType: string;
+  @Expose()
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  courseId: any;
+  @Expose()
+  @ApiProperty({ required: false, example: '507f1f77bcf86cd799439011' })
+  sectionId?: string;
+  @Expose()
+  @ApiProperty({ example: 1 })
+  price: number;
 
-  @Exclude() _id?: any;
+  @Exclude()
+  @ApiProperty({ required: false, example: '507f1f77bcf86cd799439011' })
+  _id?: any;
 
   constructor(partial: Partial<CartItemSerializer>) {
     Object.assign(this, partial);
-    
+
     if ((partial as any)._id) {
       this.id = (partial as any)._id.toString();
       delete (this as any)._id;
@@ -35,22 +49,35 @@ export class CartItemSerializer {
 }
 
 export class CartSerializer {
-  @Expose() id: string;
-  @Expose() studentId: string;
-  
+  @Expose()
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  id: string;
+  @Expose()
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  studentId: string;
+
   @Expose()
   @Type(() => CartItemSerializer)
+  @ApiProperty()
   items: CartItemSerializer[];
 
-  @Expose() createdAt: Date;
-  @Expose() updatedAt: Date;
+  @Expose()
+  @ApiProperty({ example: '2026-01-15T10:30:00.000Z' })
+  createdAt: Date;
+  @Expose()
+  @ApiProperty({ example: '2026-01-15T10:30:00.000Z' })
+  updatedAt: Date;
 
-  @Exclude() _id?: any;
-  @Exclude() __v?: number;
+  @Exclude()
+  @ApiProperty({ required: false, example: '507f1f77bcf86cd799439011' })
+  _id?: any;
+  @Exclude()
+  @ApiProperty({ required: false, example: 1 })
+  __v?: number;
 
   constructor(partial: Partial<CartSerializer>) {
     Object.assign(this, partial);
-    
+
     if ((partial as any)._id) {
       this.id = (partial as any)._id.toString();
       delete (this as any)._id;
@@ -61,9 +88,12 @@ export class CartSerializer {
     }
 
     if (this.items && Array.isArray(this.items)) {
-      this.items = this.items.map((item: any) => new CartItemSerializer(
-        typeof item.toObject === 'function' ? item.toObject() : item
-      ));
+      this.items = this.items.map(
+        (item: any) =>
+          new CartItemSerializer(
+            typeof item.toObject === 'function' ? item.toObject() : item,
+          ),
+      );
     }
   }
 }

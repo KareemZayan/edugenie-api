@@ -1,12 +1,32 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { User } from '../users/schema/user.schema';
 import { Earning, EarningDocument } from '../earnings/schema/earning.schema';
-import { AuditLog, AuditLogDocument } from '../audit-logs/schemas/audit-log.schema';
-import { PlatformConfig, PlatformConfigDocument } from './schema/platform-config.schema';
-import { WebhookFailureLog, WebhookFailureLogDocument } from './schema/webhook-failure-log.schema';
-import { Notification, NotificationDocument } from '../notifications/schema/notification.schema';
+import {
+  AuditLog,
+  AuditLogDocument,
+} from '../audit-logs/schemas/audit-log.schema';
+import {
+  PlatformConfig,
+  PlatformConfigDocument,
+} from './schema/platform-config.schema';
+import {
+  WebhookFailureLog,
+  WebhookFailureLogDocument,
+} from './schema/webhook-failure-log.schema';
+import {
+  Notification,
+  NotificationDocument,
+} from '../notifications/schema/notification.schema';
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
@@ -14,6 +34,12 @@ import { ProcessPayoutDto } from './dto/process-payout.dto';
 import { UpdatePlatformConfigDto } from './dto/update-platform-config.dto';
 import { AuditLogsFilterDto } from './dto/audit-logs-filter.dto';
 import { AdminActivityQueryDto } from './dto/admin-activity-query.dto';
+import {
+  AdminInvite,
+  AdminInviteDocument,
+} from './schema/admin-invite.schema';
+import { MailService } from '../mail/mail.service';
+import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
 import {
   SuperAdminDashboardOverviewResponse,
   AdminListItem,
@@ -31,10 +57,202 @@ export class SuperAdminService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Earning.name) private earningModel: Model<EarningDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
-    @InjectModel(PlatformConfig.name) private platformConfigModel: Model<PlatformConfigDocument>,
-    @InjectModel(WebhookFailureLog.name) private webhookFailureLogModel: Model<WebhookFailureLogDocument>,
-    @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+    @InjectModel(PlatformConfig.name)
+    private platformConfigModel: Model<PlatformConfigDocument>,
+    @InjectModel(WebhookFailureLog.name)
+    private webhookFailureLogModel: Model<WebhookFailureLogDocument>,
+    @InjectModel(Notification.name)
+    private notificationModel: Model<NotificationDocument>,
+    @InjectModel(AdminInvite.name)
+    private adminInviteModel: Model<AdminInviteDocument>,
+    private readonly configService: ConfigService,
+    private readonly mailService: MailService,
   ) {}
+
+  private readonly INVITE_TTL_HOURS = 48;
+
+  /**
+   * Invites a new administrator by email. Creates a single-use, hashed,
+   * time-limited invite token and emails an acceptance link. No user record is
+   * created until the invite is accepted, so abandoned invites leave no
+   * half-provisioned privileged accounts behind.
+   */
+  async inviteAdmin(
+    superAdminId: string,
+    dto: CreateAdminInviteDto,
+  ): Promise<{
+    message: string;
+    email: string;
+    expiresAt: Date;
+    emailSent: boolean;
+    inviteUrl?: string;
+  }> {
+    const email = dto.email.toLowerCase().trim();
+
+    // Reject if a user with this email already exists.
+    const existingUser = await this.userModel.countDocuments({ email }).exec();
+    if (existingUser > 0) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    // Generate a high-entropy raw token; only its hash is persisted.
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
+    const expiresAt = new Date(
+      Date.now() + this.INVITE_TTL_HOURS * 60 * 60 * 1000,
+    );
+
+    // Replace any prior unaccepted invite for the same email (re-invite flow).
+    await this.adminInviteModel.deleteMany({ email, acceptedAt: null }).exec();
+
+    await this.adminInviteModel.create({
+      email,
+      firstName: dto.firstName.trim(),
+      lastName: dto.lastName.trim(),
+      tokenHash,
+      role: UserRole.ADMIN,
+      invitedBy: new Types.ObjectId(superAdminId),
+      expiresAt,
+    });
+
+    const dashboardUrl = (
+      this.configService.get<string>('DASHBOARD_URL') || 'http://localhost:4200'
+    ).replace(/\/$/, '');
+    const inviteUrl = `${dashboardUrl}/accept-invite?token=${rawToken}`;
+
+    await this.auditLogModel.create({
+      action: 'ADMIN_INVITED',
+      performedBy: new Types.ObjectId(superAdminId),
+      details: { email, role: UserRole.ADMIN },
+    });
+
+    let emailSent = false;
+    try {
+      await this.mailService.sendAdminInvite({
+        to: email,
+        firstName: dto.firstName.trim(),
+        inviteUrl,
+        expiresInHours: this.INVITE_TTL_HOURS,
+      });
+      emailSent = this.mailService.isConfigured;
+    } catch {
+      // Invite is persisted; surface a soft failure so the superadmin can retry.
+      emailSent = false;
+    }
+
+    return {
+      message: emailSent
+        ? 'Invitation email sent'
+        : 'Invitation created (email not configured — share the link manually)',
+      email,
+      expiresAt,
+      emailSent,
+      // Only expose the raw link when we could NOT email it (dev / misconfig).
+      inviteUrl: emailSent ? undefined : inviteUrl,
+    };
+  }
+
+  async listAdminInvites(): Promise<
+    Array<{
+      email: string;
+      firstName: string;
+      lastName: string;
+      invitedAt: Date;
+      expiresAt: Date;
+      status: 'pending' | 'expired';
+    }>
+  > {
+    const invites = await this.adminInviteModel
+      .find({ acceptedAt: null })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+
+    const now = Date.now();
+    return invites.map((inv: any) => ({
+      email: inv.email,
+      firstName: inv.firstName,
+      lastName: inv.lastName,
+      invitedAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      status: new Date(inv.expiresAt).getTime() < now ? 'expired' : 'pending',
+    }));
+  }
+
+  /**
+   * Revokes an admin's access by deactivating their account. The account and
+   * password are preserved (role stays `admin`); they simply can't log in
+   * anymore — enforced by the login/JWT status checks. Reversible via unrevoke.
+   */
+  async revokeAdmin(
+    superAdminId: string,
+    targetId: string,
+  ): Promise<{ id: string; status: UserStatus }> {
+    if (targetId === superAdminId) {
+      throw new ForbiddenException('You cannot revoke your own account');
+    }
+
+    const admin = await this.userModel.findById(targetId);
+    if (!admin) {
+      throw new NotFoundException('Admin not found');
+    }
+    if (admin.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Only admin accounts can be revoked here');
+    }
+    if (admin.status === UserStatus.DEACTIVATED) {
+      throw new BadRequestException('This admin is already revoked');
+    }
+
+    admin.status = UserStatus.DEACTIVATED;
+    admin.deactivatedReason = 'Admin access revoked by superadmin';
+    admin.deactivatedAt = new Date();
+    admin.deactivatedBy = new Types.ObjectId(superAdminId);
+    await admin.save();
+
+    await this.auditLogModel.create({
+      action: 'ADMIN_REVOKED',
+      performedBy: new Types.ObjectId(superAdminId),
+      targetUser: admin._id,
+      details: { email: admin.email },
+    });
+
+    return { id: admin._id.toString(), status: admin.status };
+  }
+
+  /** Restores a previously-revoked admin's access (reactivates the account). */
+  async unrevokeAdmin(
+    superAdminId: string,
+    targetId: string,
+  ): Promise<{ id: string; status: UserStatus }> {
+    const admin = await this.userModel.findById(targetId);
+    if (!admin) {
+      throw new NotFoundException('Admin not found');
+    }
+    if (admin.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Only admin accounts can be restored here');
+    }
+    if (admin.status === UserStatus.ACTIVE) {
+      throw new BadRequestException('This admin is already active');
+    }
+
+    admin.status = UserStatus.ACTIVE;
+    admin.deactivatedReason = null;
+    admin.deactivatedAt = null;
+    admin.deactivatedBy = null;
+    await admin.save();
+
+    await this.auditLogModel.create({
+      action: 'ADMIN_UNREVOKED',
+      performedBy: new Types.ObjectId(superAdminId),
+      targetUser: admin._id,
+      details: { email: admin.email },
+    });
+
+    return { id: admin._id.toString(), status: admin.status };
+  }
 
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -46,16 +264,29 @@ export class SuperAdminService {
       pendingPayoutsResult,
       webhookFailures,
     ] = await Promise.all([
-      this.earningModel.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]).exec(),
-      this.earningModel.aggregate([
-        { $match: { status: { $ne: EarningStatus.PAID_OUT } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]).exec(),
-      this.userModel.countDocuments({ role: UserRole.ADMIN, status: UserStatus.ACTIVE }).exec(),
-      this.earningModel.aggregate([
-        { $match: { status: EarningStatus.PENDING } },
-        { $group: { _id: '$instructorId', oldestDate: { $min: '$createdAt' } } },
-      ]).exec(),
+      this.earningModel
+        .aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+        .exec(),
+      this.earningModel
+        .aggregate([
+          { $match: { status: { $ne: EarningStatus.PAID_OUT } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ])
+        .exec(),
+      this.userModel
+        .countDocuments({ role: UserRole.ADMIN, status: UserStatus.ACTIVE })
+        .exec(),
+      this.earningModel
+        .aggregate([
+          { $match: { status: EarningStatus.PENDING } },
+          {
+            $group: {
+              _id: '$instructorId',
+              oldestDate: { $min: '$createdAt' },
+            },
+          },
+        ])
+        .exec(),
       this.webhookFailureLogModel
         .find({ occurredAt: { $gte: twentyFourHoursAgo } })
         .sort({ occurredAt: -1 })
@@ -67,17 +298,23 @@ export class SuperAdminService {
     const pendingPayouts = pendingPayoutsResult.length;
 
     const criticalAlerts: any[] = [];
-    
+
     // Group webhook failures by service
     if (webhookFailures.length > 0) {
-      const serviceGroups = webhookFailures.reduce((acc, curr) => {
-        acc[curr.service] = acc[curr.service] || { count: 0, lastOccurredAt: curr.occurredAt };
-        acc[curr.service].count += 1;
-        if (curr.occurredAt > acc[curr.service].lastOccurredAt) {
-          acc[curr.service].lastOccurredAt = curr.occurredAt;
-        }
-        return acc;
-      }, {} as Record<string, { count: number; lastOccurredAt: Date }>);
+      const serviceGroups = webhookFailures.reduce(
+        (acc, curr) => {
+          acc[curr.service] = acc[curr.service] || {
+            count: 0,
+            lastOccurredAt: curr.occurredAt,
+          };
+          acc[curr.service].count += 1;
+          if (curr.occurredAt > acc[curr.service].lastOccurredAt) {
+            acc[curr.service].lastOccurredAt = curr.occurredAt;
+          }
+          return acc;
+        },
+        {} as Record<string, { count: number; lastOccurredAt: Date }>,
+      );
 
       for (const [service, data] of Object.entries(serviceGroups)) {
         criticalAlerts.push({
@@ -115,34 +352,40 @@ export class SuperAdminService {
   async getAdmins(): Promise<AdminListItem[]> {
     // Only fetch ADMIN role, not SUPERADMIN
     const admins = await this.userModel.find({ role: UserRole.ADMIN }).exec();
-    
+
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
     const adminList = await Promise.all(
       admins.map(async (admin) => {
-        const actionsThisMonth = await this.auditLogModel.countDocuments({
-          performedBy: admin._id,
-          createdAt: { $gte: startOfMonth },
-        }).exec();
+        const actionsThisMonth = await this.auditLogModel
+          .countDocuments({
+            performedBy: admin._id,
+            createdAt: { $gte: startOfMonth },
+          })
+          .exec();
 
         return {
           id: admin._id.toString(),
           name: `${admin.firstName} ${admin.lastName}`,
           email: admin.email,
           role: admin.role,
+          status: admin.status,
           // NOTE: lastActiveAt requires a login-timestamp field on User — not currently tracked
-          lastActiveAt: null, 
+          lastActiveAt: null,
           actionsThisMonth,
         };
-      })
+      }),
     );
 
     return adminList;
   }
 
-  async getAdminActivity(adminId: string, query: AdminActivityQueryDto): Promise<AdminActivityPaginatedResponse> {
+  async getAdminActivity(
+    adminId: string,
+    query: AdminActivityQueryDto,
+  ): Promise<AdminActivityPaginatedResponse> {
     const admin = await this.userModel.findById(adminId).exec();
     if (!admin || admin.role !== UserRole.ADMIN) {
       throw new NotFoundException('Admin not found');
@@ -160,7 +403,9 @@ export class SuperAdminService {
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.auditLogModel.countDocuments({ performedBy: new Types.ObjectId(adminId) }).exec(),
+      this.auditLogModel
+        .countDocuments({ performedBy: new Types.ObjectId(adminId) })
+        .exec(),
     ]);
 
     const data = logs.map((log) => {
@@ -193,7 +438,9 @@ export class SuperAdminService {
     };
   }
 
-  async getPendingPayouts(query: AdminActivityQueryDto): Promise<PendingPayoutPaginatedResponse> {
+  async getPendingPayouts(
+    query: AdminActivityQueryDto,
+  ): Promise<PendingPayoutPaginatedResponse> {
     const page = query.page || 1;
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
@@ -212,24 +459,28 @@ export class SuperAdminService {
       },
     ];
 
-    const allGrouped = await this.earningModel.aggregate(aggregationPipeline).exec();
+    const allGrouped = await this.earningModel
+      .aggregate(aggregationPipeline)
+      .exec();
     const total = allGrouped.length;
 
-    const paginatedGrouped = await this.earningModel.aggregate([
-      ...aggregationPipeline,
-      { $sort: { periodStart: 1 } },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'instructor',
+    const paginatedGrouped = await this.earningModel
+      .aggregate([
+        ...aggregationPipeline,
+        { $sort: { periodStart: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: 'users',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'instructor',
+          },
         },
-      },
-      { $unwind: '$instructor' },
-    ]).exec();
+        { $unwind: '$instructor' },
+      ])
+      .exec();
 
     const data = paginatedGrouped.map((item) => ({
       instructorId: item._id.toString(),
@@ -265,42 +516,61 @@ export class SuperAdminService {
 
     try {
       const instructorObjId = new Types.ObjectId(instructorId);
-      
+
       const pendingEarnings = await this.earningModel
         .find({ instructorId: instructorObjId, status: EarningStatus.PENDING })
         .session(session)
         .exec();
 
       if (pendingEarnings.length === 0) {
-        throw new BadRequestException('No pending earnings for this instructor');
+        throw new BadRequestException(
+          'No pending earnings for this instructor',
+        );
       }
 
       const totalAmount = pendingEarnings.reduce((sum, e) => sum + e.amount, 0);
 
       if (totalAmount < config.minimumPayoutThreshold) {
-        throw new BadRequestException('Total pending amount is below the minimum payout threshold');
+        throw new BadRequestException(
+          'Total pending amount is below the minimum payout threshold',
+        );
       }
 
       await this.earningModel.updateMany(
         { instructorId: instructorObjId, status: EarningStatus.PENDING },
         { $set: { status: EarningStatus.PAID_OUT } },
-        { session }
+        { session },
       );
 
-      await this.auditLogModel.create([{
-        action: 'PAYOUT_PROCESSED',
-        performedBy: new Types.ObjectId(superAdminId),
-        targetUser: instructorObjId,
-        details: { amount: totalAmount, earningsCount: pendingEarnings.length, method: dto.method, reference: dto.reference },
-      }], { session });
+      await this.auditLogModel.create(
+        [
+          {
+            action: 'PAYOUT_PROCESSED',
+            performedBy: new Types.ObjectId(superAdminId),
+            targetUser: instructorObjId,
+            details: {
+              amount: totalAmount,
+              earningsCount: pendingEarnings.length,
+              method: dto.method,
+              reference: dto.reference,
+            },
+          },
+        ],
+        { session },
+      );
 
-      await this.notificationModel.create([{
-        userId: instructorObjId,
-        title: 'Payout Processed',
-        message: `Your payout of ${totalAmount} EGP has been processed successfully. Reference: ${dto.reference}`,
-        type: 'PAYOUT_PROCESSED',
-        isRead: false,
-      }], { session });
+      await this.notificationModel.create(
+        [
+          {
+            userId: instructorObjId,
+            title: 'Payout Processed',
+            message: `Your payout of ${totalAmount} EGP has been processed successfully. Reference: ${dto.reference}`,
+            type: 'PAYOUT_PROCESSED',
+            isRead: false,
+          },
+        ],
+        { session },
+      );
 
       await session.commitTransaction();
       session.endSession();
@@ -380,7 +650,9 @@ export class SuperAdminService {
     };
   }
 
-  async getAuditLogs(query: AuditLogsFilterDto): Promise<AuditLogPaginatedResponse> {
+  async getAuditLogs(
+    query: AuditLogsFilterDto,
+  ): Promise<AuditLogPaginatedResponse> {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
@@ -421,11 +693,15 @@ export class SuperAdminService {
         action: log.action,
         performedBy: {
           id: performedByObj ? performedByObj._id.toString() : 'Unknown',
-          name: performedByObj ? `${performedByObj.firstName} ${performedByObj.lastName}` : 'System',
+          name: performedByObj
+            ? `${performedByObj.firstName} ${performedByObj.lastName}`
+            : 'System',
         },
         targetUser: {
           id: targetUserObj ? targetUserObj._id.toString() : 'Unknown',
-          name: targetUserObj ? `${targetUserObj.firstName} ${targetUserObj.lastName}` : 'System',
+          name: targetUserObj
+            ? `${targetUserObj.firstName} ${targetUserObj.lastName}`
+            : 'System',
         },
         details: log.details,
         createdAt: (log as any).createdAt,
@@ -463,8 +739,8 @@ export class SuperAdminService {
 
     return {
       apiStatus,
-      // NOTE: apiStatus/averageResponseTimeMs require either a timing interceptor or external monitoring 
-      // (Datadog, Sentry, etc.) — this implementation returns webhookFailuresLast24h only with apiStatus 
+      // NOTE: apiStatus/averageResponseTimeMs require either a timing interceptor or external monitoring
+      // (Datadog, Sentry, etc.) — this implementation returns webhookFailuresLast24h only with apiStatus
       // hardcoded to a basic self-check value based on webhook failures
       averageResponseTimeMs: null,
       errorRateLast24h: null,
