@@ -4,11 +4,14 @@ import {
   Delete,
   Body,
   Headers,
+  Req,
   UseGuards,
   UnauthorizedException,
   HttpCode,
   Query,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -25,6 +28,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CloudinaryService } from './cloudinary.service';
+import { SkipThrottle } from '@nestjs/throttler';
 
 import {  Get, Param } from '@nestjs/common';
 
@@ -81,6 +85,7 @@ export class CloudinaryController {
     );
   }
 
+  @SkipThrottle()
   @Post('webhook')
   @HttpCode(200)
   @ApiOperation({ summary: 'Handle webhook' })
@@ -88,6 +93,7 @@ export class CloudinaryController {
   @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
   @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
   async handleWebhook(
+    @Req() req: RawBodyRequest<Request>,
     @Headers('x-cld-signature') signature: string,
     @Headers('x-cld-timestamp') timestamp: string,
     @Body() body: Record<string, unknown>,
@@ -96,8 +102,12 @@ export class CloudinaryController {
       throw new UnauthorizedException('Missing Cloudinary signatures');
     }
 
+    // Cloudinary signs the EXACT raw request body. Re-serializing the parsed
+    // object can reorder keys / change whitespace and break verification, so
+    // verify against the raw bytes captured by `rawBody: true` (main.ts/lambda.ts).
+    const rawBody = req.rawBody?.toString('utf8');
     const isValid = this.cloudinaryService.verifyWebhookSignature(
-      body,
+      rawBody ?? body,
       signature,
       timestamp,
     );
@@ -106,8 +116,23 @@ export class CloudinaryController {
       throw new UnauthorizedException('Invalid Cloudinary signature');
     }
 
-    if (body.notification_type === 'upload') {
+    const notificationType = body.notification_type;
+
+    if (notificationType === 'upload') {
       await this.cloudinaryService.processUploadWebhook(body);
+    }
+
+    // raw_convert add-on completion (e.g. google_speech) arrives as an `info`
+    // notification. This is the serverless-safe path that persists the
+    // transcript without depending on the dashboard staying open or an
+    // in-process timer (both of which die on Vercel). Handle defensively in
+    // case the add-on result is delivered under a different notification_type.
+    if (
+      notificationType === 'info' ||
+      body.info_kind === 'google_speech' ||
+      (body as { info?: { raw_convert?: unknown } }).info?.raw_convert !== undefined
+    ) {
+      await this.cloudinaryService.processTranscriptionWebhook(body);
     }
 
     return { success: true };

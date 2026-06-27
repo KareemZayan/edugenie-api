@@ -4,7 +4,6 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import * as mongoose from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Course } from './schema/course.schema';
@@ -590,7 +589,9 @@ export class CoursesService {
         .lean()
         .exec();
 
-      console.log(`📣 Notifying ${admins.length} admin(s) about course submission: ${course.title}`);
+      console.log(
+        `📣 Notifying ${admins.length} admin(s) about course submission: ${course.title}`,
+      );
 
       await Promise.all(
         admins.map((admin) =>

@@ -71,14 +71,16 @@ export class CloudinaryService {
   }
 
   verifyWebhookSignature(
-    body: Record<string, unknown>,
+    body: string | Record<string, unknown>,
     signature: string,
     timestamp: string,
   ): boolean {
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     if (!apiSecret) return false;
 
-    const payload = JSON.stringify(body);
+    // Prefer the raw request body (exact bytes Cloudinary signed); only fall
+    // back to re-serializing the parsed object when the raw body is absent.
+    const payload = typeof body === 'string' ? body : JSON.stringify(body);
     const expectedSignature = crypto
       .createHash('sha1')
       .update(payload + timestamp + apiSecret)
@@ -167,6 +169,72 @@ export class CloudinaryService {
     } catch (error) {
       this.logger.error(`Webhook update failed`, error);
     }
+  }
+
+  /**
+   * Persist a transcript when Cloudinary notifies us that a raw_convert add-on
+   * (google_speech) has finished. This is browser- and timer-independent, so it
+   * works on serverless even after the instructor has left the course builder —
+   * unlike the in-process poll (killed when the function suspends) and the
+   * dashboard foreground poll (stops when the page unmounts).
+   */
+  async processTranscriptionWebhook(payload: Record<string, unknown>) {
+    const publicId = payload.public_id as string | undefined;
+    const info = payload.info as { kind?: string; status?: string } | undefined;
+    const infoKind = (payload.info_kind ?? info?.kind) as string | undefined;
+    const infoStatus = (payload.info_status ?? info?.status) as string | undefined;
+
+    if (!publicId) {
+      this.logger.warn('Transcription webhook missing public_id');
+      return;
+    }
+    // Only act on speech-to-text completions; ignore other add-on kinds/states.
+    if (infoKind && infoKind !== 'google_speech') return;
+    if (
+      infoStatus &&
+      !['complete', 'completed', 'success'].includes(infoStatus.toLowerCase())
+    ) {
+      return;
+    }
+
+    await this.persistTranscriptForPublicId(publicId);
+  }
+
+  /**
+   * Fetch the generated transcript for a video asset and write it onto whichever
+   * lesson currently references that videoPublicId. Returns true if a lesson was
+   * updated. Shared by the webhook handler and the in-process poll fallback.
+   */
+  private async persistTranscriptForPublicId(
+    publicId: string,
+  ): Promise<boolean> {
+    const status = await this.getTranscriptionStatus(publicId);
+    if (!status.transcriptReady || !status.transcriptText) {
+      this.logger.warn(`Transcript not ready/parseable yet for ${publicId}`);
+      return false;
+    }
+
+    // Match the lesson by videoPublicId rather than threading course/section/
+    // lesson ids through the webhook — triggerTranscription already stored this
+    // asset id on the lesson, so it is a unique handle back to the right lesson.
+    const result = await this.courseModel.updateOne(
+      { 'sections.lessons.videoPublicId': publicId },
+      {
+        $set: {
+          'sections.$[].lessons.$[l].transcript': status.transcriptText,
+        },
+      },
+      { arrayFilters: [{ 'l.videoPublicId': publicId }] },
+    );
+
+    if (result.modifiedCount > 0) {
+      this.logger.log(`Saved transcript for asset ${publicId} via webhook`);
+      return true;
+    }
+    this.logger.warn(
+      `No lesson found with videoPublicId ${publicId} to save transcript`,
+    );
+    return false;
   }
 
   /**
