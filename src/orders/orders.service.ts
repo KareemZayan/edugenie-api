@@ -5,9 +5,10 @@ import * as crypto from 'crypto';
 
 import { Order } from './schema/order.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
+import { User } from '../users/schema/user.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { CartService } from '../cart/cart.service';
-import { PaymobService } from '../paymob/paymob.service';
+import { PaymobService, PaymobBillingData } from '../paymob/paymob.service';
 import { CheckoutResponse, OrderDetailResponse, OrderHistoryResponse } from '../frontend-contracts';
 import { OrderStatus } from '../common/enums/order-status.enum';
 
@@ -16,9 +17,41 @@ export class OrdersService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<Order>,
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
+    @InjectModel(User.name) private userModel: Model<User>,
     private cartService: CartService,
     private paymobService: PaymobService,
   ) { }
+
+  /** Build Paymob billing data from the student's profile (best-effort). */
+  private async buildBillingData(
+    studentId: string,
+  ): Promise<PaymobBillingData | undefined> {
+    try {
+      const user = await this.userModel
+        .findById(studentId)
+        .select('firstName lastName email')
+        .lean<{ firstName?: string; lastName?: string; email?: string }>()
+        .exec();
+      if (!user?.email) return undefined;
+      return {
+        first_name: user.firstName || 'EduGenie',
+        last_name: user.lastName || 'Student',
+        email: user.email,
+        phone_number: '+201000000000',
+        apartment: 'NA',
+        floor: 'NA',
+        street: 'NA',
+        building: 'NA',
+        shipping_method: 'NA',
+        postal_code: 'NA',
+        city: 'NA',
+        country: 'EG',
+        state: 'NA',
+      };
+    } catch {
+      return undefined;
+    }
+  }
 
   async processCheckout(studentId: string): Promise<CheckoutResponse> {
     // 1 & 3. RE-VALIDATE THE CART
@@ -63,7 +96,11 @@ export class OrdersService {
           currency: 'EGP'
         };
       }
-      const paymentData = await this.paymobService.createPaymentUrl(existingOrder.totalAmount, existingOrder._id.toString());
+      const paymentData = await this.paymobService.createPaymentUrl(
+        Math.round(existingOrder.totalAmount * 100),
+        existingOrder._id.toString(),
+        await this.buildBillingData(studentId),
+      );
       return {
         clientSecret: paymentData.clientSecret,
         orderId: existingOrder._id.toString(),
@@ -141,8 +178,13 @@ export class OrdersService {
 
     // 5. CALL PAYMOB
     try {
-      const paymentData = await this.paymobService.createPaymentUrl(totalAmount, order._id.toString());
-      order.paymobOrderId = `paymob_${order._id}`; // Store external ID
+      const paymentData = await this.paymobService.createPaymentUrl(
+        Math.round(totalAmount * 100),
+        order._id.toString(),
+        await this.buildBillingData(studentId),
+      );
+      // Store the real Paymob intention id for reconciliation (null if absent).
+      order.paymobOrderId = paymentData.paymobOrderId ?? null;
       await order.save();
       
       return {

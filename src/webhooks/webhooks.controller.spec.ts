@@ -6,6 +6,8 @@ import { Order } from '../orders/schema/order.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Earning } from '../earnings/schema/earning.schema';
 import { Course } from '../courses/schema/course.schema';
+import { Lesson } from '../lessons/schema/lesson.schema';
+import { WebhookFailureLog } from '../superadmin/schema/webhook-failure-log.schema';
 import { UnauthorizedException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
@@ -52,6 +54,8 @@ describe('WebhooksController', () => {
         { provide: getModelToken(Enrollment.name), useValue: enrollmentModel },
         { provide: getModelToken(Earning.name), useValue: earningModel },
         { provide: getModelToken(Course.name), useValue: courseModel },
+        { provide: getModelToken(Lesson.name), useValue: {} },
+        { provide: getModelToken(WebhookFailureLog.name), useValue: { create: jest.fn() } },
       ],
     }).compile();
 
@@ -70,15 +74,28 @@ describe('WebhooksController', () => {
     it('should accept valid HMAC and transition PENDING -> COMPLETED', async () => {
       paymobService.verifyWebhookHmac.mockReturnValue(true);
       const orderId = new Types.ObjectId();
-      const req = { body: { order_id: orderId.toString() } } as any;
+      // Realistic Paymob transaction callback: nested obj, explicit success,
+      // amount_cents matching the order total (100 EGP -> 10000 cents).
+      const req = {
+        query: {},
+        body: {
+          obj: {
+            success: true,
+            pending: false,
+            amount_cents: 10000,
+            order: { merchant_order_id: orderId.toString() },
+          },
+        },
+      } as any;
       const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as any;
-      
-      const mockOrder = { 
-        _id: orderId, 
-        status: 'PENDING', 
-        studentId: new Types.ObjectId(), 
-        items: [{ courseId: new Types.ObjectId(), itemType: 'full_course', price: 100 }], 
-        save: jest.fn() 
+
+      const mockOrder = {
+        _id: orderId,
+        status: 'PENDING',
+        totalAmount: 100,
+        studentId: new Types.ObjectId(),
+        items: [{ courseId: new Types.ObjectId(), itemType: 'full_course', price: 100 }],
+        save: jest.fn()
       };
 
       orderModel.session.mockResolvedValue(mockOrder);

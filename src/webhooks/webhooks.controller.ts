@@ -31,8 +31,12 @@ export class WebhooksController {
   async handlePaymobWebhook(
     @Req() req: Request,
     @Res() res: Response,
-    @Headers('hmac') hmacSignature: string
+    @Headers('hmac') hmacHeader: string
   ) {
+    // Paymob sends the HMAC on the transaction callback as a query parameter
+    // (`?hmac=...`); fall back to the header for other integrations / tests.
+    const hmacSignature =
+      (req.query?.hmac as string | undefined) || hmacHeader;
     if (!hmacSignature) {
       throw new UnauthorizedException('Missing HMAC signature');
     }
@@ -43,14 +47,28 @@ export class WebhooksController {
     }
 
     const payload = req.body;
-    
-    // In our mock, the payload structure would have an orderId or clientSecret.
-    // For this implementation, we will assume payload.order_id matches order._id
-    const orderIdStr = payload.order_id || payload.clientSecret?.replace('paymob_', '') || payload.obj?.order?.merchant_order_id || payload.obj?.special_reference;
-    
+    // Real Paymob nests the transaction under `obj`; tolerate a flat shape too.
+    const obj = payload?.obj ?? payload;
+
+    // `special_reference` (our order id) comes back as `order.merchant_order_id`.
+    const orderIdStr =
+      obj?.order?.merchant_order_id ||
+      obj?.special_reference ||
+      payload?.special_reference ||
+      payload?.order_id;
+
     if (!orderIdStr || !Types.ObjectId.isValid(orderIdStr)) {
       return res.status(200).send('Invalid or missing order reference in webhook');
     }
+
+    // A transaction is only fulfilled on an explicit, final success. A pending
+    // (auth-only / awaiting-capture) callback is acknowledged but not fulfilled.
+    const success =
+      obj?.success === true ||
+      obj?.success === 'true' ||
+      payload?.success === true ||
+      payload?.success === 'true';
+    const pending = obj?.pending === true || obj?.pending === 'true';
 
     const session = await this.orderModel.db.startSession();
     session.startTransaction();
@@ -58,7 +76,7 @@ export class WebhooksController {
     try {
       // Find the order
       const order = await this.orderModel.findById(orderIdStr).session(session);
-      
+
       if (!order) {
         await session.abortTransaction();
         session.endSession();
@@ -72,13 +90,39 @@ export class WebhooksController {
         return res.status(200).send('Already processed');
       }
 
-      // Check if it's a failed transaction from paymob
-      if (payload.success === false || payload.success === 'false' || payload.obj?.success === false) {
+      // Pending/auth callback — not a final state. Acknowledge, do not fulfill.
+      if (pending) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(200).send('Payment pending');
+      }
+
+      // Explicit failure (or anything that isn't a success) → record FAILED.
+      if (!success) {
         order.status = OrderStatus.FAILED;
         await order.save({ session });
         await session.commitTransaction();
         session.endSession();
         return res.status(200).send('Recorded failure');
+      }
+
+      // Anti-tamper: the amount actually paid must match what we charged.
+      const expectedCents = Math.round((order.totalAmount ?? 0) * 100);
+      const paidCents = Number(obj?.amount_cents);
+      if (
+        expectedCents > 0 &&
+        (!Number.isFinite(paidCents) || paidCents !== expectedCents)
+      ) {
+        await session.abortTransaction();
+        session.endSession();
+        await this.webhookFailureLogModel
+          .create({
+            service: 'paymob',
+            endpoint: '/webhooks/paymob',
+            errorMessage: `Amount mismatch for order ${orderIdStr}: expected ${expectedCents} cents, received ${paidCents}`,
+          })
+          .catch(() => undefined);
+        return res.status(200).send('Amount mismatch');
       }
 
       // 1. Mark Order as COMPLETED

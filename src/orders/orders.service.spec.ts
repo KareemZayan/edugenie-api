@@ -3,6 +3,8 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { OrdersService } from './orders.service';
 import { Order } from './schema/order.schema';
+import { Enrollment } from '../enrollments/schema/enrollment.schema';
+import { User } from '../users/schema/user.schema';
 import { CartService } from '../cart/cart.service';
 import { PaymobService } from '../paymob/paymob.service';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
@@ -34,6 +36,8 @@ describe('OrdersService', () => {
       providers: [
         OrdersService,
         { provide: getModelToken(Order.name), useValue: orderModel },
+        { provide: getModelToken(Enrollment.name), useValue: {} },
+        { provide: getModelToken(User.name), useValue: { findById: jest.fn() } },
         { provide: CartService, useValue: cartService },
         { provide: PaymobService, useValue: paymobService }
       ],
