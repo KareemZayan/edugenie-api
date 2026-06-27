@@ -299,15 +299,15 @@ export class CloudinaryService {
     transcriptReady: boolean;
     transcriptText: string | null;
   }> {
-    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-    const transcriptUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${publicId}.transcript`;
+    const transcriptPublicId = `${publicId}.transcript`;
 
     try {
-      const response = await fetch(transcriptUrl);
+      const resource = await cloudinary.api.resource(transcriptPublicId, {
+        resource_type: 'raw',
+        type: 'upload',
+      });
 
-      if (response.status === 404) {
-        return { videoReady: true, transcriptReady: false, transcriptText: null };
-      }
+      const response = await fetch(resource.secure_url); // now has the version baked in
 
       if (response.ok) {
         const json = await response.json() as any;
@@ -331,8 +331,12 @@ export class CloudinaryService {
           return { videoReady: true, transcriptReady: true, transcriptText };
         }
       }
-    } catch (err) {
-      this.logger.warn(`Transcript fetch failed for ${publicId}:`, err);
+    } catch (err: any) {
+      if (err?.http_code === 404 || err?.error?.http_code === 404) {
+        // transcript not generated yet — normal "still processing" case
+        return { videoReady: true, transcriptReady: false, transcriptText: null };
+      }
+      this.logger.warn(`Transcript fetch failed for ${publicId}:`, err?.message || err);
     }
 
     return { videoReady: true, transcriptReady: false, transcriptText: null };
