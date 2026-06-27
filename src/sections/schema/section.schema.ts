@@ -19,12 +19,17 @@ export class Section {
   @Prop({ type: [String], default: [] })
   expectedOutcomes!: string[];
 
-
   @Prop({ type: Number, default: null, min: 0 })
   price!: number | null;
 
   @Prop({ type: [LessonSchema], default: [] })
   lessons!: Types.DocumentArray<Lesson>;
+
+  @Prop({ type: String, default: null })
+  previewVideoUrl!: string | null;
+
+  @Prop({ type: String, default: null })
+  previewVideoPublicId!: string | null;
 }
 
 export const SectionSchema = SchemaFactory.createForClass(Section);

@@ -1,21 +1,36 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User } from '../../users/schema/user.schema';
-import { AuditLog, AuditLogDocument } from '../../audit-logs/schemas/audit-log.schema';
-import { Notification, NotificationDocument } from '../../notifications/schema/notification.schema';
+import {
+  AuditLog,
+  AuditLogDocument,
+} from '../../audit-logs/schemas/audit-log.schema';
+import {
+  Notification,
+  NotificationDocument,
+} from '../../notifications/schema/notification.schema';
 import { UserStatus } from '../../common/enums/user-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { AdminUsersFilterDto } from '../dto/admin-users-filter.dto';
 import { DeactivateUserDto } from '../dto/deactivate-user.dto';
-import { AdminUserListResponse, UserStatusChangeResponse } from '../../common/interfaces/frontend-contracts';
+import {
+  AdminUserListResponse,
+  UserStatusChangeResponse,
+} from '../../common/interfaces/frontend-contracts';
 
 @Injectable()
 export class AdminUsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
-    @InjectModel(Notification.name) private notificationModel: Model<NotificationDocument>,
+    @InjectModel(Notification.name)
+    private notificationModel: Model<NotificationDocument>,
   ) {}
 
   async getUsers(query: AdminUsersFilterDto): Promise<AdminUserListResponse> {
@@ -40,13 +55,14 @@ export class AdminUsersService {
     }
 
     const [users, total] = await Promise.all([
-      this.userModel.find(filter)
+      this.userModel
+        .find(filter)
         .select('-password -passwordReset')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.userModel.countDocuments(filter).exec()
+      this.userModel.countDocuments(filter).exec(),
     ]);
 
     const data = users.map((user) => ({
@@ -54,6 +70,7 @@ export class AdminUsersService {
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      avatar: user.avatar,
       role: user.role,
       status: user.status,
       createdAt: (user as any).createdAt,
@@ -68,11 +85,15 @@ export class AdminUsersService {
         totalPages: Math.ceil(total / limit),
         hasNextPage: page * limit < total,
         hasPrevPage: page > 1,
-      }
+      },
     };
   }
 
-  async deactivateUser(id: string, adminId: string, dto: DeactivateUserDto): Promise<UserStatusChangeResponse> {
+  async deactivateUser(
+    id: string,
+    adminId: string,
+    dto: DeactivateUserDto,
+  ): Promise<UserStatusChangeResponse> {
     const user = await this.userModel.findById(id).exec();
     if (!user) {
       throw new NotFoundException('User not found');
@@ -99,7 +120,7 @@ export class AdminUsersService {
       details: { reason: dto.reason },
     });
 
-    // NOTE: Confirm whether deactivated users should be notified. 
+    // NOTE: Confirm whether deactivated users should be notified.
     // Sending notification for now, assuming they can still access their notifications via email or if they are just blocked from certain actions.
     await this.notificationModel.create({
       userId: user._id,
@@ -117,7 +138,10 @@ export class AdminUsersService {
     };
   }
 
-  async reactivateUser(id: string, adminId: string): Promise<UserStatusChangeResponse> {
+  async reactivateUser(
+    id: string,
+    adminId: string,
+  ): Promise<UserStatusChangeResponse> {
     const user = await this.userModel.findById(id).exec();
     if (!user) {
       throw new NotFoundException('User not found');

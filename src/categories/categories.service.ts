@@ -1,8 +1,13 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
 import { Category } from './schema/category.schema';
+import { Course, CourseDocument } from '../courses/schema/course.schema';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CategorySerializer } from './serializers/category.serializer';
 
@@ -11,11 +16,16 @@ export class CategoriesService {
   constructor(
     @InjectModel(Category.name)
     private readonly categoryModel: Model<Category>,
-  ) { }
+    @InjectModel(Course.name)
+    private readonly courseModel: Model<CourseDocument>,
+  ) {}
 
-  async createCategory(createCategoryDto: CreateCategoryDto): Promise<CategorySerializer> {
-
-    const existingCategory = await this.categoryModel.findOne({ name: createCategoryDto.name }).exec();
+  async createCategory(
+    createCategoryDto: CreateCategoryDto,
+  ): Promise<CategorySerializer> {
+    const existingCategory = await this.categoryModel
+      .findOne({ name: createCategoryDto.name })
+      .exec();
 
     if (existingCategory) {
       throw new ConflictException('Category already exists');
@@ -28,15 +38,31 @@ export class CategoriesService {
 
   async findAll(): Promise<CategorySerializer[]> {
     const categories = await this.categoryModel.find().exec();
-    return categories.map(c => new CategorySerializer(c.toObject()));
+    const categoriesWithCount = await Promise.all(
+      categories.map(async (c) => {
+        const courseCount = await this.courseModel
+          .countDocuments({
+            $expr: { $eq: [{ $toString: '$categoryId' }, c._id.toString()] },
+          })
+          .exec();
+        return { ...c.toObject(), courseCount };
+      }),
+    );
+    return categoriesWithCount.map(
+      (c) => new CategorySerializer(c as Partial<CategorySerializer>),
+    );
   }
 
-  async updateCategory(id: string, updateCategoryDto: any): Promise<CategorySerializer> {
-    const updatedCategory = await this.categoryModel.findByIdAndUpdate(
-      id,
-      updateCategoryDto,
-      { new: true, runValidators: true }
-    ).exec();
+  async updateCategory(
+    id: string,
+    updateCategoryDto: any,
+  ): Promise<CategorySerializer> {
+    const updatedCategory = await this.categoryModel
+      .findByIdAndUpdate(id, updateCategoryDto, {
+        new: true,
+        runValidators: true,
+      })
+      .exec();
 
     if (!updatedCategory) {
       throw new ConflictException('Category not found');
@@ -46,7 +72,9 @@ export class CategoriesService {
   }
 
   async removeCategory(id: string): Promise<any> {
-    const deletedCategory = await this.categoryModel.findByIdAndDelete(id).exec();
+    const deletedCategory = await this.categoryModel
+      .findByIdAndDelete(id)
+      .exec();
 
     if (!deletedCategory) {
       throw new ConflictException('Category not found');

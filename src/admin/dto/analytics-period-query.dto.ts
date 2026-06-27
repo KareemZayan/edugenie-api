@@ -1,3 +1,5 @@
+import { ApiProperty } from '@nestjs/swagger';
+
 import { IsEnum, IsOptional } from 'class-validator';
 
 export enum AnalyticsPeriod {
@@ -10,5 +12,6 @@ export enum AnalyticsPeriod {
 export class AnalyticsPeriodQueryDto {
   @IsOptional()
   @IsEnum(AnalyticsPeriod)
+  @ApiProperty({ required: false })
   period?: AnalyticsPeriod = AnalyticsPeriod.THIRTY_DAYS;
 }

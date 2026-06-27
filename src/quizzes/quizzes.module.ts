@@ -6,8 +6,14 @@ import { InstructorQuizzesController } from './instructor-quizzes.controller';
 import { QuizzesService } from './quizzes.service';
 import { Quiz, QuizSchema } from './schema/quiz.schema';
 import { QuizAttempt, QuizAttemptSchema } from './schema/quiz-attempt.schema';
-import { Notification, NotificationSchema } from '../notifications/schema/notification.schema';
-import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
+import {
+  Notification,
+  NotificationSchema,
+} from '../notifications/schema/notification.schema';
+import {
+  Enrollment,
+  EnrollmentSchema,
+} from '../enrollments/schema/enrollment.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
@@ -27,8 +33,12 @@ import { AiModule } from '../ai/ai.module';
     forwardRef(() => ProgressModule),
     AiModule,
   ],
-  controllers: [QuizzesController, SectionQuizzesController, InstructorQuizzesController],
+  controllers: [
+    QuizzesController,
+    SectionQuizzesController,
+    InstructorQuizzesController,
+  ],
   providers: [QuizzesService],
-  exports: [QuizzesService, MongooseModule]
+  exports: [QuizzesService, MongooseModule],
 })
 export class QuizzesModule {}

@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "src/lambda.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "^/$",
+      "headers": {
+        "Location": "/api"
+      },
+      "status": 302
+    },
+    {
+      "src": "/(.*)",
+      "dest": "src/lambda.ts"
+    }
+  ]
+}
