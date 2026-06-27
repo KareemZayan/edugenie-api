@@ -35,7 +35,7 @@ export class CoursesService {
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly notificationsService: NotificationsService,
-  ) {}
+  ) { }
 
   async create(
     dto: CreateCourseDto,
@@ -267,6 +267,8 @@ export class CoursesService {
         totalRevenue,
         rating: c.ratingAverage || 0,
         completionRate,
+        totalHours: c.totalHours || 0,       // ✅ add this
+        totalLessons: c.totalLessons || 0,   // ✅ and thi
       };
     });
 
@@ -638,18 +640,18 @@ export class CoursesService {
         createdAt: c.createdAt,
         category: c.categoryId
           ? {
-              _id: c.categoryId._id?.toString() || c.categoryId.toString(),
-              name: c.categoryId.name,
-            }
+            _id: c.categoryId._id?.toString() || c.categoryId.toString(),
+            name: c.categoryId.name,
+          }
           : null,
         instructor: c.instructorId
           ? {
-              _id: c.instructorId._id?.toString() || c.instructorId.toString(),
-              firstName: c.instructorId.firstName,
-              lastName: c.instructorId.lastName,
-              avatar: c.instructorId.avatar,
-              email: c.instructorId.email,
-            }
+            _id: c.instructorId._id?.toString() || c.instructorId.toString(),
+            firstName: c.instructorId.firstName,
+            lastName: c.instructorId.lastName,
+            avatar: c.instructorId.avatar,
+            email: c.instructorId.email,
+          }
           : null,
       };
     });
