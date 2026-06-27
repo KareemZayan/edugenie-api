@@ -98,8 +98,9 @@ export class AuthService {
     const payload = { 
       id: user._id, 
       role: user.role, 
-      firstName: user.firstName, 
-      lastName: user.lastName 
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatar: user.avatar ?? null,
     };
     const jwtToken = this.jwtService.sign(payload);
 
@@ -148,8 +149,9 @@ export class AuthService {
       const payload = { 
         id: user._id, 
         role: user.role, 
-        firstName: user.firstName, 
-        lastName: user.lastName 
+        firstName: user.firstName,
+      lastName: user.lastName,
+      avatar: user.avatar ?? null,
       };
       token = this.jwtService.sign(payload);
     }
@@ -257,7 +259,8 @@ export class AuthService {
       id: updated.userId, 
       role: updated.userRole,
       firstName: user.firstName,
-      lastName: user.lastName
+      lastName: user.lastName,
+      avatar: user.avatar ?? null,
     };
     const jwtToken = this.jwtService.sign(payload);
 
@@ -325,6 +328,7 @@ export class AuthService {
       role: user.role,
       firstName: user.firstName,
       lastName: user.lastName,
+      avatar: user.avatar ?? null,
     };
     const token = this.jwtService.sign(payload);
 

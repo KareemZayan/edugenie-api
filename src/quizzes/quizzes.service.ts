@@ -19,6 +19,7 @@ import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.enum';
 import { ProgressService } from '../progress/progress.service';
 import { QuizSerializer } from './serializers/quiz.serializer';
+import { AiService } from '../ai/ai.service';
 import {
   QuizForStudentResponse,
   QuizStartResponse,
@@ -36,36 +37,95 @@ export class QuizzesService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private enrollmentsService: EnrollmentsService,
-    @Inject(forwardRef(() => ProgressService))
-    private progressService: ProgressService,
-  ) {}
+    @Inject(forwardRef(() => ProgressService)) private progressService: ProgressService,
+    private aiService: AiService,
+  ) { }
 
   async saveQuizConfig(dto: CreateQuizDto) {
+    // Pull the section's lessons up front so a missing/foreign section fails
+    // before we create any quiz document or call the (paid) AI provider.
+    const content = await this.getSectionContent(dto.sectionId);
+
     const quiz = await this.quizModel.create({
       sectionId: new Types.ObjectId(dto.sectionId),
       difficulty: dto.difficulty,
       numberOfQuestions: dto.numberOfQuestions,
       questionType: dto.questionType,
-      generationStatus: QuizGenerationStatus.PENDING,
+      generationStatus: QuizGenerationStatus.GENERATING,
       questions: [],
     });
 
+    // Generate synchronously: on Vercel the function is suspended right after
+    // the response, so a background job would never run. If generation fails we
+    // delete the just-created quiz and surface the error rather than leaving an
+    // empty quiz the instructor can never use.
+    try {
+      const questions = await this.aiService.generateQuizQuestions({
+        sectionTitle: content.sectionTitle,
+        sectionDescription: content.sectionDescription,
+        lessons: content.lessons,
+        difficulty: dto.difficulty,
+        questionType: dto.questionType,
+        numberOfQuestions: dto.numberOfQuestions,
+      });
+
+      quiz.questions = questions;
+      quiz.generationStatus = QuizGenerationStatus.COMPLETED;
+      await quiz.save();
+    } catch (error) {
+      await this.quizModel.deleteOne({ _id: quiz._id }).exec();
+      throw error;
+    }
+
     return {
-      message: 'Quiz configuration saved! AI generation is now pending.',
-      quiz: new QuizSerializer(
-        quiz.toObject() as unknown as Partial<QuizSerializer>,
-      ),
+      message: `AI generated ${quiz.questions.length} questions. Review and approve them to publish the quiz.`,
+      quiz: new QuizSerializer(quiz.toObject() as unknown as Partial<QuizSerializer>),
     };
   }
 
-  async getQuizForStudent(
-    sectionId: string,
-    studentId: string,
-  ): Promise<QuizForStudentResponse> {
-    const hasAccess = await this.enrollmentsService.canAccessSection(
-      studentId,
-      sectionId,
-    );
+  /**
+   * Collect the lesson titles + transcripts for a section, used as grounding
+   * material for AI quiz generation. Throws if the section does not exist.
+   */
+  private async getSectionContent(sectionId: string): Promise<{
+    sectionTitle: string;
+    sectionDescription?: string;
+    lessons: { title: string; transcript?: string }[];
+  }> {
+    if (!Types.ObjectId.isValid(sectionId)) {
+      throw new BadRequestException('Invalid section ID');
+    }
+
+    const course = await this.courseModel
+      .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
+      .select('sections')
+      .lean<{
+        sections: {
+          _id: Types.ObjectId;
+          title: string;
+          description?: string;
+          lessons: { title: string; transcript?: string }[];
+        }[];
+      }>()
+      .exec();
+
+    const section = course?.sections.find((s) => s._id.toString() === sectionId);
+    if (!section) {
+      throw new NotFoundException('Section not found');
+    }
+
+    return {
+      sectionTitle: section.title,
+      sectionDescription: section.description,
+      lessons: (section.lessons ?? []).map((l) => ({
+        title: l.title,
+        transcript: l.transcript,
+      })),
+    };
+  }
+
+  async getQuizForStudent(sectionId: string, studentId: string): Promise<QuizForStudentResponse> {
+    const hasAccess = await this.enrollmentsService.canAccessSection(studentId, sectionId);
     if (!hasAccess) {
       throw new ForbiddenException(
         'You must purchase this section to access its quiz',
