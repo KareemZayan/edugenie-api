@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Delete,
+  Patch,
   Body,
   Param,
   Req,
@@ -23,6 +24,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { AttachmentsService } from './attachments.service';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
+import { UpdateAttachmentDto } from './dto/update-attachment.dto';
 import { AttachmentParentType } from './schema/attachment.schema';
 import { AttachmentSerializer } from './serializers/attachments.serializer';
 
@@ -213,7 +215,20 @@ export class AttachmentsController {
     );
   }
 
-  // ── Instructor: delete ──────────────────────────────────────────────
+  // ── Instructor: update / delete ─────────────────────────────────────
+
+  @Patch('attachments/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.INSTRUCTOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update an attachment (e.g. toggle visibility)' })
+  async update(
+    @Param('id') id: string,
+    @Req() req: RequestWithUser,
+    @Body() dto: UpdateAttachmentDto,
+  ): Promise<AttachmentSerializer> {
+    return this.attachmentsService.update(id, req.user.userId, dto);
+  }
 
   @Delete('attachments/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)

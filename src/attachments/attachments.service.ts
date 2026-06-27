@@ -15,6 +15,7 @@ import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
+import { UpdateAttachmentDto } from './dto/update-attachment.dto';
 import { AttachmentSerializer } from './serializers/attachments.serializer'; 
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
@@ -355,6 +356,42 @@ export class AttachmentsService {
         );
 
         return { message: 'Attachment successfully deleted' };
+    }
+
+    async update(
+        attachmentId: string,
+        instructorId: string,
+        updates: UpdateAttachmentDto,
+    ): Promise<AttachmentSerializer> {
+        if (!Types.ObjectId.isValid(attachmentId)) {
+            throw new BadRequestException('Invalid attachment ID');
+        }
+
+        const existing = await this.attachmentModel.findOne({
+            _id: new Types.ObjectId(attachmentId),
+            instructorId: new Types.ObjectId(instructorId),
+        });
+
+        if (!existing) {
+            throw new NotFoundException('Attachment not found or unauthorized');
+        }
+
+        const oldPublicId = existing.filePublicId;
+        const isReplacingFile = updates.filePublicId && updates.filePublicId !== oldPublicId;
+
+        const attachment = await this.attachmentModel.findByIdAndUpdate(
+            attachmentId,
+            { $set: updates },
+            { new: true },
+        );
+
+        if (isReplacingFile && oldPublicId) {
+            this.cloudinaryService.deleteAsset(oldPublicId, 'raw' as any).catch((err) => {
+                console.error(`Failed to delete old attachment asset: ${oldPublicId}`, err);
+            });
+        }
+
+        return new AttachmentSerializer(attachment!.toObject());
     }
 
     /**
