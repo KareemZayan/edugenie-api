@@ -9,6 +9,7 @@ import {
   ArrayMaxSize,
   IsNumber,
   Min,
+  IsUrl,
 } from 'class-validator';
 
 export class CreateSectionDto {
@@ -36,4 +37,15 @@ export class CreateSectionDto {
   @Min(0)
   @ApiProperty({ required: false, example: 1 })
   price?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @IsUrl()
+  @ApiProperty({ required: false, example: 'https://res.cloudinary.com/...' })
+  previewVideoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @ApiProperty({ required: false, example: 'courses/section-previews/abc123' })
+  previewVideoPublicId?: string;
 }

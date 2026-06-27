@@ -60,6 +60,17 @@ export class CreateCourseDto {
   @ApiProperty({ required: false, example: 'string_example' })
   requirements?: string[];
 
+  @IsOptional()
+  @IsString()
+  @IsUrl()
+  @ApiProperty({ required: false, example: 'https://res.cloudinary.com/...' })
+  previewVideoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @ApiProperty({ required: false, example: 'courses/previews/abc123' })
+  previewVideoPublicId?: string;
+
   // NOTE: courseStatus is intentionally NOT settable here. Status transitions
   // (draft → under_review → published/rejected) happen only through the
   // dedicated submit-for-review / admin-approval endpoints, so an instructor

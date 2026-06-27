@@ -98,6 +98,12 @@ export class Course {
   // Embedded subdocuments — Course is the aggregate root
   @Prop({ type: [SectionSchema], default: [] })
   sections!: Types.DocumentArray<Section>;
+
+  @Prop({ default: null })
+  previewVideoUrl!: string | null;
+
+  @Prop({ default: null })
+  previewVideoPublicId!: string | null;
 }
 
 export const CourseSchema = SchemaFactory.createForClass(Course);
