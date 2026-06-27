@@ -48,7 +48,7 @@ export class Course {
   })
   courseStatus!: CourseStatus;
 
-  @Prop()
+  @Prop({ type: String })
   rejectionReason?: string;
 
   @Prop({
@@ -99,10 +99,10 @@ export class Course {
   @Prop({ type: [SectionSchema], default: [] })
   sections!: Types.DocumentArray<Section>;
 
-  @Prop({ default: null })
+  @Prop({ type: String, default: null })
   previewVideoUrl!: string | null;
 
-  @Prop({ default: null })
+  @Prop({ type: String, default: null })
   previewVideoPublicId!: string | null;
 }
 
