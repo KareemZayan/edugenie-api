@@ -12,6 +12,7 @@ import { Course, CourseSchema } from '../courses/schema/course.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { ProgressModule } from '../progress/progress.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ProgressModule } from '../progress/progress.module';
     ]),
     EnrollmentsModule,
     forwardRef(() => ProgressModule),
+    AiModule,
   ],
   controllers: [QuizzesController, SectionQuizzesController, InstructorQuizzesController],
   providers: [QuizzesService],

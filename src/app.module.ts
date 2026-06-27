@@ -39,6 +39,11 @@ import { SuperAdminModule } from './superadmin/superadmin.module';
         CLOUDINARY_CLOUD_NAME: Joi.string().required(),
         CLOUDINARY_API_KEY: Joi.string().required(),
         CLOUDINARY_API_SECRET: Joi.string().required(),
+        // Allow '' so a blank placeholder in .env doesn't block boot; the AI
+        // service treats empty as "not configured".
+        SBG_API_URL: Joi.string().uri().allow('').optional(),
+        SBG_API_KEY: Joi.string().allow('').optional(),
+        SBG_MODEL: Joi.string().allow('').optional(),
       }),
     }),
     MongooseModule.forRootAsync({
