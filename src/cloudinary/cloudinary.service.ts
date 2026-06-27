@@ -54,10 +54,10 @@ export class CloudinaryService {
     };
   }
 
-  async deleteAsset(
-    publicId: string,
-    resourceType: 'image' | 'video' = 'image',
-  ): Promise<{ success: boolean }> {
+   async deleteAsset(
+   publicId: string,
+   resourceType: 'image' | 'video' | 'raw' = 'image',
+ ): Promise<{ success: boolean }> {
     try {
       await cloudinary.uploader.destroy(publicId, {
         resource_type: resourceType,

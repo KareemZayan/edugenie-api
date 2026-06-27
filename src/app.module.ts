@@ -31,6 +31,7 @@ import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
 import { SuperAdminModule } from './superadmin/superadmin.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AttachmentsModule } from './attachments/attachments.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
@@ -97,7 +98,9 @@ import { ScheduleModule } from '@nestjs/schedule';
     ReportsModule,
     AdminModule,
     SuperAdminModule,
+    AttachmentsModule
   ],
+
   controllers: [AppController],
   providers: [
     AppService,
@@ -108,4 +111,4 @@ import { ScheduleModule } from '@nestjs/schedule';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
