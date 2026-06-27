@@ -30,7 +30,7 @@ export class InstructorService {
     @InjectModel(Review.name) private reviewModel: Model<Review>,
     @InjectModel(Quiz.name) private quizModel: Model<Quiz>,
     @InjectModel(Progress.name) private progressModel: Model<Progress>,
-  ) {}
+  ) { }
 
   async getDashboardOverview(
     instructorId: string,
