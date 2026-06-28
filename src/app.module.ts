@@ -17,6 +17,7 @@ import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { QuizzesModule } from './quizzes/quizzes.module';
+import { PlacementModule } from './placement/placement.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -90,6 +91,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     OrdersModule,
     EnrollmentsModule,
     QuizzesModule,
+    PlacementModule,
     CloudinaryModule,
     ReviewsModule,
     NotificationsModule,
