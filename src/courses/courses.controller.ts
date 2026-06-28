@@ -24,6 +24,7 @@ import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
@@ -164,12 +165,18 @@ export class CoursesController {
   }
 
   @Get(':id')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Find one' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
   @SwaggerApiResponse({ status: 404, description: 'Not Found.' })
   @ApiParam({ name: 'id', type: String })
-  async findOne(@Param('id') id: string): Promise<ApiResponse<CourseResponse>> {
-    const course = await this.coursesService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    // Optional auth: anonymous viewers get everything locked; a logged-in
+    // student gets per-section ownership reflecting what they purchased.
+    @CurrentUser() user?: { userId: string },
+  ): Promise<ApiResponse<CourseResponse>> {
+    const course = await this.coursesService.findOne(id, user?.userId);
     return { success: true, data: course };
   }
 
