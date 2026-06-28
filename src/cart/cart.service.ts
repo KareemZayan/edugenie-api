@@ -251,4 +251,39 @@ export class CartService {
 
     return cart;
   }
+
+  /**
+   * Silently drop any cart items the student now owns — used after a successful
+   * purchase to empty the cart. Unlike validateCart, this NEVER throws; it's a
+   * best-effort cleanup. Items not yet owned (e.g. added after checkout) stay.
+   */
+  async clearOwnedItems(studentId: string): Promise<void> {
+    const cart = await this.cartModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+    });
+    if (!cart || cart.items.length === 0) return;
+
+    let changed = false;
+    for (let i = cart.items.length - 1; i >= 0; i--) {
+      const item = cart.items[i];
+      const isOwned = await this.enrollmentsService.hasDuplicate(
+        studentId,
+        item.itemType,
+        item.courseId.toString(),
+        item.sectionId?.toString(),
+      );
+      if (isOwned) {
+        cart.items.splice(i, 1);
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+
+    if (cart.items.length === 0) {
+      await this.cartModel.deleteOne({ _id: cart._id }).exec();
+    } else {
+      await cart.save();
+    }
+  }
 }

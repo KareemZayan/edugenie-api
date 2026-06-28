@@ -17,6 +17,7 @@ import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { Model, Types } from 'mongoose';
 
 import { PaymobService } from '../paymob/paymob.service';
+import { CartService } from '../cart/cart.service';
 import { Order } from '../orders/schema/order.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Earning } from '../earnings/schema/earning.schema';
@@ -38,6 +39,7 @@ export class WebhooksController {
   constructor(
     private readonly paymobService: PaymobService,
     private readonly notificationsService: NotificationsService,
+    private readonly cartService: CartService,
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Enrollment.name)
     private readonly enrollmentModel: Model<Enrollment>,
@@ -246,6 +248,12 @@ export class WebhooksController {
 
       await session.commitTransaction();
       session.endSession();
+
+      // Empty the purchased items from the student's cart now that they own
+      // them. Best-effort — never let cart cleanup fail the webhook.
+      await this.cartService
+        .clearOwnedItems(order.studentId.toString())
+        .catch((err) => console.error('Cart cleanup failed:', err));
 
       //  Purchase Completed notification (to student)
       await this.notificationsService.create(

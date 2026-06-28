@@ -43,6 +43,11 @@ export class Order {
   @Prop({ type: String, default: null })
   paymobOrderId: string | null;
 
+  // Paymob intention client_secret from the FIRST checkout. Reused on retry so
+  // we never re-register the same special_reference (Paymob rejects duplicates).
+  @Prop({ type: String, default: null })
+  paymobClientSecret: string | null;
+
   @Prop({ type: String, default: null })
   cartSnapshotHash: string | null;
 }

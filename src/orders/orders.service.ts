@@ -121,17 +121,42 @@ export class OrdersService {
           currency: 'EGP',
         };
       }
-      const paymentData = await this.paymobService.createPaymentUrl(
-        Math.round(existingOrder.totalAmount * 100),
-        existingOrder._id.toString(),
-        await this.buildBillingData(studentId),
-      );
-      return {
-        clientSecret: paymentData.clientSecret,
-        orderId: existingOrder._id.toString(),
-        amount: existingOrder.totalAmount,
-        currency: 'EGP',
-      };
+      // Reuse the Paymob intention created on the first checkout. Re-registering
+      // the same order id with Paymob is rejected ("An Order with ref: ... already
+      // exists"), so on retry we return the stored client_secret instead.
+      if (existingOrder.paymobClientSecret) {
+        return {
+          clientSecret: existingOrder.paymobClientSecret,
+          orderId: existingOrder._id.toString(),
+          amount: existingOrder.totalAmount,
+          currency: 'EGP',
+        };
+      }
+
+      // Legacy pending order created before client_secret was persisted: try once
+      // more. The guard converts any Paymob rejection into the graceful 503 below
+      // instead of leaking a raw 500.
+      try {
+        const paymentData = await this.paymobService.createPaymentUrl(
+          Math.round(existingOrder.totalAmount * 100),
+          existingOrder._id.toString(),
+          await this.buildBillingData(studentId),
+        );
+        existingOrder.paymobClientSecret = paymentData.clientSecret;
+        existingOrder.paymobOrderId =
+          paymentData.paymobOrderId ?? existingOrder.paymobOrderId ?? null;
+        await existingOrder.save();
+        return {
+          clientSecret: paymentData.clientSecret,
+          orderId: existingOrder._id.toString(),
+          amount: existingOrder.totalAmount,
+          currency: 'EGP',
+        };
+      } catch {
+        throw new ServiceUnavailableException(
+          'Payment service is currently unavailable. Please try again later.',
+        );
+      }
     }
 
     let totalAmount = 0;
@@ -240,7 +265,7 @@ export class OrdersService {
       );
 
       // Automatically clean the cart since items are now owned
-      await this.cartService.validateCart(studentId).catch(() => {});
+      await this.cartService.clearOwnedItems(studentId).catch(() => {});
 
       return {
         clientSecret: '',
@@ -257,8 +282,11 @@ export class OrdersService {
         order._id.toString(),
         await this.buildBillingData(studentId),
       );
-      // Store the real Paymob intention id for reconciliation (null if absent).
+      // Store the real Paymob intention id for reconciliation (null if absent),
+      // and the client_secret so a retry on the same cart reuses this intention
+      // instead of re-registering the order id (which Paymob rejects).
       order.paymobOrderId = paymentData.paymobOrderId ?? null;
+      order.paymobClientSecret = paymentData.clientSecret ?? null;
       await order.save();
 
       return {
