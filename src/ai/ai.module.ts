@@ -4,7 +4,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
-import { AiGateway } from './ai.gateway';
+// AiGateway (WebSocket streaming) is intentionally NOT registered: the AI tutor
+// runs over plain HTTP (see AiController) so the whole API can run on serverless
+// (Vercel) without an always-on WebSocket server. The gateway file is kept for
+// reference / future always-on hosting.
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
 import {
@@ -33,7 +36,7 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
     }),
   ],
   controllers: [AiController],
-  providers: [AiService, AiGateway],
+  providers: [AiService],
   exports: [AiService],
 })
 export class AiModule {}
