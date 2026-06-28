@@ -444,10 +444,10 @@ export class AiService {
     }
 
     const ctx = await this.getLessonContext(lessonId);
-    yield* this.streamReply(
-      this.lessonSystemPrompt(ctx),
-      [...this.trimHistory(history), { role: 'user', content: message }],
-    );
+    yield* this.streamReply(this.lessonSystemPrompt(ctx), [
+      ...this.trimHistory(history),
+      { role: 'user', content: message },
+    ]);
   }
 
   /** Tier 2 — tutor scoped to an entire course the student has access to. */
@@ -472,7 +472,10 @@ export class AiService {
       );
     }
 
-    const ctx = await this.getCourseContext(courseId, access.accessibleSections);
+    const ctx = await this.getCourseContext(
+      courseId,
+      access.accessibleSections,
+    );
     const systemPrompt =
       `You are EduGenie's AI tutor for the course "${ctx.courseTitle}". Use the ` +
       `course outline and the material the student has unlocked to answer ` +
@@ -508,7 +511,9 @@ export class AiService {
       }>()
       .exec();
 
-    const skills = user?.skills?.length ? user.skills.join(', ') : 'none specified';
+    const skills = user?.skills?.length
+      ? user.skills.join(', ')
+      : 'none specified';
     const interests = user?.interests?.length
       ? user.interests.join(', ')
       : 'none specified';
@@ -536,7 +541,13 @@ export class AiService {
     const full = await this.callGateway(systemPrompt, messages, 1200);
     // Preserve whitespace so the reassembled text matches the original.
     const parts = full.match(/\S+\s*/g) ?? [full];
-    for (const part of parts) yield part;
+    // The gateway returns the whole reply at once. Pace the words with a small
+    // delay so each SSE frame flushes separately and the client renders a
+    // natural word-by-word "typing" stream instead of one instant burst.
+    for (const part of parts) {
+      yield part;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
 
   private lessonSystemPrompt(ctx: {
@@ -580,7 +591,11 @@ export class AiService {
         title: string;
         sections: {
           title: string;
-          lessons: { _id: Types.ObjectId; title: string; transcript?: string }[];
+          lessons: {
+            _id: Types.ObjectId;
+            title: string;
+            transcript?: string;
+          }[];
         }[];
       }>()
       .exec();
@@ -648,6 +663,9 @@ export class AiService {
       if (material.length >= MAX_TOTAL) break;
     }
 
-    return { courseTitle: course.title, material: material.slice(0, MAX_TOTAL) };
+    return {
+      courseTitle: course.title,
+      material: material.slice(0, MAX_TOTAL),
+    };
   }
 }

@@ -32,17 +32,26 @@ describe('AiController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('drains streamLessonChat and wraps the joined reply', async () => {
-    async function* gen() {
+  it('streams streamLessonChat tokens as SSE frames', async () => {
+    function* gen() {
       yield 'hi ';
       yield 'there';
     }
     aiService.streamLessonChat.mockReturnValue(gen());
 
-    const result = await controller.chat(
+    const writes: string[] = [];
+    const res = {
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      write: jest.fn((chunk: string) => writes.push(chunk)),
+      end: jest.fn(),
+    } as any;
+
+    await controller.chat(
       'lesson1',
       { message: 'hello' },
       { userId: 'u1' },
+      res,
     );
 
     expect(aiService.streamLessonChat).toHaveBeenCalledWith(
@@ -51,6 +60,12 @@ describe('AiController', () => {
       'hello',
       undefined,
     );
-    expect(result).toEqual({ success: true, data: { reply: 'hi there' } });
+    // two token frames + a done frame, then the response is ended
+    expect(writes).toEqual([
+      `data: ${JSON.stringify({ type: 'token', value: 'hi ' })}\n\n`,
+      `data: ${JSON.stringify({ type: 'token', value: 'there' })}\n\n`,
+      `data: ${JSON.stringify({ type: 'done' })}\n\n`,
+    ]);
+    expect(res.end).toHaveBeenCalled();
   });
 });
