@@ -6,7 +6,11 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 describe('AiController', () => {
   let controller: AiController;
-  const aiService = { chat: jest.fn() };
+  const aiService = {
+    streamLessonChat: jest.fn(),
+    streamCourseChat: jest.fn(),
+    streamRoadmap: jest.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -28,12 +32,25 @@ describe('AiController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('delegates chat() to AiService and wraps the result', async () => {
-    aiService.chat.mockResolvedValue({ reply: 'hi there' });
+  it('drains streamLessonChat and wraps the joined reply', async () => {
+    async function* gen() {
+      yield 'hi ';
+      yield 'there';
+    }
+    aiService.streamLessonChat.mockReturnValue(gen());
 
-    const result = await controller.chat('lesson1', 'hello', { userId: 'u1' });
+    const result = await controller.chat(
+      'lesson1',
+      { message: 'hello' },
+      { userId: 'u1' },
+    );
 
-    expect(aiService.chat).toHaveBeenCalledWith('lesson1', 'u1', 'hello');
+    expect(aiService.streamLessonChat).toHaveBeenCalledWith(
+      'lesson1',
+      'u1',
+      'hello',
+      undefined,
+    );
     expect(result).toEqual({ success: true, data: { reply: 'hi there' } });
   });
 });
