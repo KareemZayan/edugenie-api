@@ -14,6 +14,27 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { MongoExceptionFilter } from './common/filters/mongo-exception.filter';
 import mongoose from 'mongoose';
 
+// Silence ONLY the DEP0169 (`url.parse()`) deprecation warning. It is emitted by
+// `follow-redirects` (a transitive dependency of axios) on every outbound HTTP
+// request — a third-party call we don't control. The warning is informational
+// ("CVEs are not issued for url.parse() vulnerabilities"). All other warnings
+// are passed through unchanged.
+const originalEmitWarning = process.emitWarning.bind(process);
+process.emitWarning = function (
+  warning: string | Error,
+  ...args: unknown[]
+): void {
+  const code =
+    args.find(
+      (a): a is string => typeof a === 'string' && a.startsWith('DEP'),
+    ) ??
+    (typeof args[0] === 'object' && args[0] !== null
+      ? (args[0] as { code?: string }).code
+      : undefined);
+  if (code === 'DEP0169') return;
+  (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args);
+} as typeof process.emitWarning;
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
 

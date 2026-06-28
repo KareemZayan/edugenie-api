@@ -17,6 +17,7 @@ import { PaginatedResponse } from '../common/interfaces/paginated-response.inter
 
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Progress } from '../progress/schema/progress.schema';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
@@ -331,7 +332,7 @@ export class CoursesService {
     return course;
   }
 
-  async findOne(id: string): Promise<CourseSerializer> {
+  async findOne(id: string, studentId?: string): Promise<CourseSerializer> {
     if (!Types.ObjectId.isValid(id))
       throw new BadRequestException('Invalid ID');
 
@@ -339,7 +340,61 @@ export class CoursesService {
     await this.syncMetadata(id);
 
     const course = await this.findCourseDocument(id);
-    return new CourseSerializer(course.toObject());
+    const courseObj = course.toObject();
+
+    // Tag each section with `isOwned` and each lesson with a `state` based on
+    // what THIS student purchased: full course → everything unlocked; specific
+    // section(s) → only those sections + their lessons; otherwise locked.
+    // (Video URLs are separately gated server-side by canAccessLesson — this
+    // just drives the visual lock state in the course player.)
+    await this.applyStudentAccess(courseObj, studentId);
+
+    return new CourseSerializer(courseObj);
+  }
+
+  /** Mutates courseObj.sections[*].isOwned and lessons[*].state for a student. */
+  private async applyStudentAccess(
+    courseObj: any,
+    studentId?: string,
+  ): Promise<void> {
+    const sections: any[] = Array.isArray(courseObj?.sections)
+      ? courseObj.sections
+      : [];
+    if (sections.length === 0) return;
+
+    const enrollment = studentId
+      ? await this.enrollmentModel.findOne({
+          studentId: new Types.ObjectId(studentId),
+          courseId: courseObj._id,
+        })
+      : null;
+
+    const ownsFullCourse = enrollment?.type === PurchaseType.FULL_COURSE;
+    const ownedSectionIds = new Set(
+      (enrollment?.sectionIds ?? []).map((sid: any) => sid.toString()),
+    );
+    const completedLessonIds = new Set(
+      (enrollment?.completedLessons ?? []).map((lid: any) => lid.toString()),
+    );
+
+    for (const section of sections) {
+      const owned =
+        ownsFullCourse || ownedSectionIds.has(section._id?.toString());
+      section.isOwned = owned;
+
+      const lessons: any[] = Array.isArray(section.lessons)
+        ? section.lessons
+        : [];
+      for (const lesson of lessons) {
+        if (!owned) {
+          lesson.state = 'locked';
+        } else if (completedLessonIds.has(lesson._id?.toString())) {
+          lesson.state = 'completed';
+        } else {
+          lesson.state = 'available';
+        }
+      }
+    }
   }
 
   async update(
