@@ -1,4 +1,9 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -22,12 +27,18 @@ export interface PaymobBillingData {
 }
 
 @Injectable()
-export class PaymobService {
+export class PaymobService implements OnModuleInit {
   private readonly logger = new Logger(PaymobService.name);
   private readonly intentionApiUrl = 'https://accept.paymob.com/v1/intention/';
   private readonly secretKey: string;
   private readonly integrationId: string;
+  /** All payment-method integration ids offered at checkout (card, wallet, …). */
+  private readonly paymentMethodIds: number[];
   public readonly hmacSecret: string;
+  /** Student-web base URL — where Paymob returns the browser after payment. */
+  private readonly studentAppUrl: string;
+  /** Optional server-to-server webhook URL (else configured in the dashboard). */
+  private readonly webhookUrl: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -35,8 +46,10 @@ export class PaymobService {
   ) {
     const isProd = this.configService.get<string>('NODE_ENV') === 'production';
     const secretKey = this.configService.get<string>('PAYMOB_SECRET_KEY') || '';
-    const hmacSecret = this.configService.get<string>('PAYMOB_HMAC_SECRET') || '';
-    const integrationId = this.configService.get<string>('PAYMOB_INTEGRATION_ID') || '';
+    const hmacSecret =
+      this.configService.get<string>('PAYMOB_HMAC_SECRET') || '';
+    const integrationId =
+      this.configService.get<string>('PAYMOB_INTEGRATION_ID') || '';
 
     // Fail fast in production rather than silently running with dummy keys that
     // make every charge and every signature check wrong.
@@ -51,6 +64,52 @@ export class PaymobService {
     this.secretKey = secretKey || 'dummy_secret_key';
     this.hmacSecret = hmacSecret || 'dummy_hmac_secret';
     this.integrationId = integrationId || '4856475';
+    // PAYMOB_INTEGRATION_ID may be a single id or a comma-separated list, so you
+    // can offer several methods (e.g. "5734317,1234567" = card + mobile wallet).
+    // Each id is a separate integration created in the Paymob dashboard.
+    this.paymentMethodIds = this.integrationId
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    this.studentAppUrl = (
+      this.configService.get<string>('STUDENT_APP_URL') ||
+      'http://localhost:3000'
+    ).replace(/\/+$/, '');
+    this.webhookUrl =
+      this.configService.get<string>('PAYMOB_WEBHOOK_URL') || '';
+  }
+
+  /**
+   * Fix 2 — surface the real Paymob configuration at boot. KEEP these logs; they
+   * are how you tell, in Railway/Vercel logs, whether the deployment is running
+   * with REAL keys or silently falling back to dummies (the latter makes every
+   * Paymob call fail with a 401 that looks like a generic 500). No secret values
+   * are printed — only presence booleans and the non-secret integration id.
+   */
+  onModuleInit(): void {
+    const required = [
+      'PAYMOB_SECRET_KEY',
+      'PAYMOB_INTEGRATION_ID',
+      'PAYMOB_HMAC_SECRET',
+    ];
+    const missing = required.filter(
+      (key) => !this.configService.get<string>(key),
+    );
+
+    if (missing.length > 0) {
+      // In production the constructor already throws on missing keys; outside
+      // production we only warn so local dev/tests keep booting on the dummies.
+      this.logger.warn(
+        `Paymob env vars missing (dummy fallbacks in use): ${missing.join(', ')}`,
+      );
+    }
+
+    const usingRealSecret = this.secretKey !== 'dummy_secret_key';
+    const usingRealHmac = this.hmacSecret !== 'dummy_hmac_secret';
+    this.logger.log(
+      `Paymob initialized — paymentMethods=[${this.paymentMethodIds.join(', ')}], ` +
+        `realSecretKey=${usingRealSecret}, realHmacSecret=${usingRealHmac}`,
+    );
   }
 
   /**
@@ -76,9 +135,16 @@ export class PaymobService {
       const intentionPayload = {
         amount: amountCents,
         currency: 'EGP',
-        payment_methods: [Number(this.integrationId)],
+        payment_methods: this.paymentMethodIds,
         billing_data: billingData ?? this.fallbackBillingData(),
         special_reference: orderId,
+        // Where Paymob's hosted checkout sends the customer's browser after the
+        // payment attempt. Paymob appends its own result params (?success=...),
+        // and our success page reads orderId + success from the query string.
+        redirection_url: `${this.studentAppUrl}/checkout/success?orderId=${orderId}`,
+        // Optional per-intention server callback; otherwise the "Transaction
+        // processed callback" set in the Paymob dashboard is used.
+        ...(this.webhookUrl ? { notification_url: this.webhookUrl } : {}),
       };
 
       const response = await firstValueFrom(
@@ -96,11 +162,27 @@ export class PaymobService {
         paymobOrderId: response.data.id ? String(response.data.id) : undefined,
       };
     } catch (error: any) {
+      // Fix 1 — log the REAL Paymob error so a 400/401 from the gateway is
+      // visible instead of a bare 500. KEEP these logs (ongoing debugging).
+      // The Authorization header is redacted — the secret key is never logged.
+      const safeHeaders = { ...(error?.config?.headers ?? {}) };
+      if (safeHeaders.Authorization)
+        safeHeaders.Authorization = 'Token <redacted>';
+
+      this.logger.error('=== PAYMOB ERROR ===');
       this.logger.error(
-        `Paymob Intention API error: ${JSON.stringify(
-          error?.response?.data ?? error.message,
-        )}`,
+        `Status: ${error?.response?.status ?? 'n/a'} ${error?.response?.statusText ?? ''}`.trim(),
       );
+      this.logger.error(
+        `Response Data: ${JSON.stringify(error?.response?.data ?? error?.message, null, 2)}`,
+      );
+      this.logger.error(
+        `Request URL: ${error?.config?.url ?? this.intentionApiUrl}`,
+      );
+      this.logger.error(`Request Body: ${error?.config?.data ?? 'n/a'}`);
+      this.logger.error(`Request Headers: ${JSON.stringify(safeHeaders)}`);
+      this.logger.error('====================');
+
       throw new InternalServerErrorException(
         'Failed to initialize payment intention',
       );
@@ -121,7 +203,9 @@ export class PaymobService {
       this.configService.get<string>('WEBHOOK_BYPASS_HMAC') === 'true' &&
       this.configService.get<string>('NODE_ENV') !== 'production'
     ) {
-      this.logger.warn('Webhook HMAC bypassed via WEBHOOK_BYPASS_HMAC (non-prod)');
+      this.logger.warn(
+        'Webhook HMAC bypassed via WEBHOOK_BYPASS_HMAC (non-prod)',
+      );
       return true;
     }
 
