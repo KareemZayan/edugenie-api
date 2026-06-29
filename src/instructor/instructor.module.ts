@@ -14,6 +14,8 @@ import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
 import { Progress, ProgressSchema } from '../progress/schema/progress.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { Order, OrderSchema } from '../orders/schema/order.schema';
+
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Quiz.name, schema: QuizSchema },
       { name: Progress.name, schema: ProgressSchema },
       { name: User.name, schema: UserSchema },
+      { name: Order.name, schema: OrderSchema },
     ]),
     NotificationsModule,
   ],
@@ -32,4 +35,4 @@ import { NotificationsModule } from '../notifications/notifications.module';
   providers: [InstructorService, InstructorSummaryService],
   exports: [InstructorService],
 })
-export class InstructorModule {}
+export class InstructorModule { }

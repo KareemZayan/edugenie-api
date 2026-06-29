@@ -329,4 +329,50 @@ export class InstructorService {
       },
     };
   }
+
+  async getRecentSales(instructorId: string) {
+    const instructorObjId = new Types.ObjectId(instructorId);
+
+    // 1. Get the latest earnings for this instructor
+    const earnings = await this.earningModel
+      .find({ instructorId: instructorObjId })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('courseId', 'title') // Populate the course title directly
+      .populate({
+        path: 'orderId',
+        select: 'studentId',
+        populate: {
+          path: 'studentId',
+          select: 'firstName lastName avatar email',
+        },
+      })
+      .exec();
+
+    // 2. Format the data for the frontend
+    return {
+      data: earnings.map((e: any) => {
+        // Extract student details safely
+        const order = e.orderId || {};
+        const student = order.studentId || {};
+        const studentName = student.firstName
+          ? `${student.firstName} ${student.lastName}`
+          : 'Unknown Student';
+
+        // Extract course title safely
+        const courseTitle = e.courseId?.title || 'Unknown Course';
+
+        return {
+          id: e._id.toString(),
+          studentName: studentName,
+          studentAvatar: student.avatar || null,
+          courseTitle: courseTitle,
+          date: e.createdAt,
+          price: e.amount || 0, // This gets the real amount from the Earning table
+          status: e.status || 'COMPLETED',
+        };
+      }),
+    };
+  }
+
 }

@@ -29,7 +29,7 @@ export class InstructorController {
   constructor(
     private readonly instructorService: InstructorService,
     private readonly instructorSummaryService: InstructorSummaryService,
-  ) {}
+  ) { }
 
   @Roles(UserRole.INSTRUCTOR)
   @Get('dashboard/overview')
@@ -117,4 +117,16 @@ export class InstructorController {
   async testMonthlySummary(): Promise<{ message: string; count: number }> {
     return this.instructorSummaryService.testSendMonthlySummaries();
   }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Get('dashboard/recent-sales')
+  @ApiOperation({ summary: 'Get recent enrolled students' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  async getRecentSales(@CurrentUser() user: { userId: string }) {
+    return this.instructorService.getRecentSales(user.userId);
+  }
+
+
 }
