@@ -4,6 +4,16 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
+import { CoachService } from './coach.service';
+import { PracticeController } from './practice.controller';
+import { PracticeService } from './practice.service';
+import {
+  PracticeQuiz,
+  PracticeQuizSchema,
+} from './schema/practice-quiz.schema';
+import { RoadmapController } from './roadmap.controller';
+import { RoadmapService } from './roadmap.service';
+import { Roadmap, RoadmapSchema } from './schema/roadmap.schema';
 // AiGateway (WebSocket streaming) is intentionally NOT registered: the AI tutor
 // runs over plain HTTP (see AiController) so the whole API can run on serverless
 // (Vercel) without an always-on WebSocket server. The gateway file is kept for
@@ -14,6 +24,10 @@ import {
   Enrollment,
   EnrollmentSchema,
 } from '../enrollments/schema/enrollment.schema';
+import {
+  QuizAttempt,
+  QuizAttemptSchema,
+} from '../quizzes/schema/quiz-attempt.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { RagModule } from '../rag/rag.module';
@@ -24,6 +38,9 @@ import { RagModule } from '../rag/rag.module';
       { name: Course.name, schema: CourseSchema },
       { name: User.name, schema: UserSchema },
       { name: Enrollment.name, schema: EnrollmentSchema },
+      { name: QuizAttempt.name, schema: QuizAttemptSchema },
+      { name: PracticeQuiz.name, schema: PracticeQuizSchema },
+      { name: Roadmap.name, schema: RoadmapSchema },
     ]),
     EnrollmentsModule,
     // RAG retrieval for grounded, cited tutor answers (Phase 2).
@@ -38,8 +55,8 @@ import { RagModule } from '../rag/rag.module';
       }),
     }),
   ],
-  controllers: [AiController],
-  providers: [AiService],
+  controllers: [AiController, PracticeController, RoadmapController],
+  providers: [AiService, CoachService, PracticeService, RoadmapService],
   exports: [AiService],
 })
 export class AiModule {}

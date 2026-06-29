@@ -1,6 +1,15 @@
-import { Controller, Post, Param, Body, UseGuards, Res } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Param,
+  Body,
+  UseGuards,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { AiService, ChatTurn } from './ai.service';
+import { CoachService } from './coach.service';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
@@ -26,7 +35,10 @@ interface AiChatBody {
 @Controller('ai')
 @ApiTags('Ai')
 export class AiController {
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly coachService: CoachService,
+  ) {}
 
   /**
    * Stream an AI generator to the client as Server-Sent Events (word-by-word,
@@ -154,5 +166,32 @@ export class AiController {
         body.history,
       ),
     );
+  }
+
+  // Tier 4 — AI Learning Coach (grounded in the student's real progress)
+  @Post('coach-chat')
+  @ApiOperation({ summary: 'AI Learning Coach chat (SSE stream)' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 200, description: 'SSE token stream.' })
+  async coachChat(
+    @Body() body: AiChatBody,
+    @CurrentUser() user: { userId: string },
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.streamSse(
+      res,
+      this.coachService.streamCoach(user.userId, body.message, body.history),
+    );
+  }
+
+  // Deterministic learning snapshot for a dashboard stats card (no LLM).
+  @Get('coach/snapshot')
+  @ApiOperation({ summary: "Student's learning snapshot (progress + weak spots)" })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 200, description: 'Learning snapshot.' })
+  async coachSnapshot(@CurrentUser() user: { userId: string }) {
+    return this.coachService.getSnapshot(user.userId);
   }
 }
