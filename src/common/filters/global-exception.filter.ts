@@ -17,11 +17,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    // to be removed
-    // if (response.headersSent) {
-    //   return;
-    // }
-    //---------------
+    // If the response was already sent (e.g. a guard performed an OAuth
+    // failure redirect), don't try to write again — that would throw
+    // "Cannot set headers after they are sent".
+    if (response.headersSent) {
+      return;
+    }
 
     const status =
       exception instanceof HttpException
