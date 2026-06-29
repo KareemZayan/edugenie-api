@@ -67,6 +67,15 @@ import { AttachmentsModule } from './attachments/attachments.module';
         // Front-end origins used for invite/redirect links and CORS.
         DASHBOARD_URL: Joi.string().default('http://localhost:4200'),
         STUDENT_APP_URL: Joi.string().default('http://localhost:3000'),
+        // Google OAuth sign-in (optional — endpoints only complete the flow once
+        // client id/secret are set). GOOGLE_CALLBACK_URL must exactly match the
+        // "Authorized redirect URI" in Google Cloud Console.
+        GOOGLE_CLIENT_ID: Joi.string().allow('').optional(),
+        GOOGLE_CLIENT_SECRET: Joi.string().allow('').optional(),
+        GOOGLE_CALLBACK_URL: Joi.string().uri().allow('').optional(),
+        // Where the callback sends the browser after success (defaults to
+        // `${STUDENT_APP_URL}/auth-callback`).
+        GOOGLE_SUCCESS_REDIRECT: Joi.string().uri().allow('').optional(),
         CORS_ORIGINS: Joi.string().optional(),
         CLOUDINARY_WEBHOOK_URL: Joi.string().uri().optional(),
       }),

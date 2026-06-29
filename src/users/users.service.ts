@@ -10,6 +10,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { User } from './schema/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -86,6 +87,61 @@ export class UsersService {
       email: data.email,
       role: data.role,
       password: data.passwordHash,
+      isVerified: true,
+      status: UserStatus.ACTIVE,
+    });
+    return newUser.save();
+  }
+
+  /**
+   * Find-or-create a Student account for a verified Google (OAuth) identity.
+   * - Already linked (googleId match) → returned as-is.
+   * - Same email, not yet linked → the Google id is attached to that account.
+   * - Brand new → a pre-verified, ACTIVE Student is created with a random
+   *   password (the account signs in via Google, not a password).
+   */
+  async findOrCreateGoogleUser(data: {
+    googleId: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    avatar?: string | null;
+    role?: UserRole;
+  }): Promise<User> {
+    const byGoogle = await this.userModel.findOne({ googleId: data.googleId });
+    if (byGoogle) return byGoogle;
+
+    // Existing password account with the same email → link it. We keep its
+    // existing role (a Google sign-in never changes an established account).
+    const byEmail = await this.userModel.findOne({ email: data.email });
+    if (byEmail) {
+      if (!byEmail.googleId) {
+        byEmail.googleId = data.googleId;
+        if (!byEmail.avatar && data.avatar) byEmail.avatar = data.avatar;
+        await byEmail.save();
+      }
+      return byEmail;
+    }
+
+    // New account: honor the chosen role, but only student/instructor are ever
+    // allowed via Google (privileged roles exist only through invites).
+    const role =
+      data.role === UserRole.INSTRUCTOR ? UserRole.INSTRUCTOR : UserRole.STUDENT;
+
+    // Random password — Google accounts authenticate through OAuth, not a
+    // password. They can later set one via the forgot-password flow if needed.
+    const passwordHash = await bcrypt.hash(
+      crypto.randomBytes(32).toString('hex'),
+      10,
+    );
+    const newUser = new this.userModel({
+      firstName: data.firstName?.trim() || 'Google',
+      lastName: data.lastName?.trim() || 'User',
+      email: data.email,
+      googleId: data.googleId,
+      avatar: data.avatar ?? undefined,
+      role,
+      password: passwordHash,
       isVerified: true,
       status: UserStatus.ACTIVE,
     });

@@ -3,32 +3,114 @@ import { CreateUserDto } from '../users/dto/create-user.dto';
 import {
   Controller,
   Post,
+  Get,
   Body,
   Res,
   HttpCode,
   HttpStatus,
   UseGuards,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import * as express from 'express';
 import { LoginDto } from './dto/login.dto';
 import type { ApiResponse } from '../common/interfaces/api-response.interface';
 import type { AuthResponse } from './interfaces/auth-response.interface';
-import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
+import { ThrottlerGuard, Throttle, SkipThrottle } from '@nestjs/throttler';
 import { RedeemHandoffCodeDto } from './dto/redeem-handoff-code.dto';
 import { AcceptInviteDto, ValidateInviteDto } from './dto/accept-invite.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Req } from '@nestjs/common'; // add to existing import
 import { extractClientIp } from './utils/login-device.util';
+import { ConfigService } from '@nestjs/config';
+import type { GoogleUser } from './strategies/google.strategy';
+import { GoogleOAuthGuard } from './guards/google-oauth.guard';
+import { UserRole } from '../common/enums/user-role.enum';
 
 @Controller('auth')
 @UseGuards(ThrottlerGuard)
 @Throttle({ default: { limit: 20, ttl: 60000 } })
 @ApiTags('Auth') // 5 requests per 15 mins
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  private readonly logger = new Logger(AuthController.name);
+
+  constructor(
+    private authService: AuthService,
+    private configService: ConfigService,
+  ) {}
+
+  // ── Google OAuth ──────────────────────────────────────────────────────────
+
+  /**
+   * Step 1. The browser hits this; the Google passport guard immediately
+   * 302-redirects to Google's consent screen. No JSON is returned.
+   */
+  @Get('google')
+  @SkipThrottle()
+  @UseGuards(GoogleOAuthGuard)
+  @ApiOperation({
+    summary:
+      'Start Google sign-in — 302 redirects to Google. Pass ?role=instructor or ?role=student to choose the role for new accounts (default student).',
+  })
+  googleAuth(): void {
+    // Intentionally empty: GoogleOAuthGuard performs the redirect to Google and
+    // forwards the chosen role as the OAuth `state` parameter.
+  }
+
+  /**
+   * Step 2. Google redirects back here with a `code`. The guard exchanges it and
+   * populates req.user; we find-or-create the account, mint a single-use
+   * exchange token, and 302-redirect to the frontend with it. We never return
+   * the JWT as JSON here (the browser is mid-redirect) — the frontend swaps the
+   * token for a JWT via POST /auth/verify-exchange-token.
+   */
+  @Get('google/callback')
+  @SkipThrottle()
+  @UseGuards(GoogleOAuthGuard)
+  @ApiOperation({
+    summary:
+      'Google OAuth callback — 302 redirects to the frontend with a one-time ?token=',
+  })
+  async googleCallback(
+    @Req() req: express.Request,
+    @Res() res: express.Response,
+  ): Promise<void> {
+    const studentApp =
+      this.configService.get<string>('STUDENT_APP_URL') ||
+      'http://localhost:3000';
+    const dashboardApp =
+      this.configService.get<string>('DASHBOARD_URL') ||
+      'http://localhost:4200';
+
+    try {
+      const { exchangeToken, user } = await this.authService.loginWithGoogle(
+        req.user as GoogleUser,
+      );
+
+      // Route each role to its own app: instructors land on the dashboard
+      // profile, students on the student auth-callback. The page reads the
+      // ?token= and exchanges it for a session. An explicit
+      // GOOGLE_SUCCESS_REDIRECT overrides this for every role.
+      const successRedirect =
+        this.configService.get<string>('GOOGLE_SUCCESS_REDIRECT') ||
+        (user.role === UserRole.INSTRUCTOR
+          ? `${dashboardApp}/profile`
+          : `${studentApp}/auth-callback`);
+
+      res.redirect(
+        `${successRedirect}?token=${encodeURIComponent(exchangeToken)}` +
+          `&role=${encodeURIComponent(user.role)}`,
+      );
+    } catch (err) {
+      this.logger.error(
+        'Google sign-in failed',
+        err instanceof Error ? err.stack : String(err),
+      );
+      res.redirect(`${studentApp}/login?error=google_auth_failed`);
+    }
+  }
 
   @Post('register')
   @ApiOperation({ summary: 'Register' })

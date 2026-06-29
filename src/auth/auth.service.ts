@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { User } from '../users/schema/user.schema';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
@@ -31,6 +32,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import type { GoogleUser } from './strategies/google.strategy';
 import {
   getFingerprint,
   parseDevice,
@@ -78,6 +80,30 @@ export class AuthService {
     const token = crypto.randomBytes(32).toString('hex');
     await this.exchangeTokenModel.create({ userId, token });
     return token;
+  }
+
+  /**
+   * Complete a Google OAuth sign-in: find-or-create the account, then mint a
+   * single-use exchange token (the same one the student SSO flow uses). The
+   * controller redirects to the frontend with this token; the frontend swaps it
+   * for a real JWT via POST /auth/verify-exchange-token.
+   */
+  async loginWithGoogle(
+    googleUser: GoogleUser,
+  ): Promise<{ exchangeToken: string; user: User }> {
+    const user = await this.usersService.findOrCreateGoogleUser(googleUser);
+
+    // SECURITY: deactivated/suspended accounts must not be able to log in.
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException(
+        'This account has been deactivated. Please contact support.',
+      );
+    }
+
+    const exchangeToken = await this.generateExchangeToken(
+      user._id as Types.ObjectId,
+    );
+    return { exchangeToken, user };
   }
 
   async verifyExchangeToken(
