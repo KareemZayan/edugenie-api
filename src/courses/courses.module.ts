@@ -14,6 +14,7 @@ import { ProgressModule } from '../progress/progress.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RagModule } from '../rag/rag.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ProgressModule,
     EnrollmentsModule,
     NotificationsModule,
+    RagModule,
   ],
   controllers: [CoursesController, InstructorCoursesController],
   providers: [CoursesService],

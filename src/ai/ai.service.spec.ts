@@ -39,7 +39,12 @@ describe('AiService.generateQuizQuestions', () => {
     fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
     // Direct construction with stub deps — generateQuizQuestions never uses them.
-    service = new AiService({} as never, {} as never, {} as never);
+    service = new AiService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
   });
 
   afterEach(() => {
@@ -50,7 +55,12 @@ describe('AiService.generateQuizQuestions', () => {
 
   it('throws (and never calls the gateway) when not configured', async () => {
     delete process.env.SBG_API_URL;
-    service = new AiService({} as never, {} as never, {} as never);
+    service = new AiService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
 
     await expect(
       service.generateQuizQuestions(baseParams),

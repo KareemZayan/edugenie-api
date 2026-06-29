@@ -18,6 +18,7 @@ import { OrdersModule } from './orders/orders.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { QuizzesModule } from './quizzes/quizzes.module';
 import { PlacementModule } from './placement/placement.module';
+import { RagModule } from './rag/rag.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -50,6 +51,9 @@ import { AttachmentsModule } from './attachments/attachments.module';
         SBG_API_URL: Joi.string().uri().allow('').optional(),
         SBG_API_KEY: Joi.string().allow('').optional(),
         SBG_MODEL: Joi.string().allow('').optional(),
+        // RAG embeddings (Google Gemini text-embedding-004). Optional: without
+        // it, RAG indexing is disabled but the rest of the app boots normally.
+        GEMINI_API_KEY: Joi.string().allow('').optional(),
         NODE_ENV: Joi.string()
           .valid('development', 'production', 'test')
           .default('development'),
@@ -92,6 +96,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     EnrollmentsModule,
     QuizzesModule,
     PlacementModule,
+    RagModule,
     CloudinaryModule,
     ReviewsModule,
     NotificationsModule,

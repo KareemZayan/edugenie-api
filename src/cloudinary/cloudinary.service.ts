@@ -5,6 +5,7 @@ import { Model, Types } from 'mongoose';
 import { v2 as cloudinary } from 'cloudinary';
 import { Course } from '../courses/schema/course.schema';
 import { CoursesService } from '../courses/courses.service';
+import { IndexingService } from '../rag/indexing.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class CloudinaryService {
     private configService: ConfigService,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private coursesService: CoursesService,
+    private readonly indexing: IndexingService,
   ) {
     cloudinary.config({
       cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
@@ -229,6 +231,13 @@ export class CloudinaryService {
 
     if (result.modifiedCount > 0) {
       this.logger.log(`Saved transcript for asset ${publicId} via webhook`);
+      // A transcript landed → (re)index that course's content chunks for RAG.
+      const course = await this.courseModel
+        .findOne({ 'sections.lessons.videoPublicId': publicId })
+        .select('_id')
+        .lean<{ _id: Types.ObjectId } | null>()
+        .exec();
+      if (course) await this.indexing.onTranscriptSaved(course._id.toString());
       return true;
     }
     this.logger.warn(
@@ -327,6 +336,8 @@ export class CloudinaryService {
         },
       );
       this.logger.log(`Saved transcript for lesson ${lessonId}`);
+      // A transcript landed → (re)index that course's content chunks for RAG.
+      await this.indexing.onTranscriptSaved(courseId);
       return;
     }
 
