@@ -16,6 +16,7 @@ import {
 } from '../enrollments/schema/enrollment.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
+import { RagModule } from '../rag/rag.module';
 
 @Module({
   imports: [
@@ -25,6 +26,8 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
       { name: Enrollment.name, schema: EnrollmentSchema },
     ]),
     EnrollmentsModule,
+    // RAG retrieval for grounded, cited tutor answers (Phase 2).
+    RagModule,
     // Same signing config as AuthModule so the gateway can verify session JWTs.
     JwtModule.registerAsync({
       imports: [ConfigModule],

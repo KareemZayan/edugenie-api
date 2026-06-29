@@ -23,6 +23,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { UserRole } from '../common/enums/user-role.enum';
 import { User } from '../users/schema/user.schema';
+import { IndexingService } from '../rag/indexing.service';
 
 @Injectable()
 export class CoursesService {
@@ -35,6 +36,7 @@ export class CoursesService {
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly notificationsService: NotificationsService,
+    private readonly indexing: IndexingService,
   ) { }
 
   async create(
@@ -408,12 +410,16 @@ export class CoursesService {
       { returnDocument: 'after', runValidators: true },
     );
     if (!updated) throw new ForbiddenException('Not authorized');
+    // Refresh the catalog card (or drop it if no longer published).
+    await this.indexing.onCourseChanged(id);
     return new CourseSerializer(updated.toObject());
   }
 
   async remove(id: string): Promise<{ message: string }> {
     const result = await this.courseModel.findByIdAndDelete(id);
     if (!result) throw new NotFoundException('Course not found');
+    // Drop its catalog card + content chunks.
+    await this.indexing.onCourseRemoved(id);
     return { message: 'Course successfully deleted' };
   }
 
@@ -753,6 +759,8 @@ export class CoursesService {
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
+    // Published → add it to the catalog index.
+    await this.indexing.onCourseChanged(courseId);
     return new CourseSerializer(course.toObject());
   }
 
@@ -772,6 +780,8 @@ export class CoursesService {
     );
     if (!course)
       throw new NotFoundException('Course not found or not under review.');
+    // Rejected → ensure it's not in the catalog index.
+    await this.indexing.onCourseChanged(courseId);
     return new CourseSerializer(course.toObject());
   }
 

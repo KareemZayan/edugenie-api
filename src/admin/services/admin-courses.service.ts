@@ -15,6 +15,7 @@ import { NotificationType } from '../../notifications/enums/notification-type.en
 import { CourseStatus } from '../../common/enums/course-status.enum';
 import { PaginateQueryDto } from '../../common/dto/paginate-query.dto';
 import { RejectCourseDto } from '../dto/reject-course.dto';
+import { IndexingService } from '../../rag/indexing.service';
 import {
   PendingCourseListResponse,
   CourseReviewDetailResponse,
@@ -29,6 +30,7 @@ export class AdminCoursesService {
     @InjectModel(Course.name) private courseModel: Model<CourseDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
     private readonly notificationsService: NotificationsService,
+    private readonly indexing: IndexingService,
   ) {}
 
   async getPendingReviews(
@@ -223,6 +225,9 @@ export class AdminCoursesService {
     (course as any).approvedAt = new Date();
     await course.save();
 
+    // Published → index it for roadmap recommendations (non-throwing).
+    await this.indexing.onCourseChanged(course._id.toString());
+
     await this.auditLogModel.create({
       action: 'COURSE_APPROVED',
       performedBy: new Types.ObjectId(adminId),
@@ -269,6 +274,9 @@ export class AdminCoursesService {
     course.rejectedBy = new Types.ObjectId(adminId);
     course.rejectedAt = new Date();
     await course.save();
+
+    // Rejected → ensure it's not in the catalog index (non-throwing).
+    await this.indexing.onCourseChanged(course._id.toString());
 
     await this.auditLogModel.create({
       action: 'COURSE_REJECTED',

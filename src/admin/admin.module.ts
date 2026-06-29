@@ -16,6 +16,7 @@ import {
   NotificationSchema,
 } from '../notifications/schema/notification.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RagModule } from '../rag/rag.module';
 
 import { AdminController } from './controllers/admin.controller';
 import { AdminCoursesController } from './controllers/admin-courses.controller';
@@ -42,6 +43,7 @@ import { AdminCategoriesService } from './services/admin-categories.service';
       { name: Notification.name, schema: NotificationSchema },
     ]),
     NotificationsModule,
+    RagModule,
   ],
   controllers: [
     AdminController,

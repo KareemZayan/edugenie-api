@@ -11,6 +11,8 @@ import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { User } from '../users/schema/user.schema';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
+import { RetrievalService } from '../rag/retrieval.service';
+import type { RetrievedChunk, RetrievedCourse } from '../rag/retrieval.service';
 import { QuestionType } from '../common/enums/questionsType.enum';
 import { QuizDifficulty } from '../common/enums/quizDifficulty.enum';
 
@@ -58,6 +60,7 @@ export class AiService {
     @InjectModel(Course.name) private courseModel: Model<Course>,
     @InjectModel(User.name) private userModel: Model<User>,
     private enrollmentsService: EnrollmentsService,
+    private retrieval: RetrievalService,
   ) {}
 
   /** True once the gateway host AND key are configured. */
@@ -444,7 +447,19 @@ export class AiService {
     }
 
     const ctx = await this.getLessonContext(lessonId);
-    yield* this.streamReply(this.lessonSystemPrompt(ctx), [
+
+    // RAG: retrieve the most relevant slices of THIS lesson's transcript and
+    // ground the answer in them. Falls back to the full-lesson prompt if no
+    // chunks are indexed (or embeddings aren't configured).
+    const chunks = await this.retrieval
+      .retrieve({ query: message, lessonId, k: 5 })
+      .catch(() => [] as RetrievedChunk[]);
+
+    const systemPrompt = chunks.length
+      ? this.groundedLessonPrompt(ctx.lessonTitle, ctx.courseTitle, chunks)
+      : this.lessonSystemPrompt(ctx);
+
+    yield* this.streamReply(systemPrompt, [
       ...this.trimHistory(history),
       { role: 'user', content: message },
     ]);
@@ -476,16 +491,33 @@ export class AiService {
       courseId,
       access.accessibleSections,
     );
-    const systemPrompt =
-      `You are EduGenie's AI tutor for the course "${ctx.courseTitle}". Use the ` +
-      `course outline and the material the student has unlocked to answer ` +
-      `questions, connect concepts across lessons, and guide their study. Do ` +
-      `not reveal content from sections they have not unlocked.\n\n` +
-      `=== COURSE OUTLINE & MATERIAL ===\n${ctx.material}`;
+
+    // RAG: retrieve the most relevant lesson excerpts across the sections the
+    // student has unlocked, ground the answer, and cite the source lessons.
+    const chunks = await this.retrieval
+      .retrieve({
+        query: message,
+        courseId,
+        sectionIds: access.accessibleSections,
+        k: 6,
+      })
+      .catch(() => [] as RetrievedChunk[]);
+
+    const systemPrompt = chunks.length
+      ? this.groundedCoursePrompt(ctx.courseTitle, chunks)
+      : `You are EduGenie's AI tutor for the course "${ctx.courseTitle}". Use the ` +
+        `course outline and the material the student has unlocked to answer ` +
+        `questions, connect concepts across lessons, and guide their study. Do ` +
+        `not reveal content from sections they have not unlocked.\n\n` +
+        `=== COURSE OUTLINE & MATERIAL ===\n${ctx.material}`;
+
     yield* this.streamReply(systemPrompt, [
       ...this.trimHistory(history),
       { role: 'user', content: message },
     ]);
+
+    // Cite the lessons the answer drew from (tier-2 spans multiple lessons).
+    if (chunks.length) yield* this.streamSources(chunks);
   }
 
   /** Tier 3 — global advisor that builds a personalized learning roadmap. */
@@ -519,18 +551,74 @@ export class AiService {
       : 'none specified';
     const level = user?.level || 'unspecified';
 
+    // RAG: surface REAL EduGenie courses that match the goal so the advisor
+    // recommends enrollable courses instead of inventing them.
+    // Build the retrieval query from the WHOLE interview so far (goal + the
+    // student's answers), so recommended courses fit everything gathered — not
+    // just the opening message.
+    const answersSoFar = history
+      .filter((t) => t.role === 'user')
+      .slice(-5)
+      .map((t) => t.content)
+      .join(' ');
+    const retrievalQuery =
+      `${goal} ${answersSoFar} ${message}`.trim() || userMessage;
+
+    const courses = await this.retrieval
+      .retrieveCatalog(retrievalQuery, 5)
+      .catch(() => [] as RetrievedCourse[]);
+
+    // The student fills a structured intake on the frontend (goal, level, time,
+    // timeline, preferences), so the first message usually contains everything
+    // needed — generate the roadmap directly. Only ask if something essential is
+    // genuinely missing (e.g. a follow-up chat with no goal).
     const systemPrompt =
-      `You are EduGenie's career roadmap advisor. Build a clear, realistic, ` +
-      `step-by-step learning roadmap that takes the student from where they are ` +
-      `now to their goal. Use ordered milestones, name concrete skills to learn ` +
-      `at each step, and keep it actionable.\n\n` +
-      `Student profile — level: ${level}; current skills: ${skills}; ` +
-      `interests: ${interests}.` +
-      (goal ? `\nStated goal: ${goal}` : '');
+      `You are EduGenie's AI learning coach. Build a learning roadmap tailored ` +
+      `to this student.\n` +
+      `- If their message already gives the goal, current level, available time, ` +
+      `and timeline, build the roadmap NOW — do NOT ask questions first.\n` +
+      `- Only if an essential detail is truly missing, ask ONE short question to ` +
+      `fill the gap, then build it.\n\n` +
+      `Use what you know from their profile (do NOT re-ask it) — level: ${level}; ` +
+      `skills: ${skills}; interests: ${interests}.` +
+      (goal ? ` Stated goal: ${goal}.` : '') +
+      `\n\nWHEN YOU BUILD THE ROADMAP:\n` +
+      `- Use ordered milestones; for each, name the concrete skills to learn and ` +
+      `estimate time using their weekly availability and timeline.\n` +
+      `- Tailor everything to what they told you (level, time, timeline, focus).\n` +
+      (courses.length
+        ? `- Map milestones to these REAL EduGenie courses. Whenever you mention ` +
+          `a course, write it as a markdown link using its EXACT title and the ` +
+          `given link — e.g. [Course Title](/courses/ID). Do NOT invent courses ` +
+          `or links:\n${this.formatCourses(courses)}\n`
+        : '') +
+      `- Finish with a short, encouraging next step.`;
+
     yield* this.streamReply(systemPrompt, [
       ...this.trimHistory(history),
       { role: 'user', content: userMessage },
     ]);
+  }
+
+  /**
+   * Bedrock requires the conversation to START with a user message and to
+   * alternate user/assistant roles. Drop any leading assistant turns (e.g. the
+   * roadmap's seeded greeting) and merge consecutive same-role turns so the
+   * payload is always valid.
+   */
+  private sanitizeForBedrock(messages: GatewayMessage[]): GatewayMessage[] {
+    const out: GatewayMessage[] = [];
+    for (const m of messages) {
+      if (!m?.content?.trim()) continue;
+      if (out.length === 0 && m.role !== 'user') continue; // must start with user
+      const last = out[out.length - 1];
+      if (last && last.role === m.role) {
+        last.content = `${last.content}\n${m.content}`.slice(0, 4000);
+      } else {
+        out.push({ role: m.role, content: m.content });
+      }
+    }
+    return out;
   }
 
   /** Fetch a full reply, then yield it word-by-word (simulated streaming). */
@@ -538,7 +626,8 @@ export class AiService {
     systemPrompt: string,
     messages: GatewayMessage[],
   ): AsyncGenerator<string> {
-    const full = await this.callGateway(systemPrompt, messages, 1200);
+    const safe = this.sanitizeForBedrock(messages);
+    const full = await this.callGateway(systemPrompt, safe, 1200);
     // Preserve whitespace so the reassembled text matches the original.
     const parts = full.match(/\S+\s*/g) ?? [full];
     // The gateway returns the whole reply at once. Pace the words with a small
@@ -562,6 +651,78 @@ export class AiService {
       `only help with this lesson's content and suggest what to re-watch.\n\n` +
       `=== LESSON MATERIAL ===\n${ctx.material}`
     );
+  }
+
+  // ── RAG: grounded prompts + citations ──────────────────────────────────────
+
+  private groundedLessonPrompt(
+    lessonTitle: string,
+    courseTitle: string,
+    chunks: RetrievedChunk[],
+  ): string {
+    return (
+      `You are EduGenie's AI tutor for the lesson "${lessonTitle}" in the course ` +
+      `"${courseTitle}". Answer the student's question using PRIMARILY the ` +
+      `excerpts from this lesson below. If the excerpts don't contain the answer, ` +
+      `say you're not certain and suggest what to re-watch — do NOT invent facts. ` +
+      `Be clear and concise.\n\n=== RELEVANT EXCERPTS ===\n` +
+      this.formatExcerpts(chunks)
+    );
+  }
+
+  private groundedCoursePrompt(
+    courseTitle: string,
+    chunks: RetrievedChunk[],
+  ): string {
+    return (
+      `You are EduGenie's AI tutor for the course "${courseTitle}". Answer using ` +
+      `PRIMARILY the excerpts below, drawn from the lessons the student has ` +
+      `unlocked. Connect concepts across lessons and reference lesson titles when ` +
+      `helpful. If the excerpts don't cover it, say so and suggest what to study — ` +
+      `do NOT invent facts, and never reveal content from locked sections.\n\n` +
+      `=== RELEVANT EXCERPTS ===\n` +
+      this.formatExcerpts(chunks)
+    );
+  }
+
+  private formatExcerpts(chunks: RetrievedChunk[]): string {
+    return chunks
+      .map(
+        (c, i) => `[${i + 1}] (from lesson "${c.lessonTitle}")\n${c.text.trim()}`,
+      )
+      .join('\n\n');
+  }
+
+  private formatCourses(courses: RetrievedCourse[]): string {
+    return courses
+      .map(
+        (c) =>
+          `- "${c.title}" — link: /courses/${c.courseId} ` +
+          `(${c.level || 'all levels'}, $${c.price}` +
+          (c.ratingAverage ? `, rated ${c.ratingAverage.toFixed(1)}/5` : '') +
+          `)` +
+          (c.goals?.length
+            ? `; covers: ${c.goals.slice(0, 4).join('; ')}`
+            : ''),
+      )
+      .join('\n');
+  }
+
+  /** Stream a compact "sources" footer listing the distinct cited lessons. */
+  private async *streamSources(
+    chunks: RetrievedChunk[],
+  ): AsyncGenerator<string> {
+    const seen = new Set<string>();
+    const titles: string[] = [];
+    for (const c of chunks) {
+      const title = c.lessonTitle?.trim();
+      if (title && !seen.has(title)) {
+        seen.add(title);
+        titles.push(title);
+      }
+    }
+    if (!titles.length) return;
+    yield `\n\n📚 Based on: ${titles.join(' · ')}`;
   }
 
   private trimHistory(history: ChatTurn[]): GatewayMessage[] {
