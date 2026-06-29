@@ -605,6 +605,7 @@ export interface AdminDashboardOverviewResponse {
   newSignupsToday: number;
   openReports: number;
   platformRevenue: number;
+  todayRevenue: number;
 }
 
 export interface CourseListInstructor {
@@ -735,6 +736,10 @@ export interface PlatformAnalyticsResponse {
   totalCourses: number;
   totalRevenue: number;
   revenueGrowthPercent: number;
+  revenueChart: {
+    labels: string[];
+    data: number[];
+  };
   topCourses: Array<{
     courseId: string;
     title: string;
