@@ -80,4 +80,21 @@ export class InstructorQuizzesController {
       dto as unknown as Record<string, unknown>,
     );
   }
+
+  @Roles(UserRole.INSTRUCTOR)
+@Get('section/:sectionId')
+@ApiOperation({ summary: 'Get quiz by section (for instructor review)' })
+@SwaggerApiResponse({ status: 200, description: 'Success.' })
+@SwaggerApiResponse({ status: 404, description: 'Not Found.' })
+@ApiParam({ name: 'sectionId', type: String })
+@ApiCookieAuth('jwt')
+@ApiBearerAuth()
+@SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+@SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+async getQuizBySection(
+  @Param('sectionId') sectionId: string,
+  @CurrentUser() user: { userId: string },
+) {
+  return this.quizzesService.findOneForInstructorBySection(sectionId, user.userId);
+}
 }
