@@ -633,4 +633,61 @@ export class QuizzesService {
       approvedAt: new Date(),
     };
   }
+
+
+  async findOneForInstructorBySection(sectionId: string, instructorId: string) {
+  if (!Types.ObjectId.isValid(sectionId)) {
+    throw new BadRequestException('Invalid section ID');
+  }
+
+  const course = await this.courseModel
+    .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
+    .select('instructorId')
+    .exec();
+  if (!course) throw new NotFoundException('Section not found');
+
+  // OWNERSHIP CHECK ENFORCED
+  if (course.instructorId.toString() !== instructorId) {
+    throw new ForbiddenException('You do not own this section');
+  }
+
+  const quiz = await this.quizModel
+    .findOne({ sectionId: new Types.ObjectId(sectionId) })
+    .exec();
+
+  if (!quiz) {
+    return null; // no quiz generated yet for this section — frontend shows the form
+  }
+
+  return {
+    quizId: quiz._id.toString(),
+    sectionId: quiz.sectionId.toString(),
+    difficulty: quiz.difficulty,
+    numberOfQuestions: quiz.numberOfQuestions,
+    questionType: quiz.questionType,
+    generationStatus: quiz.generationStatus,
+    status: quiz.status,
+    questions: quiz.questions.map((q, index: number) => {
+      const questionObj = q as unknown as {
+        _id?: Types.ObjectId;
+        questionText: string;
+        options: string[];
+        correctAnswers: string[];
+      };
+      return {
+        questionId: questionObj._id
+          ? questionObj._id.toString()
+          : index.toString(),
+        text: questionObj.questionText,
+        options: questionObj.options.map((opt: string) => ({
+          optionId: opt,
+          text: opt,
+        })),
+        correctAnswers: questionObj.correctAnswers,
+      };
+    }),
+  };
+}
+
+
 }
