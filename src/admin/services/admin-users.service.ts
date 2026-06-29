@@ -26,6 +26,8 @@ export class AdminUsersService {
     const filter: any = {};
     if (query.role) {
       filter.role = query.role;
+    } else {
+      filter.role = { $nin: [UserRole.ADMIN, UserRole.SUPERADMIN] };
     }
     if (query.status) {
       filter.status = query.status;
