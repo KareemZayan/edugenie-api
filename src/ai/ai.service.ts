@@ -517,7 +517,7 @@ export class AiService {
     ]);
 
     // Cite the lessons the answer drew from (tier-2 spans multiple lessons).
-    if (chunks.length) yield* this.streamSources(chunks);
+    if (chunks.length) yield* this.streamSources(chunks, courseId);
   }
 
   /** Tier 3 — global advisor that builds a personalized learning roadmap. */
@@ -598,6 +598,43 @@ export class AiService {
       ...this.trimHistory(history),
       { role: 'user', content: userMessage },
     ]);
+  }
+
+  /**
+   * Public streaming primitive for sibling AI features (e.g. the Learning
+   * Coach) that build their own grounded system prompt: stream a paced reply
+   * through the same gateway, history trimming, and Bedrock sanitiser as the
+   * tutor tiers. Access/validation checks run before the first token, so the
+   * SSE wrapper can surface them as proper HTTP errors.
+   */
+  async *streamGrounded(
+    systemPrompt: string,
+    userMessage: string,
+    history: ChatTurn[] = [],
+  ): AsyncGenerator<string> {
+    this.assertConfigured();
+    this.assertMessage(userMessage);
+    yield* this.streamReply(systemPrompt, [
+      ...this.trimHistory(history),
+      { role: 'user', content: userMessage },
+    ]);
+  }
+
+  /**
+   * One-shot, non-streaming completion for sibling features that need a full
+   * text reply they parse themselves (e.g. the roadmap planner's JSON).
+   */
+  async complete(
+    systemPrompt: string,
+    userPrompt: string,
+    maxTokens = 1500,
+  ): Promise<string> {
+    this.assertConfigured();
+    return this.callGateway(
+      systemPrompt,
+      [{ role: 'user', content: userPrompt }],
+      maxTokens,
+    );
   }
 
   /**
@@ -708,21 +745,31 @@ export class AiService {
       .join('\n');
   }
 
-  /** Stream a compact "sources" footer listing the distinct cited lessons. */
+  /**
+   * Stream a compact "sources" footer citing the distinct lessons the answer
+   * drew from. Each cited lesson is a deep-link into the player at that exact
+   * lesson — the client renders `[Title](/learn/<courseId>?lesson=<lessonId>)`
+   * as a clickable link.
+   */
   private async *streamSources(
     chunks: RetrievedChunk[],
+    courseId: string,
   ): AsyncGenerator<string> {
     const seen = new Set<string>();
-    const titles: string[] = [];
+    const items: string[] = [];
     for (const c of chunks) {
+      const id = c.lessonId;
       const title = c.lessonTitle?.trim();
-      if (title && !seen.has(title)) {
-        seen.add(title);
-        titles.push(title);
-      }
+      if (!id || !title || seen.has(id)) continue;
+      seen.add(id);
+      items.push(
+        courseId
+          ? `[${title}](/learn/${courseId}?lesson=${id})`
+          : title,
+      );
     }
-    if (!titles.length) return;
-    yield `\n\n📚 Based on: ${titles.join(' · ')}`;
+    if (!items.length) return;
+    yield `\n\n📚 Based on: ${items.join(' · ')}`;
   }
 
   private trimHistory(history: ChatTurn[]): GatewayMessage[] {

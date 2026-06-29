@@ -46,6 +46,10 @@ export class User extends Document {
   @Prop({ default: 0 })
   profileViews!: number;
 
+  // Lifetime count of AI roadmap builds (capped at 3 — never decremented).
+  @Prop({ default: 0 })
+  roadmapGenerationsUsed!: number;
+
   @Prop({
     type: {
       code: { type: String },

@@ -107,29 +107,13 @@ export class CartService {
       throw new ConflictException('You already have access to this content');
     }
 
-    let cart = await this.cartModel.findOne({
-      studentId: new Types.ObjectId(studentId),
-    });
-    if (!cart) {
-      cart = new this.cartModel({
-        studentId: new Types.ObjectId(studentId),
-        items: [],
-      });
-    }
+    const sid = new Types.ObjectId(studentId);
+    const cid = new Types.ObjectId(courseId);
+    const secObjId = sectionId ? new Types.ObjectId(sectionId) : undefined;
 
-    const exists = cart.items.some(
-      (item) =>
-        item.courseId.toString() === courseId &&
-        (item.itemType === PurchaseType.FULL_COURSE ||
-          item.sectionId?.toString() === sectionId),
-    );
-    if (exists) {
-      throw new ConflictException('This item is already in your cart');
-    }
-
+    // Snapshot the price (and validate the section is individually sellable).
     const course = await this.coursesService.findCourseDocument(courseId);
     let priceToSnapshot = course.price;
-
     if (itemType === PurchaseType.SECTION) {
       const section = course.sections.find(
         (s: any) => s._id.toString() === sectionId?.toString(),
@@ -143,14 +127,49 @@ export class CartService {
       priceToSnapshot = section.price;
     }
 
-    cart.items.push({
-      itemType,
-      courseId: new Types.ObjectId(courseId),
-      sectionId: sectionId ? new Types.ObjectId(sectionId) : undefined,
-      price: priceToSnapshot,
-    });
+    // Recognise an equivalent item already in the cart: a full-course purchase
+    // conflicts with anything for that course; a section conflicts with the same
+    // section (or an existing full-course purchase of the same course).
+    const conflictGuard =
+      itemType === PurchaseType.FULL_COURSE
+        ? { courseId: cid }
+        : {
+            courseId: cid,
+            $or: [{ itemType: PurchaseType.FULL_COURSE }, { sectionId: secObjId }],
+          };
 
-    await cart.save();
+    // 1) Ensure the cart row exists. Upsert is atomic, so two concurrent
+    //    "first add" requests can't both insert and trip the unique studentId
+    //    index (the E11000 duplicate-key error).
+    await this.cartModel
+      .updateOne(
+        { studentId: sid },
+        { $setOnInsert: { items: [] } },
+        { upsert: true },
+      )
+      .catch((e) => {
+        // A concurrent request created the cart first — harmless.
+        if ((e as { code?: number }).code !== 11000) throw e;
+      });
+
+    // 2) Push the item only if an equivalent one isn't already present. The
+    //    $elemMatch guard makes re-adding the same item an idempotent no-op
+    //    instead of a duplicate-key crash, and $push is atomic so parallel
+    //    adds of different items don't clobber each other.
+    await this.cartModel.updateOne(
+      { studentId: sid, items: { $not: { $elemMatch: conflictGuard } } },
+      {
+        $push: {
+          items: {
+            itemType,
+            courseId: cid,
+            sectionId: secObjId,
+            price: priceToSnapshot,
+          },
+        },
+      },
+    );
+
     return this.getCart(studentId);
   }
 
