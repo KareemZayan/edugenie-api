@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Enrollment } from './schema/enrollment.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
+import { computeCourseProgress } from '../common/utils/lesson-progress.util';
 import { Course } from '../courses/schema/course.schema';
 import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -171,32 +172,34 @@ export class EnrollmentsService {
       .sort({ createdAt: -1 }) // most recently enrolled first
       .exec();
 
-    return enrollments
-      // Skip enrollments whose course has since been deleted
-      .filter((enrollment) => enrollment.courseId)
-      .map((enrollment) => {
-        const course = enrollment.courseId as unknown as {
-          _id: Types.ObjectId;
-          title: string;
-          thumbnail: string;
-          thumbnailPublicId: string;
-          price: number;
-          level: string;
-        };
-        const enrolledAt = (enrollment as unknown as { createdAt: Date })
-          .createdAt;
+    return (
+      enrollments
+        // Skip enrollments whose course has since been deleted
+        .filter((enrollment) => enrollment.courseId)
+        .map((enrollment) => {
+          const course = enrollment.courseId as unknown as {
+            _id: Types.ObjectId;
+            title: string;
+            thumbnail: string;
+            thumbnailPublicId: string;
+            price: number;
+            level: string;
+          };
+          const enrolledAt = (enrollment as unknown as { createdAt: Date })
+            .createdAt;
 
-        return {
-          courseId: course._id.toString(),
-          title: course.title,
-          thumbnail: course.thumbnail,
-          thumbnailPublicId: course.thumbnailPublicId,
-          price: course.price,
-          level: course.level,
-          progressPercent: enrollment.progressPercentage,
-          enrolledAt: enrolledAt ? enrolledAt.toISOString() : '',
-        };
-      });
+          return {
+            courseId: course._id.toString(),
+            title: course.title,
+            thumbnail: course.thumbnail,
+            thumbnailPublicId: course.thumbnailPublicId,
+            price: course.price,
+            level: course.level,
+            progressPercent: enrollment.progressPercentage,
+            enrolledAt: enrolledAt ? enrolledAt.toISOString() : '',
+          };
+        })
+    );
   }
 
   // 2. Open a specific course: Get the progress to see which videos to unlock
@@ -248,23 +251,23 @@ export class EnrollmentsService {
     // D. Add the lesson to the completed array
     enrollment.completedLessons.push(lessonObjectId);
 
-    // E. Fetch the course to see what the total number of lessons is
+    // E. Fetch the course (with sections) to scope the progress to what the
+    // student owns — same computation as the player's trackProgress path.
     const course = await this.courseModel
       .findById(courseId)
-      .select('totalLessons title')
+      .select('title sections._id sections.lessons._id')
       .exec();
-    if (!course || course.totalLessons === 0) {
+    if (!course || course.sections.length === 0) {
       throw new BadRequestException('Course metadata is broken.');
     }
 
-    // F. Calculate the Math! (Completed / Total) * 100
-    // Capture the OLD percentage before overwriting it — needed to detect the 50% crossing.
+    // F. Scope-aware progress: completed-in-scope / owned-lessons (so a
+    // section-buyer can reach 100%). Capture the OLD % to detect the 50% cross.
     const previousPercentage = enrollment.progressPercentage;
-    const rawPercentage =
-      (enrollment.completedLessons.length / course.totalLessons) * 100;
-
-    // Ensure it never goes above 100%, and round it to a whole number
-    enrollment.progressPercentage = Math.min(Math.round(rawPercentage), 100);
+    enrollment.progressPercentage = computeCourseProgress(
+      course,
+      enrollment,
+    ).percentage;
 
     // Goal Milestone — fires once, the moment progress crosses from below 50% to 50%+
     if (

@@ -17,6 +17,8 @@ import { PaginatedResponse } from '../common/interfaces/paginated-response.inter
 
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Progress } from '../progress/schema/progress.schema';
+import { Quiz } from '../quizzes/schema/quiz.schema';
+import { QuizAttempt } from '../quizzes/schema/quiz-attempt.schema';
 import { PurchaseType } from '../common/enums/purchase-type.enum';
 
 import { NotificationsService } from '../notifications/notifications.service';
@@ -24,6 +26,9 @@ import { NotificationType } from '../notifications/enums/notification-type.enum'
 import { UserRole } from '../common/enums/user-role.enum';
 import { User } from '../users/schema/user.schema';
 import { IndexingService } from '../rag/indexing.service';
+
+/** Platform rule: a section quiz must be passed at this % to unlock the next. */
+const SECTION_UNLOCK_PASS_PERCENT = 80;
 
 @Injectable()
 export class CoursesService {
@@ -35,9 +40,12 @@ export class CoursesService {
     @InjectModel(Progress.name) private readonly progressModel: Model<Progress>,
     @InjectModel(Earning.name) private readonly earningModel: Model<Earning>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(Quiz.name) private readonly quizModel: Model<Quiz>,
+    @InjectModel(QuizAttempt.name)
+    private readonly quizAttemptModel: Model<QuizAttempt>,
     private readonly notificationsService: NotificationsService,
     private readonly indexing: IndexingService,
-  ) { }
+  ) {}
 
   async create(
     dto: CreateCourseDto,
@@ -354,7 +362,20 @@ export class CoursesService {
     return new CourseSerializer(courseObj);
   }
 
-  /** Mutates courseObj.sections[*].isOwned and lessons[*].state for a student. */
+  /**
+   * Mutates each section/lesson with the student's access + progression state.
+   *
+   * Two independent gates combine:
+   *  1. Ownership — the student must have bought the section (or full course).
+   *  2. Progression — within the OWNED sections (in course order), the next one
+   *     only unlocks once the previous owned section's quiz is passed at
+   *     {@link SECTION_UNLOCK_PASS_PERCENT}%. Un-owned sections are skipped, so a
+   *     gap the student hasn't bought never blocks a later section they own.
+   *
+   * Per section we set: `isOwned`, `isUnlocked`, `hasQuiz`, and a `lockReason`
+   * ('not_purchased' | 'locked_progress' | null) plus `requiredSectionId/Title`
+   * so the player can tell the student WHY a section is locked.
+   */
   private async applyStudentAccess(
     courseObj: any,
     studentId?: string,
@@ -379,23 +400,99 @@ export class CoursesService {
       (enrollment?.completedLessons ?? []).map((lid: any) => lid.toString()),
     );
 
-    for (const section of sections) {
-      const owned =
-        ownsFullCourse || ownedSectionIds.has(section._id?.toString());
-      section.isOwned = owned;
+    // Which sections have a usable quiz, and which the student has passed (≥80%).
+    const sectionObjIds = sections
+      .map((s) => s._id)
+      .filter((id): id is Types.ObjectId => !!id);
 
+    // Only an APPROVED quiz with questions can be taken, so only those gate the
+    // next section. A pending/empty quiz falls back to lesson-completion below,
+    // which prevents a section locking with no way through.
+    const quizzes = await this.quizModel
+      .find({ sectionId: { $in: sectionObjIds }, status: 'approved' })
+      .select('_id sectionId questions')
+      .lean();
+    const quizBySection = new Map<string, boolean>(); // sectionId → has questions
+    for (const q of quizzes) {
+      quizBySection.set(
+        String((q as any).sectionId),
+        (((q as any).questions as unknown[]) ?? []).length > 0,
+      );
+    }
+
+    let passedSectionIds = new Set<string>();
+    if (studentId && quizzes.length) {
+      const passed = await this.quizAttemptModel
+        .find({
+          studentId: new Types.ObjectId(studentId),
+          sectionId: { $in: sectionObjIds },
+          status: 'submitted',
+          score: { $gte: SECTION_UNLOCK_PASS_PERCENT },
+        })
+        .select('sectionId')
+        .lean();
+      passedSectionIds = new Set(
+        passed.map((a) => String((a as any).sectionId)),
+      );
+    }
+
+    // Walk sections in course order, chaining the gate over OWNED sections only.
+    let prevOwnedPassed: boolean = true; // first owned section is always unlocked
+    let prevOwnedSectionId: string | null = null;
+    let prevOwnedTitle: string | null = null;
+
+    for (const section of sections) {
+      const sid = section._id?.toString();
+      const owned = ownsFullCourse || ownedSectionIds.has(sid);
+      const hasQuiz = quizBySection.get(sid) ?? false;
       const lessons: any[] = Array.isArray(section.lessons)
         ? section.lessons
         : [];
-      for (const lesson of lessons) {
-        if (!owned) {
-          lesson.state = 'locked';
-        } else if (completedLessonIds.has(lesson._id?.toString())) {
-          lesson.state = 'completed';
-        } else {
-          lesson.state = 'available';
-        }
+
+      section.isOwned = owned;
+      section.hasQuiz = hasQuiz;
+
+      if (!owned) {
+        // Locked by ownership — does not take part in the progression chain.
+        section.isUnlocked = false;
+        section.lockReason = 'not_purchased';
+        section.requiredSectionId = null;
+        section.requiredSectionTitle = null;
+        for (const lesson of lessons) lesson.state = 'locked';
+        continue;
       }
+
+      // Owned: unlocked iff the previous OWNED section's quiz gate is passed.
+      const unlocked: boolean = prevOwnedPassed;
+      section.isUnlocked = unlocked;
+
+      if (unlocked) {
+        section.lockReason = null;
+        section.requiredSectionId = null;
+        section.requiredSectionTitle = null;
+        for (const lesson of lessons) {
+          lesson.state = completedLessonIds.has(lesson._id?.toString())
+            ? 'completed'
+            : 'available';
+        }
+      } else {
+        section.lockReason = 'locked_progress';
+        section.requiredSectionId = prevOwnedSectionId;
+        section.requiredSectionTitle = prevOwnedTitle;
+        for (const lesson of lessons) lesson.state = 'locked';
+      }
+
+      // Has THIS section's gate been cleared (for the next owned section)? A
+      // section with a quiz needs the 80% pass; one without falls back to having
+      // all its lessons completed. You can't clear a section you can't open.
+      const allLessonsDone =
+        lessons.length > 0 &&
+        lessons.every((l) => completedLessonIds.has(l._id?.toString()));
+      const gateCleared = hasQuiz ? passedSectionIds.has(sid) : allLessonsDone;
+
+      prevOwnedPassed = unlocked && gateCleared;
+      prevOwnedSectionId = sid ?? prevOwnedSectionId;
+      prevOwnedTitle = section.title ?? prevOwnedTitle;
     }
   }
 
@@ -638,6 +735,28 @@ export class CoursesService {
       );
     }
 
+    // 4. Validation: every section must have an APPROVED quiz — it gates the
+    // next section, so a pending or empty quiz would leave students stuck.
+    const sectionIds = course.sections.map((s) => s._id);
+    const quizzes = await this.quizModel
+      .find({ sectionId: { $in: sectionIds }, status: 'approved' })
+      .select('sectionId questions')
+      .lean();
+    const sectionsWithQuiz = new Set(
+      quizzes
+        .filter((q) => (((q as any).questions as unknown[]) ?? []).length > 0)
+        .map((q) => String((q as any).sectionId)),
+    );
+    const missing = course.sections.filter(
+      (s) => !sectionsWithQuiz.has(String(s._id)),
+    );
+    if (missing.length > 0) {
+      const names = missing.map((s) => `"${s.title}"`).join(', ');
+      throw new BadRequestException(
+        `Every section needs an approved quiz before publishing. Add and approve a quiz for: ${names}.`,
+      );
+    }
+
     // Pass: Change Status
     course.courseStatus = CourseStatus.UNDER_REVIEW;
     await course.save();
@@ -657,7 +776,7 @@ export class CoursesService {
       await Promise.all(
         admins.map((admin) =>
           this.notificationsService.create(
-            admin._id as Types.ObjectId,
+            admin._id,
             'New Course Submitted',
             `Instructor submitted course: ${course.title} for review`,
             NotificationType.COURSE_SUBMITTED_FOR_REVIEW,
@@ -700,18 +819,18 @@ export class CoursesService {
         createdAt: c.createdAt,
         category: c.categoryId
           ? {
-            _id: c.categoryId._id?.toString() || c.categoryId.toString(),
-            name: c.categoryId.name,
-          }
+              _id: c.categoryId._id?.toString() || c.categoryId.toString(),
+              name: c.categoryId.name,
+            }
           : null,
         instructor: c.instructorId
           ? {
-            _id: c.instructorId._id?.toString() || c.instructorId.toString(),
-            firstName: c.instructorId.firstName,
-            lastName: c.instructorId.lastName,
-            avatar: c.instructorId.avatar,
-            email: c.instructorId.email,
-          }
+              _id: c.instructorId._id?.toString() || c.instructorId.toString(),
+              firstName: c.instructorId.firstName,
+              lastName: c.instructorId.lastName,
+              avatar: c.instructorId.avatar,
+              email: c.instructorId.email,
+            }
           : null,
       };
     });

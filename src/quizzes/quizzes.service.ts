@@ -20,6 +20,7 @@ import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.
 import { ProgressService } from '../progress/progress.service';
 import { QuizSerializer } from './serializers/quiz.serializer';
 import { AiService } from '../ai/ai.service';
+import { RemediationService } from '../ai/remediation.service';
 import {
   QuizForStudentResponse,
   QuizStartResponse,
@@ -37,9 +38,11 @@ export class QuizzesService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private enrollmentsService: EnrollmentsService,
-    @Inject(forwardRef(() => ProgressService)) private progressService: ProgressService,
+    @Inject(forwardRef(() => ProgressService))
+    private progressService: ProgressService,
     private aiService: AiService,
-  ) { }
+    private remediationService: RemediationService,
+  ) {}
 
   async saveQuizConfig(dto: CreateQuizDto) {
     // Pull the section's lessons up front so a missing/foreign section fails
@@ -52,6 +55,8 @@ export class QuizzesService {
       numberOfQuestions: dto.numberOfQuestions,
       questionType: dto.questionType,
       generationStatus: QuizGenerationStatus.GENERATING,
+      // Platform rule: section quizzes pass at 80% (drives section unlocking).
+      passingScore: 80,
       questions: [],
     });
 
@@ -79,7 +84,9 @@ export class QuizzesService {
 
     return {
       message: `AI generated ${quiz.questions.length} questions. Review and approve them to publish the quiz.`,
-      quiz: new QuizSerializer(quiz.toObject() as unknown as Partial<QuizSerializer>),
+      quiz: new QuizSerializer(
+        quiz.toObject() as unknown as Partial<QuizSerializer>,
+      ),
     };
   }
 
@@ -109,7 +116,9 @@ export class QuizzesService {
       }>()
       .exec();
 
-    const section = course?.sections.find((s) => s._id.toString() === sectionId);
+    const section = course?.sections.find(
+      (s) => s._id.toString() === sectionId,
+    );
     if (!section) {
       throw new NotFoundException('Section not found');
     }
@@ -124,8 +133,14 @@ export class QuizzesService {
     };
   }
 
-  async getQuizForStudent(sectionId: string, studentId: string): Promise<QuizForStudentResponse> {
-    const hasAccess = await this.enrollmentsService.canAccessSection(studentId, sectionId);
+  async getQuizForStudent(
+    sectionId: string,
+    studentId: string,
+  ): Promise<QuizForStudentResponse> {
+    const hasAccess = await this.enrollmentsService.canAccessSection(
+      studentId,
+      sectionId,
+    );
     if (!hasAccess) {
       throw new ForbiddenException(
         'You must purchase this section to access its quiz',
@@ -170,11 +185,13 @@ export class QuizzesService {
       const qObj = q as unknown as {
         _id?: Types.ObjectId;
         questionText: string;
+        type: string;
         options: string[];
       };
       return {
         questionId: qObj._id ? qObj._id.toString() : index.toString(),
         text: qObj.questionText,
+        type: qObj.type,
         options: qObj.options.map((opt: string) => ({
           optionId: opt, // using text as optionId for simplicity, or we could index
           text: opt,
@@ -189,6 +206,7 @@ export class QuizzesService {
       attemptNumber: attemptCount + 1,
       maxAttempts: quiz.maxAttempts,
       attemptsRemaining: quiz.maxAttempts - attemptCount,
+      questionType: quiz.questionType,
       questions,
     };
   }
@@ -405,6 +423,9 @@ export class QuizzesService {
       );
       nextSectionUnlocked = progressResult.nextSectionUnlocked;
 
+      // Clear any active recovery plan for this section — they're past it now.
+      void this.remediationService.resolveOnPass(studentId, sectionId);
+
       // Check if course completed
       const sectionObj = await this.courseModel
         .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
@@ -450,6 +471,18 @@ export class QuizzesService {
 
     const remainingAttempts = Math.max(0, quiz.maxAttempts - totalAttempts);
     const progressReset = !passed && remainingAttempts === 0;
+
+    // Out of attempts on this section → generate a targeted recovery plan from
+    // the wrong answers. Fire-and-forget: the service never throws, so it can't
+    // break submission.
+    if (progressReset) {
+      void this.remediationService.generate({
+        userId: studentId,
+        sectionId,
+        quizId: String(quiz._id),
+        attemptId: String(attempt._id),
+      });
+    }
 
     return {
       passed,

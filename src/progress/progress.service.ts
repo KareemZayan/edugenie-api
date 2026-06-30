@@ -1,11 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-  BadRequestException,
-  Inject,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Progress } from './schema/progress.schema';
@@ -14,10 +7,10 @@ import { Quiz } from '../quizzes/schema/quiz.schema';
 import { QuizAttempt } from '../quizzes/schema/quiz-attempt.schema';
 import { TrackProgressDto } from './dto/track-progress.dto';
 import { ProgressResponse } from './interfaces/progress-response.interface';
-import { progressStateEnum } from '../common/enums/progress.enum';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
+import { computeCourseProgress } from '../common/utils/lesson-progress.util';
 
 @Injectable()
 export class ProgressService {
@@ -79,10 +72,67 @@ export class ProgressService {
       { upsert: true, new: true },
     );
 
-    await this.enrollmentModel.updateOne(
-      { studentId: new Types.ObjectId(studentId), courseId: course._id },
-      { $set: { lastActivityAt: new Date() } },
-    );
+    // Persist completion onto the enrollment so it survives reloads and feeds
+    // the player lock state, the "x/y done" counts, the coach, and "my courses".
+    // Progress is scoped to what the student OWNS (their sections, or the whole
+    // course) so a section-buyer can actually reach 100%.
+    const enrollment = await this.enrollmentModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+      courseId: course._id,
+    });
+
+    let courseProgress = 0;
+    let completedInScope = 0;
+    let scopeTotal = 0;
+
+    if (enrollment) {
+      enrollment.lastActivityAt = new Date();
+
+      if (isCompleted) {
+        const already = enrollment.completedLessons.some(
+          (id) => id.toString() === lessonId,
+        );
+        if (!already) enrollment.completedLessons.push(lessonObjectId);
+      }
+
+      const progress = computeCourseProgress(course, enrollment);
+      scopeTotal = progress.total;
+      completedInScope = progress.completed;
+      courseProgress = progress.percentage;
+
+      const previousPercentage = enrollment.progressPercentage;
+      enrollment.progressPercentage = courseProgress;
+
+      // 50% milestone — fires once when crossing the halfway mark.
+      if (
+        previousPercentage < 50 &&
+        courseProgress >= 50 &&
+        !enrollment.milestone50Notified
+      ) {
+        enrollment.milestone50Notified = true;
+        await this.notificationsService.create(
+          studentId,
+          "You're halfway there!",
+          `You're 50% done with "${course.title}", keep it up!`,
+          NotificationType.GOAL_MILESTONE,
+          course._id.toString(),
+        );
+      }
+
+      // 100% — graduation. Guard on the flag so the certificate fires only once.
+      if (courseProgress === 100 && !enrollment.isCourseCompleted) {
+        enrollment.isCourseCompleted = true;
+        await this.notificationsService.create(
+          studentId,
+          'Certificate Earned!',
+          `You have earned a certificate for completing "${course.title}".`,
+          NotificationType.CERTIFICATE_EARNED,
+          course._id.toString(),
+        );
+      }
+
+      await enrollment.save();
+    }
 
     let nextLessonUnlocked = false;
     let nextLesson = null;
@@ -157,12 +207,15 @@ export class ProgressService {
     }
 
     return {
-      lessonState: updatedProgress.lessonState as progressStateEnum,
+      lessonState: updatedProgress.lessonState,
       nextLessonUnlocked,
       nextLesson,
       sectionCompleted,
       quizRequired,
       quizSectionId,
+      courseProgress,
+      completedLessons: completedInScope,
+      totalLessons: scopeTotal,
     };
   }
 

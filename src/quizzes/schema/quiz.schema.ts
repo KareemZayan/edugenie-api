@@ -37,7 +37,9 @@ export class Quiz {
   status: string;
   @Prop({ required: true, default: 600 })
   timeLimit: number;
-  @Prop({ required: true, min: 0, max: 100, default: 70 })
+  // Platform rule: passing a section quiz requires 80%, and that pass is what
+  // unlocks the next section (see CoursesService.applyStudentAccess).
+  @Prop({ required: true, min: 0, max: 100, default: 80 })
   passingScore: number;
   @Prop({ required: true, default: 3 })
   maxAttempts: number;

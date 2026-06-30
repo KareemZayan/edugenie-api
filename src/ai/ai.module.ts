@@ -14,6 +14,17 @@ import {
 import { RoadmapController } from './roadmap.controller';
 import { RoadmapService } from './roadmap.service';
 import { Roadmap, RoadmapSchema } from './schema/roadmap.schema';
+import { RemediationController } from './remediation.controller';
+import { RemediationService } from './remediation.service';
+import {
+  RemediationPlan,
+  RemediationPlanSchema,
+} from './schema/remediation-plan.schema';
+import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
+import {
+  Notification,
+  NotificationSchema,
+} from '../notifications/schema/notification.schema';
 // AiGateway (WebSocket streaming) is intentionally NOT registered: the AI tutor
 // runs over plain HTTP (see AiController) so the whole API can run on serverless
 // (Vercel) without an always-on WebSocket server. The gateway file is kept for
@@ -41,6 +52,9 @@ import { RagModule } from '../rag/rag.module';
       { name: QuizAttempt.name, schema: QuizAttemptSchema },
       { name: PracticeQuiz.name, schema: PracticeQuizSchema },
       { name: Roadmap.name, schema: RoadmapSchema },
+      { name: RemediationPlan.name, schema: RemediationPlanSchema },
+      { name: Quiz.name, schema: QuizSchema },
+      { name: Notification.name, schema: NotificationSchema },
     ]),
     EnrollmentsModule,
     // RAG retrieval for grounded, cited tutor answers (Phase 2).
@@ -55,8 +69,19 @@ import { RagModule } from '../rag/rag.module';
       }),
     }),
   ],
-  controllers: [AiController, PracticeController, RoadmapController],
-  providers: [AiService, CoachService, PracticeService, RoadmapService],
-  exports: [AiService],
+  controllers: [
+    AiController,
+    PracticeController,
+    RoadmapController,
+    RemediationController,
+  ],
+  providers: [
+    AiService,
+    CoachService,
+    PracticeService,
+    RoadmapService,
+    RemediationService,
+  ],
+  exports: [AiService, RemediationService],
 })
 export class AiModule {}
