@@ -15,7 +15,6 @@ import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
-  ApiResponse as SwaggerApiResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
@@ -25,7 +24,6 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { AttachmentsService } from './attachments.service';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
 import { UpdateAttachmentDto } from './dto/update-attachment.dto';
-import { AttachmentParentType } from './schema/attachment.schema';
 import { AttachmentSerializer } from './serializers/attachments.serializer';
 
 interface RequestWithUser {
@@ -43,24 +41,6 @@ export class AttachmentsController {
 
   // ── Instructor: create ──────────────────────────────────────────────
 
-  @Post('courses/:courseId/attachments')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.INSTRUCTOR)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Add a course-level attachment' })
-  async addCourseAttachment(
-    @Param('courseId') courseId: string,
-    @Req() req: RequestWithUser,
-    @Body() dto: CreateAttachmentDto,
-  ): Promise<AttachmentSerializer> {
-    return this.attachmentsService.create(
-      AttachmentParentType.COURSE,
-      courseId,
-      req.user.userId,
-      dto,
-    );
-  }
-
   @Post('courses/:courseId/sections/:sectionId/attachments')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
@@ -73,53 +53,14 @@ export class AttachmentsController {
     @Body() dto: CreateAttachmentDto,
   ): Promise<AttachmentSerializer> {
     return this.attachmentsService.create(
-      AttachmentParentType.SECTION,
       courseId,
+      sectionId,
       req.user.userId,
       dto,
-      sectionId,
-    );
-  }
-
-  @Post('courses/:courseId/sections/:sectionId/lessons/:lessonId/attachments')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.INSTRUCTOR)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Add a lesson-level attachment' })
-  async addLessonAttachment(
-    @Param('courseId') courseId: string,
-    @Param('sectionId') sectionId: string,
-    @Param('lessonId') lessonId: string,
-    @Req() req: RequestWithUser,
-    @Body() dto: CreateAttachmentDto,
-  ): Promise<AttachmentSerializer> {
-    return this.attachmentsService.create(
-      AttachmentParentType.LESSON,
-      courseId,
-      req.user.userId,
-      dto,
-      sectionId,
-      lessonId,
     );
   }
 
   // ── Instructor: read own attachments (course builder view) ─────────
-
-  @Get('courses/:courseId/attachments/manage')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.INSTRUCTOR)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'List course-level attachments (instructor view)' })
-  async listCourseAttachmentsForInstructor(
-    @Param('courseId') courseId: string,
-    @Req() req: RequestWithUser,
-  ): Promise<AttachmentSerializer[]> {
-    return this.attachmentsService.findByParentForInstructor(
-      AttachmentParentType.COURSE,
-      courseId,
-      req.user.userId,
-    );
-  }
 
   @Get('courses/:courseId/sections/:sectionId/attachments/manage')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -132,51 +73,13 @@ export class AttachmentsController {
     @Req() req: RequestWithUser,
   ): Promise<AttachmentSerializer[]> {
     return this.attachmentsService.findByParentForInstructor(
-      AttachmentParentType.SECTION,
       courseId,
       req.user.userId,
       sectionId,
-    );
-  }
-
-  @Get('courses/:courseId/sections/:sectionId/lessons/:lessonId/attachments/manage')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.INSTRUCTOR)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'List lesson-level attachments (instructor view)' })
-  async listLessonAttachmentsForInstructor(
-    @Param('courseId') courseId: string,
-    @Param('sectionId') sectionId: string,
-    @Param('lessonId') lessonId: string,
-    @Req() req: RequestWithUser,
-  ): Promise<AttachmentSerializer[]> {
-    return this.attachmentsService.findByParentForInstructor(
-      AttachmentParentType.LESSON,
-      courseId,
-      req.user.userId,
-      sectionId,
-      lessonId,
     );
   }
 
   // ── Public / student: read ──────────────────────────────────────────
-
-  @Get('courses/:courseId/attachments')
-  @UseGuards(OptionalJwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'List course-level attachments (public or enrolled)' })
-  async listCourseAttachments(
-    @Param('courseId') courseId: string,
-    @Req() req: RequestWithOptionalUser,
-  ): Promise<AttachmentSerializer[]> {
-    return this.attachmentsService.findByParent(
-      AttachmentParentType.COURSE,
-      courseId,
-      undefined,
-      undefined,
-      req.user,
-    );
-  }
 
   @Get('courses/:courseId/sections/:sectionId/attachments')
   @UseGuards(OptionalJwtAuthGuard)
@@ -188,29 +91,8 @@ export class AttachmentsController {
     @Req() req: RequestWithOptionalUser,
   ): Promise<AttachmentSerializer[]> {
     return this.attachmentsService.findByParent(
-      AttachmentParentType.SECTION,
       courseId,
       sectionId,
-      undefined,
-      req.user,
-    );
-  }
-
-  @Get('courses/:courseId/sections/:sectionId/lessons/:lessonId/attachments')
-  @UseGuards(OptionalJwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'List lesson-level attachments (enrolled students only)' })
-  async listLessonAttachments(
-    @Param('courseId') courseId: string,
-    @Param('sectionId') sectionId: string,
-    @Param('lessonId') lessonId: string,
-    @Req() req: RequestWithOptionalUser,
-  ): Promise<AttachmentSerializer[]> {
-    return this.attachmentsService.findByParent(
-      AttachmentParentType.LESSON,
-      courseId,
-      sectionId,
-      lessonId,
       req.user,
     );
   }

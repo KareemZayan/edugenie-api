@@ -25,11 +25,6 @@ export class Section {
   @Prop({ type: [LessonSchema], default: [] })
   lessons!: Types.DocumentArray<Lesson>;
 
-  @Prop({ type: String, default: null })
-  previewVideoUrl!: string | null;
-
-  @Prop({ type: String, default: null })
-  previewVideoPublicId!: string | null;
 }
 
 export const SectionSchema = SchemaFactory.createForClass(Section);

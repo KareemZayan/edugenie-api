@@ -3,23 +3,9 @@ import { HydratedDocument, Types } from 'mongoose';
 
 export type AttachmentDocument = HydratedDocument<Attachment>;
 
-export enum AttachmentParentType {
-    COURSE = 'course',
-    SECTION = 'section',
-    LESSON = 'lesson',
-}
-
 @Schema({ timestamps: true })
 export class Attachment {
-    @Prop({
-        type: String,
-        enum: AttachmentParentType,
-        required: true,
-        index: true,
-    })
-    parentType!: AttachmentParentType;
-
-    // Always set — used for ownership checks and cascading delete on course removal.
+    // Kept for ownership checks and cascading delete when a course is removed.
     @Prop({
         type: Types.ObjectId,
         ref: 'Course',
@@ -28,21 +14,12 @@ export class Attachment {
     })
     courseId!: Types.ObjectId;
 
-    // Set when parentType is 'section' or 'lesson'.
     @Prop({
         type: Types.ObjectId,
-        default: null,
+        required: true,
         index: true,
     })
-    sectionId?: Types.ObjectId | null;
-
-    // Set only when parentType is 'lesson'.
-    @Prop({
-        type: Types.ObjectId,
-        default: null,
-        index: true,
-    })
-    lessonId?: Types.ObjectId | null;
+    sectionId!: Types.ObjectId;
 
     // Denormalized so attachment ownership can be checked without a join,
     // mirroring the instructorId-in-filter pattern used everywhere else.
@@ -83,5 +60,5 @@ export class Attachment {
 
 export const AttachmentSchema = SchemaFactory.createForClass(Attachment);
 
-// Used by AttachmentsService to enforce the 5-per-parent cap quickly.
-AttachmentSchema.index({ parentType: 1, courseId: 1, sectionId: 1, lessonId: 1 });
+// Used by AttachmentsService to enforce the 5-per-section cap quickly.
+AttachmentSchema.index({ courseId: 1, sectionId: 1 });

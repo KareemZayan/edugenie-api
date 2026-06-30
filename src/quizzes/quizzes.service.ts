@@ -689,5 +689,4 @@ export class QuizzesService {
   };
 }
 
-
 }
