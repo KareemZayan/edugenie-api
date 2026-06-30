@@ -363,6 +363,8 @@ export interface QuizOption {
 export interface QuizQuestionForStudent {
   questionId: string;
   text: string;
+  /** Per-question type: SINGLE_CHOICE | MULTI_CHOICE | TRUE_FALSE (drives UI). */
+  type: string;
   options: QuizOption[];
 }
 
@@ -373,6 +375,8 @@ export interface QuizForStudentResponse {
   attemptNumber: number;
   maxAttempts: number;
   attemptsRemaining: number;
+  /** Quiz-level type, drives single (radio) vs multi (checkbox) UI. */
+  questionType: string;
   questions: QuizQuestionForStudent[];
 }
 

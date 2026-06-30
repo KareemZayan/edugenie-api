@@ -10,6 +10,11 @@ import { Course, CourseSchema } from './schema/course.schema';
 import { Earning, EarningSchema } from '../orders/schema/earning.schema';
 import { Category, CategorySchema } from '../categories/schema/category.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
+import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';
+import {
+  QuizAttempt,
+  QuizAttemptSchema,
+} from '../quizzes/schema/quiz-attempt.schema';
 import { ProgressModule } from '../progress/progress.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -23,6 +28,8 @@ import { RagModule } from '../rag/rag.module';
       { name: Category.name, schema: CategorySchema },
       { name: Earning.name, schema: EarningSchema },
       { name: User.name, schema: UserSchema },
+      { name: Quiz.name, schema: QuizSchema },
+      { name: QuizAttempt.name, schema: QuizAttemptSchema },
     ]),
     CacheModule.register({
       ttl: 60000, // cache for 1 minute
