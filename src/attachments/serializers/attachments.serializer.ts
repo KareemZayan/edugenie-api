@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Exclude, Expose } from 'class-transformer';
-import { AttachmentParentType } from '../schema/attachment.schema';
 
 export class AttachmentSerializer {
   @Expose()
@@ -8,20 +7,12 @@ export class AttachmentSerializer {
   id: string;
 
   @Expose()
-  @ApiProperty({ enum: AttachmentParentType, example: AttachmentParentType.LESSON })
-  parentType: AttachmentParentType;
-
-  @Expose()
   @ApiProperty({ example: '507f1f77bcf86cd799439011' })
   courseId: string;
 
   @Expose()
-  @ApiProperty({ required: false, example: '507f1f77bcf86cd799439011' })
-  sectionId?: string | null;
-
-  @Expose()
-  @ApiProperty({ required: false, example: '507f1f77bcf86cd799439011' })
-  lessonId?: string | null;
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  sectionId: string;
 
   @Expose()
   @ApiProperty({ example: 'Course Syllabus' })
@@ -66,10 +57,6 @@ export class AttachmentSerializer {
   @ApiProperty({ required: false, example: 1 })
   __v?: number;
 
-  // Typed `any` rather than Partial<AttachmentSerializer> because callers
-  // pass raw Mongoose .toObject() output, where courseId/sectionId/lessonId
-  // are still ObjectId instances, not the post-conversion strings this class
-  // declares — same convention as LessonSerializer/SectionSerializer's `_id`.
   constructor(partial: any) {
     Object.assign(this, partial);
     if (partial?._id) {
@@ -78,6 +65,5 @@ export class AttachmentSerializer {
     }
     if (this.courseId) this.courseId = this.courseId.toString();
     if (this.sectionId) this.sectionId = this.sectionId.toString();
-    if (this.lessonId) this.lessonId = this.lessonId.toString();
   }
 }
