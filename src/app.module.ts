@@ -61,8 +61,10 @@ import { AttachmentsModule } from './attachments/attachments.module';
         PAYMOB_SECRET_KEY: Joi.string().optional(),
         PAYMOB_HMAC_SECRET: Joi.string().optional(),
         PAYMOB_INTEGRATION_ID: Joi.string().optional(),
-        // Transactional email (Resend) — used by the admin-invite flow.
-        RESEND_API_KEY: Joi.string().optional(),
+        // Transactional email (Brevo) — admin invites, email verification,
+        // password reset, and notification emails. Optional: without the key,
+        // mail degrades gracefully (logs instead of sending, never throws).
+        BREVO_API_KEY: Joi.string().optional(),
         MAIL_FROM: Joi.string().default('EduGenie <noreply@edugenie.app>'),
         // Front-end origins used for invite/redirect links and CORS.
         DASHBOARD_URL: Joi.string().default('http://localhost:4200'),
@@ -119,7 +121,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     ReportsModule,
     AdminModule,
     SuperAdminModule,
-    AttachmentsModule
+    AttachmentsModule,
   ],
 
   controllers: [AppController],
@@ -132,4 +134,4 @@ import { AttachmentsModule } from './attachments/attachments.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

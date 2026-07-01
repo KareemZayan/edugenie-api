@@ -63,6 +63,78 @@ export class UsersService {
     return count > 0;
   }
 
+  // ── Email verification / password reset tokens (Phase 4) ──────────────────
+  // Callers store the sha256 HASH of the raw token; the raw token is emailed.
+
+  /** Stores an email-verification token hash + expiry on a user. */
+  async setEmailVerificationCode(
+    email: string,
+    hashedCode: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.userModel
+      .updateOne(
+        { email: email.toLowerCase() },
+        { $set: { emailVerification: { code: hashedCode, expiresAt } } },
+      )
+      .exec();
+  }
+
+  /**
+   * Consumes a verification token: marks the user verified and clears the
+   * token. Returns the user, or null if the token is unknown/expired.
+   */
+  async consumeEmailVerification(hashedCode: string): Promise<User | null> {
+    return this.userModel
+      .findOneAndUpdate(
+        {
+          'emailVerification.code': hashedCode,
+          'emailVerification.expiresAt': { $gt: new Date() },
+        },
+        { $set: { isVerified: true }, $unset: { emailVerification: '' } },
+        { new: true },
+      )
+      .exec();
+  }
+
+  /**
+   * Sets a password-reset token hash + expiry for the account with this email.
+   * Returns the user (for name/role) or null when no such account exists.
+   */
+  async setPasswordResetCode(
+    email: string,
+    hashedCode: string,
+    expiresAt: Date,
+  ): Promise<User | null> {
+    return this.userModel
+      .findOneAndUpdate(
+        { email: email.toLowerCase() },
+        { $set: { passwordReset: { code: hashedCode, expiresAt } } },
+        { new: true },
+      )
+      .exec();
+  }
+
+  /**
+   * Consumes a password-reset token: sets the new password hash and clears the
+   * token. Returns the user, or null if the token is unknown/expired.
+   */
+  async consumePasswordReset(
+    hashedCode: string,
+    newPasswordHash: string,
+  ): Promise<User | null> {
+    return this.userModel
+      .findOneAndUpdate(
+        {
+          'passwordReset.code': hashedCode,
+          'passwordReset.expiresAt': { $gt: new Date() },
+        },
+        { $set: { password: newPasswordHash }, $unset: { passwordReset: '' } },
+        { new: true },
+      )
+      .exec();
+  }
+
   /**
    * Creates a privileged (admin) account from an accepted superadmin invite.
    * This deliberately bypasses the public CreateUserDto role restriction and is
@@ -76,7 +148,9 @@ export class UsersService {
     role: UserRole;
     passwordHash: string;
   }): Promise<User> {
-    const existingUser = await this.userModel.findOne({ email: data.email.toLowerCase() });
+    const existingUser = await this.userModel.findOne({
+      email: data.email.toLowerCase(),
+    });
     if (existingUser) {
       throw new ConflictException('Email already in use');
     }
@@ -113,7 +187,9 @@ export class UsersService {
 
     // Existing password account with the same email → link it. We keep its
     // existing role (a Google sign-in never changes an established account).
-    const byEmail = await this.userModel.findOne({ email: data.email.toLowerCase() });
+    const byEmail = await this.userModel.findOne({
+      email: data.email.toLowerCase(),
+    });
     if (byEmail) {
       if (!byEmail.googleId) {
         byEmail.googleId = data.googleId;
@@ -126,7 +202,9 @@ export class UsersService {
     // New account: honor the chosen role, but only student/instructor are ever
     // allowed via Google (privileged roles exist only through invites).
     const role =
-      data.role === UserRole.INSTRUCTOR ? UserRole.INSTRUCTOR : UserRole.STUDENT;
+      data.role === UserRole.INSTRUCTOR
+        ? UserRole.INSTRUCTOR
+        : UserRole.STUDENT;
 
     // Random password — Google accounts authenticate through OAuth, not a
     // password. They can later set one via the forgot-password flow if needed.
