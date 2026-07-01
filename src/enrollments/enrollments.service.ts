@@ -187,6 +187,8 @@ export class EnrollmentsService {
           };
           const enrolledAt = (enrollment as unknown as { createdAt: Date })
             .createdAt;
+          const accessType: 'full' | 'section' =
+            enrollment.type === PurchaseType.FULL_COURSE ? 'full' : 'section';
 
           return {
             courseId: course._id.toString(),
@@ -197,6 +199,10 @@ export class EnrollmentsService {
             level: course.level,
             progressPercent: enrollment.progressPercentage,
             enrolledAt: enrolledAt ? enrolledAt.toISOString() : '',
+            accessType,
+            ownedSectionCount:
+              accessType === 'section' ? (enrollment.sectionIds?.length ?? 0) : 0,
+            isCompleted: Boolean(enrollment.isCourseCompleted),
           };
         })
     );

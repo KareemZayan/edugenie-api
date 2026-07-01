@@ -89,14 +89,15 @@ export class AuthController {
         req.user as GoogleUser,
       );
 
-      // Route each role to its own app: instructors land on the dashboard
-      // profile, students on the student auth-callback. The page reads the
-      // ?token= and exchanges it for a session. An explicit
-      // GOOGLE_SUCCESS_REDIRECT overrides this for every role.
+      // Route each role to its own app's auth-callback page: instructors to the
+      // dashboard, students to the student app. That page reads the ?token= and
+      // exchanges it for a session (POST /auth/verify-exchange-token), then
+      // routes on to the role's home. An explicit GOOGLE_SUCCESS_REDIRECT
+      // overrides this for every role.
       const successRedirect =
         this.configService.get<string>('GOOGLE_SUCCESS_REDIRECT') ||
         (user.role === UserRole.INSTRUCTOR
-          ? `${dashboardApp}/profile`
+          ? `${dashboardApp}/auth-callback`
           : `${studentApp}/auth-callback`);
 
       res.redirect(
@@ -180,10 +181,8 @@ export class AuthController {
     @Body('token') token: string,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
-    console.log('verify-exchange-token called with token:', token);
     const { token: jwtToken, user: userData } =
       await this.authService.verifyExchangeToken(token);
-    console.log('jwtToken to be set in cookie:', jwtToken);
 
     response.cookie('jwt', jwtToken, {
       httpOnly: true,
