@@ -21,8 +21,8 @@ export class User extends Document {
 
   // Set when the account is linked to a Google identity (OAuth sign-in). Sparse
   // so non-Google accounts (null) don't collide on the unique index.
-  @Prop({ type: String, default: null, unique: true, sparse: true })
-  googleId?: string | null;
+  @Prop({ type: String, unique: true, sparse: true })
+  googleId?: string;
 
   @Prop({ type: String, required: true, enum: UserRole })
   role!: UserRole;
