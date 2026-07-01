@@ -15,10 +15,12 @@ import {
   EnrollmentSchema,
 } from '../enrollments/schema/enrollment.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
+import { User, UserSchema } from '../users/schema/user.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { ProgressModule } from '../progress/progress.module';
 import { AiModule } from '../ai/ai.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -28,10 +30,12 @@ import { AiModule } from '../ai/ai.module';
       { name: Notification.name, schema: NotificationSchema },
       { name: Enrollment.name, schema: EnrollmentSchema },
       { name: Course.name, schema: CourseSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     EnrollmentsModule,
     forwardRef(() => ProgressModule),
     AiModule,
+    NotificationsModule,
   ],
   controllers: [
     QuizzesController,

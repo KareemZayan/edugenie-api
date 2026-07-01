@@ -12,6 +12,7 @@ import { User, UserSchema } from '../users/schema/user.schema';
 import { CartModule } from '../cart/cart.module';
 import { PaymobModule } from '../paymob/paymob.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { QuizzesModule } from '../quizzes/quizzes.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     CartModule,
     PaymobModule,
     NotificationsModule,
+    QuizzesModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

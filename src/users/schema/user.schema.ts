@@ -55,6 +55,13 @@ export class User extends Document {
   @Prop({ default: 0 })
   roadmapGenerationsUsed!: number;
 
+  // Track instructor quiz generations (for rate limiting)
+  @Prop({ default: 0 })
+  quizGenerationsUsed!: number;
+
+  @Prop({ type: Date, default: null })
+  lastQuizGenerationAt?: Date | null;
+
   @Prop({
     type: {
       code: { type: String },

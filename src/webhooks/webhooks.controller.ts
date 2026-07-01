@@ -31,6 +31,7 @@ import { EarningStatus } from '../common/enums/earning-status.enum';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { STUDENT_MILESTONES } from '../common/constants/milestones.constant';
+import { QuizzesService } from '../quizzes/quizzes.service';
 
 @SkipThrottle()
 @Controller('webhooks')
@@ -40,6 +41,7 @@ export class WebhooksController {
     private readonly paymobService: PaymobService,
     private readonly notificationsService: NotificationsService,
     private readonly cartService: CartService,
+    private readonly quizzesService: QuizzesService,
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Enrollment.name)
     private readonly enrollmentModel: Model<Enrollment>,
@@ -226,6 +228,39 @@ export class WebhooksController {
         }
 
         await enrollment.save({ session });
+
+        // Fire-and-forget: Check if quiz generation is now available for this section(s)
+        // This must NOT block or roll back the enrollment
+        try {
+          const courseForQuiz = await this.courseModel
+            .findById(item.courseId)
+            .select('instructorId sections')
+            .lean()
+            .exec();
+          
+          if (courseForQuiz?.instructorId) {
+            if (item.itemType === PurchaseType.FULL_COURSE) {
+              // Full course: check all sections
+              for (const section of courseForQuiz.sections) {
+                await this.quizzesService.checkAndNotifyQuizGenerationAvailable(
+                  item.courseId.toString(),
+                  section._id.toString(),
+                  courseForQuiz.instructorId.toString(),
+                );
+              }
+            } else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
+              // Section purchase: check only that section
+              await this.quizzesService.checkAndNotifyQuizGenerationAvailable(
+                item.courseId.toString(),
+                item.sectionId.toString(),
+                courseForQuiz.instructorId.toString(),
+              );
+            }
+          }
+        } catch (quizCheckError) {
+          console.error('[WEBHOOK] Quiz generation check failed:', quizCheckError);
+          // Do not throw - enrollment is already saved
+        }
 
         // Earnings (80% split to instructor)
         const course = await this.courseModel

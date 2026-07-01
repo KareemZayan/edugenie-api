@@ -37,7 +37,8 @@ export class QuizzesController {
   @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
   async generateQuizConfig(
     @Body() dto: CreateQuizDto,
+    @CurrentUser() user: { userId: string },
   ): Promise<{ message: string; quiz: QuizSerializer }> {
-    return this.quizzesService.saveQuizConfig(dto);
+    return this.quizzesService.saveQuizConfig(dto, user.userId);
   }
 }
