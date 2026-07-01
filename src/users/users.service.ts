@@ -156,12 +156,12 @@ export class UsersService {
    */
   async findAuthContextById(
     userId: string,
-  ): Promise<{ role: UserRole; status: UserStatus } | null> {
+  ): Promise<{ role: UserRole; status: UserStatus; isDeleted?: boolean } | null> {
     if (!Types.ObjectId.isValid(userId)) return null;
     const user = await this.userModel
       .findById(userId)
-      .select('role status')
-      .lean<{ role: UserRole; status: UserStatus }>()
+      .select('role status isDeleted')
+      .lean<{ role: UserRole; status: UserStatus; isDeleted?: boolean }>()
       .exec();
     return user ?? null;
   }
