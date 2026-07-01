@@ -94,7 +94,7 @@ export class AuthService {
     const user = await this.usersService.findOrCreateGoogleUser(googleUser);
 
     // SECURITY: deactivated/suspended accounts must not be able to log in.
-    if (user.status !== UserStatus.ACTIVE) {
+    if (user.status !== UserStatus.ACTIVE || user.isDeleted) {
       throw new ForbiddenException(
         'This account has been deactivated. Please contact support.',
       );
@@ -148,6 +148,10 @@ export class AuthService {
     const user = await this.usersService.findByEmail(loginDto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.isDeleted) {
+      throw new ForbiddenException('This account has been deactivated.');
     }
 
     const isPasswordValid = await bcrypt.compare(

@@ -351,7 +351,7 @@ export class SuperAdminService {
 
   async getAdmins(): Promise<AdminListItem[]> {
     // Only fetch ADMIN role, not SUPERADMIN
-    const admins = await this.userModel.find({ role: UserRole.ADMIN }).exec();
+    const admins = await this.userModel.find({ role: UserRole.ADMIN, isDeleted: { $ne: true } }).exec();
 
     const startOfMonth = new Date();
     startOfMonth.setDate(1);

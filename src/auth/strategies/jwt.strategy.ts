@@ -41,7 +41,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // Re-check the account on every request so deactivation takes effect
     // immediately instead of waiting for the token to expire.
     const authContext = await this.usersService.findAuthContextById(payload.id);
-    if (!authContext) {
+    if (!authContext || authContext.isDeleted) {
       throw new UnauthorizedException('Account no longer exists');
     }
     if (authContext.status !== UserStatus.ACTIVE) {

@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Delete,
   Patch,
   Param,
   Body,
@@ -21,6 +22,7 @@ import {
 import { AdminUsersService } from '../services/admin-users.service';
 import { AdminUsersFilterDto } from '../dto/admin-users-filter.dto';
 import { DeactivateUserDto } from '../dto/deactivate-user.dto';
+import { DeleteUserDto } from '../dto/delete-user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -84,5 +86,23 @@ export class AdminUsersController {
     @Request() req: any,
   ): Promise<UserStatusChangeResponse> {
     return this.adminUsersService.reactivateUser(id, req.user.userId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Soft delete a user' })
+  @SwaggerApiResponse({ status: 200, description: 'User deleted successfully.' })
+  @SwaggerApiResponse({ status: 404, description: 'User not found.' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: DeleteUserDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async deleteUser(
+    @Param('id') id: string,
+    @Body() dto: DeleteUserDto,
+    @Request() req: any,
+  ): Promise<{ message: string }> {
+    return this.adminUsersService.deleteUser(id, req.user.userId, dto);
   }
 }
