@@ -25,6 +25,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { STUDENT_MILESTONES } from '../common/constants/milestones.constant';
 import { Course } from '../courses/schema/course.schema';
+import { QuizzesService } from '../quizzes/quizzes.service';
 
 @Injectable()
 export class OrdersService {
@@ -36,6 +37,7 @@ export class OrdersService {
     private cartService: CartService,
     private paymobService: PaymobService,
     private readonly notificationsService: NotificationsService,
+    private readonly quizzesService: QuizzesService,
   ) {}
 
   /** Build Paymob billing data from the student's profile (best-effort). */
@@ -250,8 +252,30 @@ export class OrdersService {
                 NotificationType.MILESTONE_REACHED,
               );
             }
+
+            // Check if any sections can now generate quizzes
+            // For full course purchase, check all sections
+            if (item.itemType === PurchaseType.FULL_COURSE) {
+              const fullCourse = await this.courseModel.findById(item.courseId).select('sections._id').lean().exec();
+              if (fullCourse?.sections) {
+                for (const section of fullCourse.sections) {
+                  await this.quizzesService.checkAndNotifyQuizGenerationAvailable(
+                    item.courseId.toString(),
+                    section._id.toString(),
+                    course.instructorId.toString(),
+                  );
+                }
+              }
+            } else if (item.itemType === PurchaseType.SECTION && item.sectionId) {
+              // For section purchase, check only that section
+              await this.quizzesService.checkAndNotifyQuizGenerationAvailable(
+                item.courseId.toString(),
+                item.sectionId.toString(),
+                course.instructorId.toString(),
+              );
+            }
           } catch (milestoneError) {
-            console.error('Milestone check failed:', milestoneError);
+            console.error('Milestone/Quiz check failed:', milestoneError);
           }
         }
       }

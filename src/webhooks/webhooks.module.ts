@@ -21,6 +21,8 @@ import {
 } from '../superadmin/schema/platform-config.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CartModule } from '../cart/cart.module';
+import { QuizzesModule } from '../quizzes/quizzes.module';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -35,6 +37,7 @@ import { CartModule } from '../cart/cart.module';
     PaymobModule,
     NotificationsModule,
     CartModule,
+    QuizzesModule,
   ],
   controllers: [WebhooksController],
 })

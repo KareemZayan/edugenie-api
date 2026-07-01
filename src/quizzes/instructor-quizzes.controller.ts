@@ -82,19 +82,50 @@ export class InstructorQuizzesController {
   }
 
   @Roles(UserRole.INSTRUCTOR)
-@Get('section/:sectionId')
-@ApiOperation({ summary: 'Get quiz by section (for instructor review)' })
-@SwaggerApiResponse({ status: 200, description: 'Success.' })
-@SwaggerApiResponse({ status: 404, description: 'Not Found.' })
-@ApiParam({ name: 'sectionId', type: String })
-@ApiCookieAuth('jwt')
-@ApiBearerAuth()
-@SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
-@SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
-async getQuizBySection(
-  @Param('sectionId') sectionId: string,
-  @CurrentUser() user: { userId: string },
-) {
-  return this.quizzesService.findOneForInstructorBySection(sectionId, user.userId);
-}
+  @Get('section/:sectionId')
+  @ApiOperation({ summary: 'Get quiz by section (for instructor review)' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Not Found.' })
+  @ApiParam({ name: 'sectionId', type: String })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async getQuizBySection(
+    @Param('sectionId') sectionId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.findOneForInstructorBySection(sectionId, user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Get('section/:sectionId/all')
+  @ApiOperation({ summary: 'Get all quizzes for a section' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Section not found.' })
+  @ApiParam({ name: 'sectionId', type: String, description: 'Section ID' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async getAllQuizzesForSection(
+    @Param('sectionId') sectionId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.findAllForSection(sectionId, user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Get('generation-status')
+  @ApiOperation({ summary: 'Get quiz generation status for instructor' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async getGenerationStatus(
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.getInstructorQuizGenerationStatus(user.userId);
+  }
 }

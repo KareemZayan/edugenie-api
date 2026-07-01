@@ -342,4 +342,54 @@ export class EnrollmentsService {
 
     return enrollments.map((e) => e.studentId.toString());
   }
+
+  async countEnrollmentsForSection(
+  courseId: string,
+  sectionId: string,
+): Promise<number> {
+  return this.enrollmentModel.countDocuments({
+    courseId: new Types.ObjectId(courseId),
+    $or: [
+      { type: PurchaseType.FULL_COURSE },
+      {
+        type: PurchaseType.SECTION,
+        sectionIds: new Types.ObjectId(sectionId),
+      },
+    ],
+  });
+}
+
+// ⚠️ DEV/TEST ONLY — bulk-inserts fake enrollments to test the quiz cycle
+// without going through orders/payments. Guarded in the controller so it's
+// unreachable outside non-production environments.
+async seedFakeEnrollments(
+  courseId: string,
+  sectionId: string,
+  count: number,
+  type: PurchaseType = PurchaseType.FULL_COURSE,
+): Promise<{ inserted: number; ids: string[] }> {
+  const docs = Array.from({ length: count }).map(() => ({
+    studentId: new Types.ObjectId(), // fake random student, no real User needed
+    courseId: new Types.ObjectId(courseId),
+    type,
+    sectionIds: type === PurchaseType.SECTION ? [new Types.ObjectId(sectionId)] : [],
+  }));
+
+  const inserted = await this.enrollmentModel.insertMany(docs, { ordered: false });
+  return {
+    inserted: inserted.length,
+    ids: inserted.map((d) => d._id.toString()),
+  };
+}
+
+// ⚠️ DEV/TEST ONLY — deletes fake enrollments by the exact IDs returned from
+// seedFakeEnrollments, so it can never touch real data.
+async deleteFakeEnrollments(ids: string[]): Promise<{ deletedCount: number }> {
+  const objectIds = ids
+    .filter((id) => Types.ObjectId.isValid(id))
+    .map((id) => new Types.ObjectId(id));
+
+  const result = await this.enrollmentModel.deleteMany({ _id: { $in: objectIds } });
+  return { deletedCount: result.deletedCount };
+}
 }

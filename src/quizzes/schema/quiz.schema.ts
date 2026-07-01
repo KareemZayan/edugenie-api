@@ -53,6 +53,21 @@ export class Quiz {
     },
   ])
   questions: QuizQuestion[];
+
+  @Prop({ required: true, default: 0 })
+  enrollmentCountAtGeneration: number;
+  
+  // Track which generation number this is for the section (1st, 2nd, 3rd, etc.)
+  @Prop({ required: true, default: 1 })
+  quizGenerationNumber: number;
+  
+  // Track the enrollment count when this quiz was approved (for threshold calculation)
+  @Prop({ required: true, default: 0 })
+  enrollmentCountAtApproval: number;
+  
+  // One-shot guard to prevent duplicate notifications when enrollment threshold is crossed
+  @Prop({ default: false })
+  regenNotified: boolean;
 }
 
 export const QuizSchema = SchemaFactory.createForClass(Quiz);
