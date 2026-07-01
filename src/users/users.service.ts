@@ -40,7 +40,7 @@ export class UsersService {
 
   async createUser(createUserDto: CreateUserDto): Promise<UserSerializer> {
     const existingUser = await this.userModel.findOne({
-      email: createUserDto.email,
+      email: createUserDto.email.toLowerCase(),
     });
 
     if (existingUser) {
@@ -53,7 +53,7 @@ export class UsersService {
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.userModel.findOne({ email }).exec();
+    return this.userModel.findOne({ email: email.toLowerCase() }).exec();
   }
 
   async emailExists(email: string): Promise<boolean> {
@@ -76,7 +76,7 @@ export class UsersService {
     role: UserRole;
     passwordHash: string;
   }): Promise<User> {
-    const existingUser = await this.userModel.findOne({ email: data.email });
+    const existingUser = await this.userModel.findOne({ email: data.email.toLowerCase() });
     if (existingUser) {
       throw new ConflictException('Email already in use');
     }
@@ -113,7 +113,7 @@ export class UsersService {
 
     // Existing password account with the same email → link it. We keep its
     // existing role (a Google sign-in never changes an established account).
-    const byEmail = await this.userModel.findOne({ email: data.email });
+    const byEmail = await this.userModel.findOne({ email: data.email.toLowerCase() });
     if (byEmail) {
       if (!byEmail.googleId) {
         byEmail.googleId = data.googleId;
