@@ -67,6 +67,19 @@ export class User extends Document {
     expiresAt: Date;
   };
 
+  // Email-verification token (sha256 hash of the raw token emailed to the user).
+  @Prop({
+    type: {
+      code: { type: String },
+      expiresAt: { type: Date },
+    },
+    _id: false,
+  })
+  emailVerification?: {
+    code: string;
+    expiresAt: Date;
+  };
+
   @Prop({ required: true, default: false })
   isVerified!: boolean;
 

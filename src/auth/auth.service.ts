@@ -6,7 +6,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 import { User } from '../users/schema/user.schema';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
@@ -47,6 +49,8 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private notificationsService: NotificationsService,
+    private mailService: MailService,
+    private configService: ConfigService,
     @InjectModel(ExchangeToken.name)
     private exchangeTokenModel: Model<ExchangeTokenDocument>,
     @InjectModel(HandoffCode.name)
@@ -71,9 +75,159 @@ export class AuthService {
       password: hashedPassword,
     });
 
+    // Welcome + email-verification link. Guarded so a mail failure never fails
+    // the registration itself.
+    try {
+      await this.issueEmailVerification(
+        createUserDto.email,
+        createUserDto.firstName,
+        role,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to send verification email to ${createUserDto.email}: ${
+          (err as Error)?.message
+        }`,
+      );
+    }
+
     return {
       message: 'User registered successfully',
     };
+  }
+
+  // ── Email verification + password reset (Phase 4) ─────────────────────────
+
+  private hashToken(raw: string): string {
+    return crypto.createHash('sha256').update(raw).digest('hex');
+  }
+
+  /** Students land in the student web app; staff (instructor/admin) in the dashboard. */
+  private appBaseUrlForRole(role: UserRole): string {
+    const student =
+      this.configService.get<string>('STUDENT_APP_URL') ||
+      'http://localhost:3000';
+    const dashboard =
+      this.configService.get<string>('DASHBOARD_URL') ||
+      'http://localhost:4200';
+    return role === UserRole.STUDENT ? student : dashboard;
+  }
+
+  /** Generates + stores a verification token and emails the welcome/verify link. */
+  private async issueEmailVerification(
+    email: string,
+    firstName: string,
+    role: UserRole,
+  ): Promise<void> {
+    const raw = crypto.randomBytes(32).toString('hex');
+    const expiresInHours = 24;
+    const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
+    await this.usersService.setEmailVerificationCode(
+      email,
+      this.hashToken(raw),
+      expiresAt,
+    );
+    const verifyUrl = `${this.appBaseUrlForRole(role)}/verify-email?token=${raw}`;
+    await this.mailService.sendWelcomeVerifyEmail({
+      to: email,
+      firstName,
+      verifyUrl,
+      expiresInHours,
+    });
+  }
+
+  /** Confirms an email-verification token. */
+  async verifyEmail(rawToken: string): Promise<{ message: string }> {
+    const user = await this.usersService.consumeEmailVerification(
+      this.hashToken(rawToken),
+    );
+    if (!user) {
+      throw new BadRequestException(
+        'This verification link is invalid or has expired.',
+      );
+    }
+    return { message: 'Email verified successfully' };
+  }
+
+  /** Re-sends a verification link. Response is generic to avoid leaking accounts. */
+  async resendVerification(email: string): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(email);
+    if (user && !user.isVerified) {
+      try {
+        await this.issueEmailVerification(
+          user.email,
+          user.firstName,
+          user.role,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Resend verification failed: ${(err as Error)?.message}`,
+        );
+      }
+    }
+    return {
+      message:
+        'If an unverified account exists for that email, a new verification link has been sent.',
+    };
+  }
+
+  /** Starts a password reset. Always returns a generic message (no account leak). */
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const raw = crypto.randomBytes(32).toString('hex');
+    const expiresInMinutes = 60;
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+    const user = await this.usersService.setPasswordResetCode(
+      email,
+      this.hashToken(raw),
+      expiresAt,
+    );
+    if (user) {
+      const resetUrl = `${this.appBaseUrlForRole(user.role)}/reset-password?token=${raw}`;
+      try {
+        await this.mailService.sendPasswordResetEmail({
+          to: user.email,
+          firstName: user.firstName,
+          resetUrl,
+          expiresInMinutes,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Password reset email failed: ${(err as Error)?.message}`,
+        );
+      }
+    }
+    return {
+      message:
+        'If an account exists for that email, a password reset link has been sent.',
+    };
+  }
+
+  /** Completes a password reset with a valid token. */
+  async resetPassword(
+    rawToken: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const newHash = await bcrypt.hash(newPassword, 10);
+    const user = await this.usersService.consumePasswordReset(
+      this.hashToken(rawToken),
+      newHash,
+    );
+    if (!user) {
+      throw new BadRequestException(
+        'This reset link is invalid or has expired.',
+      );
+    }
+    try {
+      await this.mailService.sendPasswordChangedEmail({
+        to: user.email,
+        firstName: user.firstName,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Password-changed email failed: ${(err as Error)?.message}`,
+      );
+    }
+    return { message: 'Your password has been reset. You can now log in.' };
   }
 
   async generateExchangeToken(userId: Types.ObjectId): Promise<string> {
@@ -100,9 +254,7 @@ export class AuthService {
       );
     }
 
-    const exchangeToken = await this.generateExchangeToken(
-      user._id as Types.ObjectId,
-    );
+    const exchangeToken = await this.generateExchangeToken(user._id);
     return { exchangeToken, user };
   }
 
@@ -121,9 +273,9 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const payload = { 
-      id: user._id, 
-      role: user.role, 
+    const payload = {
+      id: user._id,
+      role: user.role,
       firstName: user.firstName,
       lastName: user.lastName,
       avatar: user.avatar ?? null,
@@ -169,15 +321,15 @@ export class AuthService {
     let isExchangeToken = false;
 
     if (user.role === UserRole.STUDENT) {
-      token = await this.generateExchangeToken(user._id as Types.ObjectId);
+      token = await this.generateExchangeToken(user._id);
       isExchangeToken = true;
     } else {
-      const payload = { 
-        id: user._id, 
-        role: user.role, 
+      const payload = {
+        id: user._id,
+        role: user.role,
         firstName: user.firstName,
-      lastName: user.lastName,
-      avatar: user.avatar ?? null,
+        lastName: user.lastName,
+        avatar: user.avatar ?? null,
       };
       token = this.jwtService.sign(payload);
     }
@@ -281,8 +433,8 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const payload = { 
-      id: updated.userId, 
+    const payload = {
+      id: updated.userId,
       role: updated.userRole,
       firstName: user.firstName,
       lastName: user.lastName,
@@ -311,7 +463,9 @@ export class AuthService {
     });
 
     if (!invite || invite.expiresAt.getTime() < Date.now()) {
-      throw new BadRequestException('This invitation is invalid or has expired');
+      throw new BadRequestException(
+        'This invitation is invalid or has expired',
+      );
     }
 
     return {
@@ -334,7 +488,9 @@ export class AuthService {
     });
 
     if (!invite || invite.expiresAt.getTime() < Date.now()) {
-      throw new BadRequestException('This invitation is invalid or has expired');
+      throw new BadRequestException(
+        'This invitation is invalid or has expired',
+      );
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);

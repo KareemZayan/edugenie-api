@@ -1,4 +1,11 @@
-import { ApiTags, ApiOperation, ApiResponse as SwaggerApiResponse, ApiBody, ApiCookieAuth, ApiBearerAuth } from "@nestjs/swagger";
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse as SwaggerApiResponse,
+  ApiBody,
+  ApiCookieAuth,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import {
   Controller,
@@ -20,6 +27,9 @@ import type { AuthResponse } from './interfaces/auth-response.interface';
 import { ThrottlerGuard, Throttle, SkipThrottle } from '@nestjs/throttler';
 import { RedeemHandoffCodeDto } from './dto/redeem-handoff-code.dto';
 import { AcceptInviteDto, ValidateInviteDto } from './dto/accept-invite.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto, ResendVerificationDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Req } from '@nestjs/common'; // add to existing import
@@ -122,7 +132,6 @@ export class AuthController {
   async register(
     @Body() createUserDto: CreateUserDto,
   ): Promise<ApiResponse<AuthResponse>> {
-    console.log('DEBUG (API): register endpoint received:', createUserDto);
     const result = await this.authService.register(createUserDto);
     return {
       success: true,
@@ -246,10 +255,7 @@ export class AuthController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    const code = await this.authService.generateHandoffCode(
-      userId as string,
-      user.role,
-    );
+    const code = await this.authService.generateHandoffCode(userId, user.role);
     return { code, expiresIn: 30 };
   }
 
@@ -284,7 +290,9 @@ export class AuthController {
   @ApiOperation({ summary: 'Validate admin invite token' })
   async validateInvite(
     @Body() dto: ValidateInviteDto,
-  ): Promise<ApiResponse<{ email: string; firstName: string; lastName: string }>> {
+  ): Promise<
+    ApiResponse<{ email: string; firstName: string; lastName: string }>
+  > {
     const data = await this.authService.validateInvite(dto.token);
     return { success: true, data };
   }
@@ -315,5 +323,57 @@ export class AuthController {
         user,
       },
     };
+  }
+
+  // ── Email verification + password reset (Phase 4) ─────────────────────────
+
+  @HttpCode(HttpStatus.OK)
+  @Post('verify-email')
+  @ApiOperation({ summary: 'Verify an email-verification token' })
+  @ApiBody({ type: VerifyEmailDto })
+  async verifyEmail(
+    @Body() dto: VerifyEmailDto,
+  ): Promise<ApiResponse<{ message: string }>> {
+    const result = await this.authService.verifyEmail(dto.token);
+    return { success: true, data: result };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @Post('resend-verification')
+  @ApiOperation({ summary: 'Resend the email-verification link' })
+  @ApiBody({ type: ResendVerificationDto })
+  async resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ): Promise<ApiResponse<{ message: string }>> {
+    const result = await this.authService.resendVerification(dto.email);
+    return { success: true, data: result };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request a password-reset link' })
+  @ApiBody({ type: ForgotPasswordDto })
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): Promise<ApiResponse<{ message: string }>> {
+    const result = await this.authService.forgotPassword(dto.email);
+    return { success: true, data: result };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 3_600_000 } })
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset a password with a valid token' })
+  @ApiBody({ type: ResetPasswordDto })
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+  ): Promise<ApiResponse<{ message: string }>> {
+    const result = await this.authService.resetPassword(
+      dto.token,
+      dto.password,
+    );
+    return { success: true, data: result };
   }
 }

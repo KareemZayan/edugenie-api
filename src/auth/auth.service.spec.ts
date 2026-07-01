@@ -7,6 +7,8 @@ import { ExchangeToken } from './schemas/exchange-token.schema';
 import { HandoffCode } from './schemas/handoff-code.schema';
 import { AdminInvite } from '../superadmin/schema/admin-invite.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../mail/mail.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -27,6 +29,8 @@ describe('AuthService', () => {
           provide: NotificationsService,
           useValue: {},
         },
+        { provide: MailService, useValue: {} },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: getModelToken(ExchangeToken.name), useValue: {} },
         { provide: getModelToken(HandoffCode.name), useValue: {} },
         { provide: getModelToken(AdminInvite.name), useValue: {} },
