@@ -96,6 +96,15 @@ export class User extends Document {
 
   @Prop({ type: Date, default: null })
   lastLoginAt?: Date | null;
+
+  @Prop({ default: false })
+  isDeleted!: boolean;
+
+  @Prop({ type: Date, default: null })
+  deletedAt?: Date | null;
+
+  @Prop({ type: String, default: null })
+  deletedReason?: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

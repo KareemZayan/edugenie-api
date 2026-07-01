@@ -19,6 +19,7 @@ import { UserStatus } from '../../common/enums/user-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { AdminUsersFilterDto } from '../dto/admin-users-filter.dto';
 import { DeactivateUserDto } from '../dto/deactivate-user.dto';
+import { DeleteUserDto } from '../dto/delete-user.dto';
 import {
   AdminUserListResponse,
   UserStatusChangeResponse,
@@ -38,7 +39,7 @@ export class AdminUsersService {
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
 
-    const filter: any = {};
+    const filter: any = { isDeleted: { $ne: true } };
     if (query.role) {
       filter.role = query.role;
     } else {
@@ -179,5 +180,30 @@ export class AdminUsersService {
       status: UserStatus.ACTIVE,
       reactivatedAt: new Date(),
     };
+  }
+
+  async deleteUser(
+    id: string,
+    adminId: string,
+    dto: DeleteUserDto,
+  ): Promise<{ message: string }> {
+    const user = await this.userModel.findById(id).exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.isDeleted = true;
+    user.deletedAt = new Date();
+    user.deletedReason = dto.reason;
+    await user.save();
+
+    await this.auditLogModel.create({
+      action: 'USER_DELETED',
+      performedBy: new Types.ObjectId(adminId),
+      targetUser: user._id,
+      details: { reason: dto.reason },
+    });
+
+    return { message: 'User deleted successfully' };
   }
 }
