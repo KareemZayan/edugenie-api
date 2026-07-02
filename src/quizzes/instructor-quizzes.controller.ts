@@ -128,4 +128,21 @@ export class InstructorQuizzesController {
   ) {
     return this.quizzesService.getInstructorQuizGenerationStatus(user.userId);
   }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Get('section/:sectionId/enrollment-status')
+  @ApiOperation({ summary: 'Get enrollment status for quiz generation' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Section not found.' })
+  @ApiParam({ name: 'sectionId', type: String, description: 'Section ID' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async getEnrollmentStatus(
+    @Param('sectionId') sectionId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.getEnrollmentStatusForSection(sectionId, user.userId);
+  }
 }

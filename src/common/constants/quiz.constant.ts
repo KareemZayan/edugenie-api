@@ -7,4 +7,4 @@ console.log('QUIZ_REGEN_ENROLLMENT_THRESHOLD loaded as:', QUIZ_REGEN_ENROLLMENT_
 export const MAX_QUIZZES_PER_SECTION = Number(
   process.env.MAX_QUIZZES_PER_SECTION ?? 5,
 );
-console.log('MAX_QUIZZES_PER_SECTION loaded as:', MAX_QUIZZES_PER_SECTION);
+// console.log('MAX_QUIZZES_PER_SECTION loaded as:', MAX_QUIZZES_PER_SECTION);

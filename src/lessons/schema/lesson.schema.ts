@@ -14,7 +14,7 @@ export class Lesson {
   @Prop({ required: true })
   videoPublicId!: string;
 
-  @Prop({ required: true, min: 0, type: Number })
+  @Prop({ required: true, min: 0, max: 900, type: Number })
   videoDuration!: number;
 
   @Prop({ trim: true })
