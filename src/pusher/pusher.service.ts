@@ -32,8 +32,12 @@ export class PusherService {
       this.logger.log(`Pusher trigger SUCCESS for channel=${channel}`);
       return result;
     } catch (err) {
+      // Real-time delivery is best-effort. A Pusher outage or bad credentials
+      // must NEVER break the action that produced the notification (e.g.
+      // approving/publishing a course) — the notification is already persisted
+      // and will show on the next fetch. Log and swallow, like the mail module.
       this.logger.error(`Pusher trigger FAILED for channel=${channel}`, err);
-      throw err;
+      return undefined;
     }
   }
 }

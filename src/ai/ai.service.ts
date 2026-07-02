@@ -37,6 +37,20 @@ interface GatewayMessage {
 }
 
 /**
+ * Shared answer-style directive appended to every tutor system prompt so replies
+ * are short, focused, and cleanly formatted for the chat UI (which renders
+ * markdown). Kept terse — it rides on every request.
+ */
+const ANSWER_STYLE =
+  `\n\n=== HOW TO ANSWER ===\n` +
+  `- Give the shortest complete answer — usually 1–3 sentences. No preamble, ` +
+  `no restating the question, no summary at the end.\n` +
+  `- Answer ONLY what was asked. Cut every tangent, background, and filler word.\n` +
+  `- If listing steps or items, use a few short bullets instead of paragraphs.\n` +
+  `- **Bold** the key term; put any code in a fenced code block.\n` +
+  `- Warm but efficient — one line of encouragement at most, only if it fits.`;
+
+/**
  * AI features backed by the SBG gateway (an OpenAI-incompatible proxy to AWS
  * Bedrock / Claude). Everything is env-driven so it activates the moment the
  * gateway host + key are provided:
@@ -509,7 +523,8 @@ export class AiService {
         `course outline and the material the student has unlocked to answer ` +
         `questions, connect concepts across lessons, and guide their study. Do ` +
         `not reveal content from sections they have not unlocked.\n\n` +
-        `=== COURSE OUTLINE & MATERIAL ===\n${ctx.material}`;
+        `=== COURSE OUTLINE & MATERIAL ===\n${ctx.material}` +
+        ANSWER_STYLE;
 
     yield* this.streamReply(systemPrompt, [
       ...this.trimHistory(history),
@@ -686,7 +701,8 @@ export class AiService {
       `course "${ctx.courseTitle}". Help the student understand THIS lesson. ` +
       `Prefer the lesson material below; if the answer isn't in it, say you can ` +
       `only help with this lesson's content and suggest what to re-watch.\n\n` +
-      `=== LESSON MATERIAL ===\n${ctx.material}`
+      `=== LESSON MATERIAL ===\n${ctx.material}` +
+      ANSWER_STYLE
     );
   }
 
@@ -703,7 +719,8 @@ export class AiService {
       `excerpts from this lesson below. If the excerpts don't contain the answer, ` +
       `say you're not certain and suggest what to re-watch — do NOT invent facts. ` +
       `Be clear and concise.\n\n=== RELEVANT EXCERPTS ===\n` +
-      this.formatExcerpts(chunks)
+      this.formatExcerpts(chunks) +
+      ANSWER_STYLE
     );
   }
 
@@ -718,7 +735,8 @@ export class AiService {
       `helpful. If the excerpts don't cover it, say so and suggest what to study — ` +
       `do NOT invent facts, and never reveal content from locked sections.\n\n` +
       `=== RELEVANT EXCERPTS ===\n` +
-      this.formatExcerpts(chunks)
+      this.formatExcerpts(chunks) +
+      ANSWER_STYLE
     );
   }
 
