@@ -23,7 +23,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       // Fall back to placeholders so the app still boots when Google isn't
       // configured — the endpoints simply won't complete a real OAuth flow
       // until GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are set.
-      clientID: configService.get<string>('GOOGLE_CLIENT_ID') || 'not-configured',
+      clientID:
+        configService.get<string>('GOOGLE_CLIENT_ID') || 'not-configured',
       clientSecret:
         configService.get<string>('GOOGLE_CLIENT_SECRET') || 'not-configured',
       callbackURL:
@@ -53,7 +54,9 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     // student/instructor are allowed (privileged roles never come from Google).
     const requested = String(req.query?.state ?? '').toLowerCase();
     const role =
-      requested === UserRole.INSTRUCTOR ? UserRole.INSTRUCTOR : UserRole.STUDENT;
+      requested === UserRole.INSTRUCTOR
+        ? UserRole.INSTRUCTOR
+        : UserRole.STUDENT;
 
     const user: GoogleUser = {
       googleId: profile.id,

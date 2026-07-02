@@ -1,6 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -11,4 +17,10 @@ export class LoginDto {
   @MinLength(6)
   @ApiProperty({ example: 'Password123!' })
   password!: string;
+
+  /** Extends the refresh-token lifetime (30d instead of 7d). */
+  @IsOptional()
+  @IsBoolean()
+  @ApiProperty({ example: false, required: false })
+  rememberMe?: boolean;
 }

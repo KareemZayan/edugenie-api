@@ -11,6 +11,11 @@ export class ExchangeToken {
   @Prop({ required: true, unique: true })
   token: string;
 
+  // Carried from the login request so verify-exchange-token can pick the
+  // refresh-token TTL (30d vs 7d) — rememberMe is only known at login time.
+  @Prop({ default: false })
+  rememberMe: boolean;
+
   // TTL index: automatically expire and remove the document after 60 seconds
   @Prop({ type: Date, default: Date.now, expires: 60 })
   createdAt: Date;

@@ -34,6 +34,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Req } from '@nestjs/common'; // add to existing import
 import { extractClientIp } from './utils/login-device.util';
+import { setAuthCookies, clearAuthCookies } from './utils/cookie.util';
 import { ConfigService } from '@nestjs/config';
 import type { GoogleUser } from './strategies/google.strategy';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
@@ -158,15 +159,15 @@ export class AuthController {
       token,
       user: userData,
       isExchangeToken,
+      refreshToken,
+      refreshTtlMs,
     } = await this.authService.login(loginDto, ip, userAgent);
 
     if (!isExchangeToken) {
-      response.cookie('jwt', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        path: '/',
-        maxAge: 24 * 60 * 60 * 1000,
+      setAuthCookies(response, {
+        accessToken: token,
+        refreshToken,
+        refreshTtlMs,
       });
     }
 
@@ -188,17 +189,24 @@ export class AuthController {
   @ApiBody({ schema: { type: 'string' } })
   async verifyExchangeToken(
     @Body('token') token: string,
+    @Req() request: express.Request,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
-    const { token: jwtToken, user: userData } =
-      await this.authService.verifyExchangeToken(token);
+    const {
+      token: jwtToken,
+      user: userData,
+      refreshToken,
+      refreshTtlMs,
+    } = await this.authService.verifyExchangeToken(
+      token,
+      extractClientIp(request),
+      request.headers['user-agent'] || '',
+    );
 
-    response.cookie('jwt', jwtToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000,
+    setAuthCookies(response, {
+      accessToken: jwtToken,
+      refreshToken,
+      refreshTtlMs,
     });
 
     return {
@@ -213,22 +221,92 @@ export class AuthController {
 
   @HttpCode(HttpStatus.OK)
   @Post('logout')
-  @ApiOperation({ summary: 'Logout' })
+  @ApiOperation({
+    summary: 'Logout — clears cookies and revokes the session server-side',
+  })
   @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
   @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
   @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
-  logout(@Res({ passthrough: true }) response: any): ApiResponse<AuthResponse> {
-    response.clearCookie('jwt', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-    });
+  async logout(
+    @Req() request: express.Request,
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse>> {
+    // Revoke the refresh session server-side so the cookie can't be replayed.
+    const refreshCookie = (request.cookies as Record<string, string>)?.[
+      'refreshToken'
+    ];
+    await this.authService.revokeRefreshToken(refreshCookie);
+
+    clearAuthCookies(response);
     return {
       success: true,
       data: {
         message: 'Logout successful',
       },
+    };
+  }
+
+  /**
+   * Rotates the refresh token and mints a fresh 15-min access JWT. Deliberately
+   * NOT behind JwtAuthGuard: this is called precisely when the access token has
+   * expired — auth comes from the httpOnly refresh cookie instead.
+   */
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  @ApiOperation({
+    summary:
+      'Exchange the refresh-token cookie for a new access + refresh pair',
+  })
+  @SwaggerApiResponse({ status: 200, description: 'Session refreshed.' })
+  @SwaggerApiResponse({
+    status: 401,
+    description: 'Invalid/expired/reused refresh token.',
+  })
+  async refresh(
+    @Req() request: express.Request,
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse>> {
+    const refreshCookie = (request.cookies as Record<string, string>)?.[
+      'refreshToken'
+    ];
+
+    try {
+      const { accessToken, refreshToken, refreshTtlMs, user } =
+        await this.authService.refresh(
+          refreshCookie,
+          extractClientIp(request),
+          request.headers['user-agent'] || '',
+        );
+
+      setAuthCookies(response, { accessToken, refreshToken, refreshTtlMs });
+      return {
+        success: true,
+        data: { message: 'Session refreshed', user },
+      };
+    } catch (err) {
+      // A dead refresh token means the session is over — drop both cookies so
+      // the client stops retrying with them.
+      clearAuthCookies(response);
+      throw err;
+    }
+  }
+
+  /** Revokes every live refresh session for the current user ("log out everywhere"). */
+  @HttpCode(HttpStatus.OK)
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke all sessions for the current user' })
+  async logoutAll(
+    @CurrentUser() user: { userId: string },
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse & { revoked: number }>> {
+    const { revoked } = await this.authService.revokeAllSessions(user.userId);
+    clearAuthCookies(response);
+    return {
+      success: true,
+      data: { message: 'All sessions revoked', revoked },
     };
   }
 
@@ -267,18 +345,17 @@ export class AuthController {
   @ApiBody({ type: RedeemHandoffCodeDto })
   async redeemHandoffCode(
     @Body() dto: RedeemHandoffCodeDto,
+    @Req() request: express.Request,
     @Res({ passthrough: true }) res: express.Response,
   ) {
-    const { userId, userRole, token } =
-      await this.authService.redeemHandoffCode(dto.code);
+    const { userId, userRole, token, refreshToken, refreshTtlMs } =
+      await this.authService.redeemHandoffCode(
+        dto.code,
+        extractClientIp(request),
+        request.headers['user-agent'] || '',
+      );
 
-    res.cookie('jwt', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000,
-    });
+    setAuthCookies(res, { accessToken: token, refreshToken, refreshTtlMs });
 
     return {
       success: true,
@@ -304,16 +381,20 @@ export class AuthController {
   @ApiOperation({ summary: 'Accept admin invite' })
   async acceptInvite(
     @Body() dto: AcceptInviteDto,
+    @Req() request: express.Request,
     @Res({ passthrough: true }) response: express.Response,
   ): Promise<ApiResponse<AuthResponse>> {
-    const { token, user } = await this.authService.acceptInvite(dto);
+    const { token, user, refreshToken, refreshTtlMs } =
+      await this.authService.acceptInvite(
+        dto,
+        extractClientIp(request),
+        request.headers['user-agent'] || '',
+      );
 
-    response.cookie('jwt', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000,
+    setAuthCookies(response, {
+      accessToken: token,
+      refreshToken,
+      refreshTtlMs,
     });
 
     return {

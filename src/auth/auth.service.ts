@@ -26,6 +26,10 @@ import {
   HandoffCodeDocument,
 } from './schemas/handoff-code.schema';
 import {
+  RefreshToken,
+  RefreshTokenDocument,
+} from './schemas/refresh-token.schema';
+import {
   AdminInvite,
   AdminInviteDocument,
 } from '../superadmin/schema/admin-invite.schema';
@@ -41,6 +45,21 @@ import {
   getLocationFromIp,
 } from './utils/login-device.util';
 
+// Refresh-token session lifetimes. The horizon is FIXED per session: rotations
+// carry the original expiresAt forward, so a session can never outlive the
+// lifetime chosen at login (no infinite sliding renewal).
+const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const REFRESH_TTL_REMEMBER_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// A rotated token replayed within this window is a benign race (two tabs /
+// parallel serverless proxy invocations refreshing at once), not theft.
+const ROTATION_GRACE_MS = 30 * 1000;
+
+export interface IssuedTokens {
+  accessToken: string;
+  refreshToken: string;
+  refreshTtlMs: number;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -55,6 +74,8 @@ export class AuthService {
     private exchangeTokenModel: Model<ExchangeTokenDocument>,
     @InjectModel(HandoffCode.name)
     private handoffCodeModel: Model<HandoffCodeDocument>,
+    @InjectModel(RefreshToken.name)
+    private refreshTokenModel: Model<RefreshTokenDocument>,
     @InjectModel(AdminInvite.name)
     private adminInviteModel: Model<AdminInviteDocument>,
   ) {}
@@ -230,10 +251,199 @@ export class AuthService {
     return { message: 'Your password has been reset. You can now log in.' };
   }
 
-  async generateExchangeToken(userId: Types.ObjectId): Promise<string> {
+  async generateExchangeToken(
+    userId: Types.ObjectId,
+    rememberMe = false,
+  ): Promise<string> {
     const token = crypto.randomBytes(32).toString('hex');
-    await this.exchangeTokenModel.create({ userId, token });
+    await this.exchangeTokenModel.create({ userId, token, rememberMe });
     return token;
+  }
+
+  // ── Rotating refresh tokens ────────────────────────────────────────────────
+
+  /** Signs the short-lived access JWT with the payload shape every guard expects. */
+  private signAccessToken(
+    user: {
+      _id: Types.ObjectId | string;
+      role: string;
+      firstName: string;
+      lastName: string;
+      avatar?: string | null;
+    },
+    roleOverride?: string,
+  ): string {
+    return this.jwtService.sign({
+      id: user._id,
+      role: roleOverride ?? user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatar: user.avatar ?? null,
+    });
+  }
+
+  /**
+   * Creates a refresh token (hash-at-rest) and returns the raw value.
+   * A fresh `family` starts a new session chain; passing an existing family +
+   * expiresAt continues a chain on rotation (fixed session horizon).
+   */
+  private async issueRefreshToken(params: {
+    userId: Types.ObjectId;
+    family?: string;
+    expiresAt?: Date;
+    rememberMe?: boolean;
+    ip?: string;
+    userAgent?: string;
+  }): Promise<{ raw: string; family: string; expiresAt: Date }> {
+    const raw = crypto.randomBytes(32).toString('hex');
+    const family = params.family ?? crypto.randomUUID();
+    const expiresAt =
+      params.expiresAt ??
+      new Date(
+        Date.now() +
+          (params.rememberMe ? REFRESH_TTL_REMEMBER_MS : REFRESH_TTL_MS),
+      );
+
+    await this.refreshTokenModel.create({
+      userId: params.userId,
+      tokenHash: this.hashToken(raw),
+      family,
+      device: parseDevice(params.userAgent ?? ''),
+      ip: params.ip ?? '',
+      expiresAt,
+    });
+
+    return { raw, family, expiresAt };
+  }
+
+  /** Starts a brand-new session chain and signs the matching access token. */
+  private async issueTokenPair(
+    user: {
+      _id: Types.ObjectId;
+      role: string;
+      firstName: string;
+      lastName: string;
+      avatar?: string | null;
+    },
+    opts: { rememberMe?: boolean; ip?: string; userAgent?: string } = {},
+  ): Promise<IssuedTokens> {
+    const { raw, expiresAt } = await this.issueRefreshToken({
+      userId: user._id,
+      rememberMe: opts.rememberMe,
+      ip: opts.ip,
+      userAgent: opts.userAgent,
+    });
+    return {
+      accessToken: this.signAccessToken(user),
+      refreshToken: raw,
+      refreshTtlMs: expiresAt.getTime() - Date.now(),
+    };
+  }
+
+  /**
+   * Rotates a refresh token: revokes the presented one, issues a successor in
+   * the same family, and signs a fresh access JWT.
+   *
+   * Reuse of an already-rotated token OUTSIDE the grace window means the token
+   * leaked (someone replayed a stale copy) — the entire family is revoked so
+   * both the thief's and the victim's copies die together.
+   */
+  async refresh(
+    rawToken: string,
+    ip: string,
+    userAgent: string,
+  ): Promise<IssuedTokens & { user: UserSerializer }> {
+    if (!rawToken) {
+      throw new UnauthorizedException('No refresh token provided');
+    }
+
+    const doc = await this.refreshTokenModel.findOne({
+      tokenHash: this.hashToken(rawToken),
+    });
+    if (!doc) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (doc.expiresAt.getTime() <= Date.now()) {
+      // TTL monitor may lag; treat as expired either way.
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    let benignRace = false;
+    if (doc.revokedAt) {
+      if (Date.now() - doc.revokedAt.getTime() < ROTATION_GRACE_MS) {
+        // Two tabs (or parallel serverless proxy invocations) refreshed with
+        // the same token at once. The loser lands here milliseconds later —
+        // not theft. Issue it its own successor in the same family.
+        benignRace = true;
+      } else {
+        await this.revokeFamily(doc.family);
+        this.logger.warn(
+          `Refresh-token reuse detected for user ${doc.userId.toString()} — family revoked`,
+        );
+        throw new UnauthorizedException('Session revoked');
+      }
+    }
+
+    if (!benignRace) {
+      // Atomic rotate: if another request revoked it between the read and this
+      // write, fall back to the benign-race path instead of double-rotating.
+      const rotated = await this.refreshTokenModel.findOneAndUpdate(
+        { _id: doc._id, revokedAt: null },
+        { $set: { revokedAt: new Date() } },
+      );
+      if (!rotated) {
+        benignRace = true;
+      }
+    }
+
+    const user = await this.usersService.findById(doc.userId.toString());
+    if (!user || user.isDeleted || user.status !== UserStatus.ACTIVE) {
+      await this.revokeFamily(doc.family);
+      throw new UnauthorizedException('Account is no longer active');
+    }
+
+    const { raw, expiresAt } = await this.issueRefreshToken({
+      userId: doc.userId,
+      family: doc.family,
+      expiresAt: doc.expiresAt, // fixed horizon — rotation never extends the session
+      ip,
+      userAgent,
+    });
+
+    return {
+      accessToken: this.signAccessToken(user),
+      refreshToken: raw,
+      refreshTtlMs: expiresAt.getTime() - Date.now(),
+      user: new UserSerializer(user.toObject()),
+    };
+  }
+
+  private async revokeFamily(family: string): Promise<void> {
+    await this.refreshTokenModel.updateMany(
+      { family, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
+  }
+
+  /** Server-side logout: kills the presented session chain. Silent no-op if absent. */
+  async revokeRefreshToken(rawToken?: string): Promise<void> {
+    if (!rawToken) return;
+    const doc = await this.refreshTokenModel.findOne({
+      tokenHash: this.hashToken(rawToken),
+    });
+    if (doc) {
+      await this.revokeFamily(doc.family);
+    }
+  }
+
+  /** "Log out everywhere": revokes every live session for the user. */
+  async revokeAllSessions(userId: string): Promise<{ revoked: number }> {
+    const result = await this.refreshTokenModel.updateMany(
+      { userId: new Types.ObjectId(userId), revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
+    return { revoked: result.modifiedCount };
   }
 
   /**
@@ -260,7 +470,9 @@ export class AuthService {
 
   async verifyExchangeToken(
     token: string,
-  ): Promise<{ token: string; user: UserSerializer }> {
+    ip = '',
+    userAgent = '',
+  ): Promise<IssuedTokens & { token: string; user: UserSerializer }> {
     const exchangeToken = await this.exchangeTokenModel.findOneAndDelete({
       token,
     });
@@ -273,17 +485,15 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const payload = {
-      id: user._id,
-      role: user.role,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      avatar: user.avatar ?? null,
-    };
-    const jwtToken = this.jwtService.sign(payload);
+    const tokens = await this.issueTokenPair(user, {
+      rememberMe: exchangeToken.rememberMe,
+      ip,
+      userAgent,
+    });
 
     return {
-      token: jwtToken,
+      ...tokens,
+      token: tokens.accessToken,
       user: new UserSerializer(user.toObject()),
     };
   }
@@ -296,6 +506,8 @@ export class AuthService {
     token: string;
     user: UserSerializer;
     isExchangeToken: boolean;
+    refreshToken?: string;
+    refreshTtlMs?: number;
   }> {
     const user = await this.usersService.findByEmail(loginDto.email);
     if (!user) {
@@ -323,19 +535,26 @@ export class AuthService {
 
     let token: string;
     let isExchangeToken = false;
+    let refreshToken: string | undefined;
+    let refreshTtlMs: number | undefined;
 
     if (user.role === UserRole.STUDENT) {
-      token = await this.generateExchangeToken(user._id);
+      // Students get their cookies at verify-exchange-token; carry rememberMe
+      // on the exchange token so that step can pick the refresh TTL.
+      token = await this.generateExchangeToken(
+        user._id,
+        loginDto.rememberMe ?? false,
+      );
       isExchangeToken = true;
     } else {
-      const payload = {
-        id: user._id,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        avatar: user.avatar ?? null,
-      };
-      token = this.jwtService.sign(payload);
+      const tokens = await this.issueTokenPair(user, {
+        rememberMe: loginDto.rememberMe,
+        ip,
+        userAgent,
+      });
+      token = tokens.accessToken;
+      refreshToken = tokens.refreshToken;
+      refreshTtlMs = tokens.refreshTtlMs;
     }
 
     // Don't block the login response on geo lookups / notification creation
@@ -346,6 +565,8 @@ export class AuthService {
     return {
       token,
       isExchangeToken,
+      refreshToken,
+      refreshTtlMs,
       user: new UserSerializer(user.toObject()),
     };
   }
@@ -411,7 +632,11 @@ export class AuthService {
 
   async redeemHandoffCode(
     code: string,
-  ): Promise<{ userId: string; userRole: string; token: string }> {
+    ip = '',
+    userAgent = '',
+  ): Promise<
+    IssuedTokens & { userId: string; userRole: string; token: string }
+  > {
     const doc = await this.handoffCodeModel.findOne({ code });
     if (!doc) {
       throw new UnauthorizedException('Invalid or expired code');
@@ -437,19 +662,21 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const payload = {
-      id: updated.userId,
-      role: updated.userRole,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      avatar: user.avatar ?? null,
-    };
-    const jwtToken = this.jwtService.sign(payload);
+    // Keep the role captured at handoff time (matches the old payload shape).
+    const accessToken = this.signAccessToken(user, updated.userRole);
+    const { raw, expiresAt } = await this.issueRefreshToken({
+      userId: updated.userId,
+      ip,
+      userAgent,
+    });
 
     return {
       userId: updated.userId.toString(),
       userRole: updated.userRole,
-      token: jwtToken,
+      token: accessToken,
+      accessToken,
+      refreshToken: raw,
+      refreshTtlMs: expiresAt.getTime() - Date.now(),
     };
   }
 
@@ -485,7 +712,9 @@ export class AuthService {
    */
   async acceptInvite(
     dto: AcceptInviteDto,
-  ): Promise<{ token: string; user: UserSerializer }> {
+    ip = '',
+    userAgent = '',
+  ): Promise<IssuedTokens & { token: string; user: UserSerializer }> {
     const invite = await this.adminInviteModel.findOne({
       tokenHash: this.hashInviteToken(dto.token),
       acceptedAt: null,
@@ -509,17 +738,11 @@ export class AuthService {
     invite.acceptedAt = new Date();
     await invite.save();
 
-    const payload = {
-      id: user._id,
-      role: user.role,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      avatar: user.avatar ?? null,
-    };
-    const token = this.jwtService.sign(payload);
+    const tokens = await this.issueTokenPair(user, { ip, userAgent });
 
     return {
-      token,
+      ...tokens,
+      token: tokens.accessToken,
       user: new UserSerializer((user as any).toObject()),
     };
   }
