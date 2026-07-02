@@ -123,7 +123,12 @@ export class AuthService {
     return crypto.createHash('sha256').update(raw).digest('hex');
   }
 
-  /** Students land in the student web app; staff (instructor/admin) in the dashboard. */
+  /**
+   * Where a role's email links (verify / password-reset) should open.
+   * Students AND instructors sign in on the student web app, so both land
+   * there; only admins/superadmins use the dashboard. Keep this in sync with
+   * where each role actually authenticates.
+   */
   private appBaseUrlForRole(role: UserRole): string {
     const student =
       this.configService.get<string>('STUDENT_APP_URL') ||
@@ -131,7 +136,9 @@ export class AuthService {
     const dashboard =
       this.configService.get<string>('DASHBOARD_URL') ||
       'http://localhost:4200';
-    return role === UserRole.STUDENT ? student : dashboard;
+    return role === UserRole.ADMIN || role === UserRole.SUPERADMIN
+      ? dashboard
+      : student;
   }
 
   /** Generates + stores a verification token and emails the welcome/verify link. */
@@ -283,6 +290,15 @@ export class AuthService {
   }
 
   /**
+   * Serializes a Mongoose user document into the API response shape.
+   * `Document.toObject()` is typed `any` by Mongoose, so we assert the plain
+   * object back to the serializer's input shape to keep the call type-safe.
+   */
+  private serializeUser(user: User): UserSerializer {
+    return new UserSerializer(user.toObject() as Partial<UserSerializer>);
+  }
+
+  /**
    * Creates a refresh token (hash-at-rest) and returns the raw value.
    * A fresh `family` starts a new session chain; passing an existing family +
    * expiresAt continues a chain on rotation (fixed session horizon).
@@ -415,7 +431,7 @@ export class AuthService {
       accessToken: this.signAccessToken(user),
       refreshToken: raw,
       refreshTtlMs: expiresAt.getTime() - Date.now(),
-      user: new UserSerializer(user.toObject()),
+      user: this.serializeUser(user),
     };
   }
 
@@ -494,7 +510,7 @@ export class AuthService {
     return {
       ...tokens,
       token: tokens.accessToken,
-      user: new UserSerializer(user.toObject()),
+      user: this.serializeUser(user),
     };
   }
 
@@ -567,12 +583,12 @@ export class AuthService {
       isExchangeToken,
       refreshToken,
       refreshTtlMs,
-      user: new UserSerializer(user.toObject()),
+      user: this.serializeUser(user),
     };
   }
 
   private async checkLoginDevice(
-    user: any,
+    user: User,
     ip: string,
     userAgent: string,
   ): Promise<void> {
@@ -743,7 +759,7 @@ export class AuthService {
     return {
       ...tokens,
       token: tokens.accessToken,
-      user: new UserSerializer((user as any).toObject()),
+      user: this.serializeUser(user),
     };
   }
 }
