@@ -14,6 +14,10 @@ import {
 } from './schemas/exchange-token.schema';
 import { HandoffCode, HandoffCodeSchema } from './schemas/handoff-code.schema';
 import {
+  RefreshToken,
+  RefreshTokenSchema,
+} from './schemas/refresh-token.schema';
+import {
   AdminInvite,
   AdminInviteSchema,
 } from '../superadmin/schema/admin-invite.schema';
@@ -24,6 +28,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MongooseModule.forFeature([
       { name: ExchangeToken.name, schema: ExchangeTokenSchema },
       { name: HandoffCode.name, schema: HandoffCodeSchema },
+      { name: RefreshToken.name, schema: RefreshTokenSchema },
       { name: AdminInvite.name, schema: AdminInviteSchema },
     ]),
     UsersModule,
@@ -33,7 +38,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
+        // Short-lived on purpose: sessions are kept alive by the rotating
+        // refresh token (POST /auth/refresh), not by a long JWT.
+        // Keep in sync with ACCESS_TOKEN_TTL_MS in utils/cookie.util.ts.
+        signOptions: { expiresIn: '15m' },
       }),
     }),
   ],
