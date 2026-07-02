@@ -968,4 +968,69 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
     return { status: 'unknown' };
   }
 
+  async getEnrollmentStatusForSection(sectionId: string, instructorId: string) {
+    if (!Types.ObjectId.isValid(sectionId)) {
+      throw new BadRequestException('Invalid section ID');
+    }
+
+    // Verify instructor owns this section
+    const course = await this.courseModel
+      .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
+      .select('instructorId _id')
+      .exec();
+    if (!course) throw new NotFoundException('Section not found');
+
+    if (course.instructorId.toString() !== instructorId) {
+      throw new ForbiddenException('You do not own this section');
+    }
+
+    // Get current enrollment count
+    const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
+      course._id.toString(),
+      sectionId,
+    );
+
+    // Get the last approved quiz to determine baseline
+    const lastApprovedQuiz = await this.quizModel
+      .findOne({
+        sectionId: new Types.ObjectId(sectionId),
+        status: 'approved',
+      })
+      .sort({ createdAt: -1 })
+      .select('enrollmentCountAtApproval enrollmentCountAtGeneration quizGenerationNumber')
+      .exec();
+
+    let canGenerateQuiz = true;
+    let enrollmentsNeeded = 0;
+    let baselineEnrollmentCount = 0;
+    let newEnrollmentsSinceLastApproval = 0;
+
+    if (lastApprovedQuiz) {
+      // Use enrollmentCountAtApproval, fall back to enrollmentCountAtGeneration for backwards compatibility
+      baselineEnrollmentCount = lastApprovedQuiz.enrollmentCountAtApproval || lastApprovedQuiz.enrollmentCountAtGeneration || 0;
+      newEnrollmentsSinceLastApproval = currentEnrollmentCount - baselineEnrollmentCount;
+      
+      if (newEnrollmentsSinceLastApproval < QUIZ_REGEN_ENROLLMENT_THRESHOLD) {
+        canGenerateQuiz = false;
+        enrollmentsNeeded = QUIZ_REGEN_ENROLLMENT_THRESHOLD - newEnrollmentsSinceLastApproval;
+      }
+    } else {
+      // First quiz - no baseline needed
+      canGenerateQuiz = true;
+      enrollmentsNeeded = 0;
+    }
+
+    return {
+      sectionId,
+      currentEnrollmentCount,
+      baselineEnrollmentCount,
+      newEnrollmentsSinceLastApproval,
+      enrollmentThreshold: QUIZ_REGEN_ENROLLMENT_THRESHOLD,
+      enrollmentsNeeded,
+      canGenerateQuiz,
+      hasApprovedQuiz: !!lastApprovedQuiz,
+      lastApprovedQuizGeneration: lastApprovedQuiz?.quizGenerationNumber || 0,
+    };
+  }
+
 }
