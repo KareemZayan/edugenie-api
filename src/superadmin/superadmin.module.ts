@@ -5,6 +5,10 @@ import { SuperAdminService } from './superadmin.service';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import {
+  PayoutRequest,
+  PayoutRequestSchema,
+} from '../earnings/schema/payout-request.schema';
+import {
   AuditLog,
   AuditLogSchema,
 } from '../audit-logs/schemas/audit-log.schema';
@@ -30,6 +34,7 @@ import {
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Earning.name, schema: EarningSchema },
+      { name: PayoutRequest.name, schema: PayoutRequestSchema },
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
       { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema },

@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -32,5 +32,21 @@ export class EarningsController {
     @CurrentUser() user: { userId: string },
   ): Promise<EarningsPayoutResponse> {
     return this.earningsService.getMyPayouts(user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Post('request-payout')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Request a payout of my pending earnings' })
+  @SwaggerApiResponse({ status: 201, description: 'Payout request created.' })
+  @SwaggerApiResponse({
+    status: 400,
+    description: 'Below minimum threshold / no pending earnings.',
+  })
+  @SwaggerApiResponse({ status: 409, description: 'A request is already open.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  async requestPayout(@CurrentUser() user: { userId: string }) {
+    return this.earningsService.requestPayout(user.userId);
   }
 }
