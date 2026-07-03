@@ -54,6 +54,14 @@ import { AttachmentsModule } from './attachments/attachments.module';
         // RAG embeddings (Google Gemini text-embedding-004). Optional: without
         // it, RAG indexing is disabled but the rest of the app boots normally.
         GEMINI_API_KEY: Joi.string().allow('').optional(),
+        // RAG retrieval backend. Default (false) ranks candidate embeddings with
+        // in-Node cosine similarity. Set true to use Atlas $vectorSearch — create
+        // the indexes first with scripts/create-vector-indexes.mjs. Retrieval
+        // falls back to in-Node automatically if a vector query errors.
+        RAG_USE_VECTOR_SEARCH: Joi.boolean()
+          .truthy('true')
+          .falsy('false')
+          .default(false),
         NODE_ENV: Joi.string()
           .valid('development', 'production', 'test')
           .default('development'),
