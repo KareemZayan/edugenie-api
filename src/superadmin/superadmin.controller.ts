@@ -25,6 +25,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
+import { RejectPayoutDto } from './dto/reject-payout.dto';
 import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
 import { UpdatePlatformConfigDto } from './dto/update-platform-config.dto';
 import { AuditLogsFilterDto } from './dto/audit-logs-filter.dto';
@@ -150,22 +151,42 @@ export class SuperAdminController {
     return this.superAdminService.getPendingPayouts(query);
   }
 
-  @Patch('payouts/:instructorId/process')
-  @ApiOperation({ summary: 'Process payout' })
+  @Patch('payouts/:requestId/approve')
+  @ApiOperation({ summary: 'Approve (confirm) a payout request' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
-  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
-  @ApiParam({ name: 'instructorId', type: String })
+  @SwaggerApiResponse({ status: 400, description: 'Already processed.' })
+  @SwaggerApiResponse({ status: 404, description: 'Request not found.' })
+  @ApiParam({ name: 'requestId', type: String })
   @ApiBody({ type: ProcessPayoutDto })
   @ApiCookieAuth('jwt')
   @ApiBearerAuth()
   @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
   @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
-  async processPayout(
-    @Param('instructorId') instructorId: string,
+  async approvePayout(
+    @Param('requestId') requestId: string,
     @Body() dto: ProcessPayoutDto,
     @CurrentUser() user: { userId: string },
   ): Promise<PayoutProcessResponse> {
-    return this.superAdminService.processPayout(instructorId, user.userId, dto);
+    return this.superAdminService.approvePayout(requestId, user.userId, dto);
+  }
+
+  @Patch('payouts/:requestId/reject')
+  @ApiOperation({ summary: 'Reject (decline) a payout request' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 400, description: 'Already processed.' })
+  @SwaggerApiResponse({ status: 404, description: 'Request not found.' })
+  @ApiParam({ name: 'requestId', type: String })
+  @ApiBody({ type: RejectPayoutDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async rejectPayout(
+    @Param('requestId') requestId: string,
+    @Body() dto: RejectPayoutDto,
+    @CurrentUser() user: { userId: string },
+  ): Promise<PayoutProcessResponse> {
+    return this.superAdminService.rejectPayout(requestId, user.userId, dto);
   }
 
   @Get('platform-config')

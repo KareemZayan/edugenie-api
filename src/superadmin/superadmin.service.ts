@@ -12,6 +12,10 @@ import * as crypto from 'crypto';
 import { User } from '../users/schema/user.schema';
 import { Earning, EarningDocument } from '../earnings/schema/earning.schema';
 import {
+  PayoutRequest,
+  PayoutRequestDocument,
+} from '../earnings/schema/payout-request.schema';
+import {
   AuditLog,
   AuditLogDocument,
 } from '../audit-logs/schemas/audit-log.schema';
@@ -30,7 +34,9 @@ import {
 import { UserRole } from '../common/enums/user-role.enum';
 import { UserStatus } from '../common/enums/user-status.enum';
 import { EarningStatus } from '../common/enums/earning-status.enum';
+import { PayoutRequestStatus } from '../common/enums/payout-request-status.enum';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
+import { RejectPayoutDto } from './dto/reject-payout.dto';
 import { UpdatePlatformConfigDto } from './dto/update-platform-config.dto';
 import { AuditLogsFilterDto } from './dto/audit-logs-filter.dto';
 import { AdminActivityQueryDto } from './dto/admin-activity-query.dto';
@@ -56,6 +62,8 @@ export class SuperAdminService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Earning.name) private earningModel: Model<EarningDocument>,
+    @InjectModel(PayoutRequest.name)
+    private payoutRequestModel: Model<PayoutRequestDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
     @InjectModel(PlatformConfig.name)
     private platformConfigModel: Model<PlatformConfigDocument>,
@@ -445,35 +453,20 @@ export class SuperAdminService {
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
 
-    // Group Earning records by instructorId where status === 'PENDING'
-    const aggregationPipeline: any[] = [
-      { $match: { status: EarningStatus.PENDING } },
-      {
-        $group: {
-          _id: '$instructorId',
-          amount: { $sum: '$amount' },
-          earningsCount: { $sum: 1 },
-          periodStart: { $min: '$createdAt' },
-          periodEnd: { $max: '$createdAt' },
-        },
-      },
-    ];
+    // List open payout REQUESTS (instructor-initiated) awaiting a decision.
+    const match = { status: PayoutRequestStatus.PENDING };
+    const total = await this.payoutRequestModel.countDocuments(match);
 
-    const allGrouped = await this.earningModel
-      .aggregate(aggregationPipeline)
-      .exec();
-    const total = allGrouped.length;
-
-    const paginatedGrouped = await this.earningModel
+    const requests = await this.payoutRequestModel
       .aggregate([
-        ...aggregationPipeline,
-        { $sort: { periodStart: 1 } },
+        { $match: match },
+        { $sort: { createdAt: 1 } }, // oldest request first
         { $skip: skip },
         { $limit: limit },
         {
           $lookup: {
             from: 'users',
-            localField: '_id',
+            localField: 'instructorId',
             foreignField: '_id',
             as: 'instructor',
           },
@@ -482,13 +475,14 @@ export class SuperAdminService {
       ])
       .exec();
 
-    const data = paginatedGrouped.map((item) => ({
-      instructorId: item._id.toString(),
-      instructorName: `${item.instructor.firstName} ${item.instructor.lastName}`,
-      amount: item.amount,
-      earningsCount: item.earningsCount,
-      periodStart: item.periodStart,
-      periodEnd: item.periodEnd,
+    const data = requests.map((r) => ({
+      requestId: r._id.toString(),
+      instructorId: r.instructorId.toString(),
+      instructorName: `${r.instructor.firstName} ${r.instructor.lastName}`,
+      instructorEmail: r.instructor.email,
+      amount: r.amount,
+      earningsCount: r.earningsCount,
+      requestedAt: r.createdAt,
     }));
 
     return {
@@ -504,43 +498,45 @@ export class SuperAdminService {
     };
   }
 
-  async processPayout(
-    instructorId: string,
+  /**
+   * Superadmin CONFIRMS a payout request: the instructor's REQUESTED earnings
+   * become PAID_OUT and the request is marked APPROVED with the payout method +
+   * external reference. The instructor is notified.
+   */
+  async approvePayout(
+    requestId: string,
     superAdminId: string,
     dto: ProcessPayoutDto,
   ): Promise<PayoutProcessResponse> {
-    const config = await this.getPlatformConfig();
+    const request = await this.payoutRequestModel.findById(requestId).exec();
+    if (!request) {
+      throw new NotFoundException('Payout request not found');
+    }
+    if (request.status !== PayoutRequestStatus.PENDING) {
+      throw new BadRequestException(
+        'This payout request has already been processed',
+      );
+    }
+
+    const instructorObjId = request.instructorId;
+    const processedAt = new Date();
 
     const session = await this.earningModel.db.startSession();
     session.startTransaction();
-
     try {
-      const instructorObjId = new Types.ObjectId(instructorId);
-
-      const pendingEarnings = await this.earningModel
-        .find({ instructorId: instructorObjId, status: EarningStatus.PENDING })
-        .session(session)
-        .exec();
-
-      if (pendingEarnings.length === 0) {
-        throw new BadRequestException(
-          'No pending earnings for this instructor',
-        );
-      }
-
-      const totalAmount = pendingEarnings.reduce((sum, e) => sum + e.amount, 0);
-
-      if (totalAmount < config.minimumPayoutThreshold) {
-        throw new BadRequestException(
-          'Total pending amount is below the minimum payout threshold',
-        );
-      }
-
+      // The single open request owns all of this instructor's REQUESTED earnings.
       await this.earningModel.updateMany(
-        { instructorId: instructorObjId, status: EarningStatus.PENDING },
+        { instructorId: instructorObjId, status: EarningStatus.REQUESTED },
         { $set: { status: EarningStatus.PAID_OUT } },
         { session },
       );
+
+      request.status = PayoutRequestStatus.APPROVED;
+      request.method = dto.method;
+      request.reference = dto.reference;
+      request.processedBy = new Types.ObjectId(superAdminId);
+      request.processedAt = processedAt;
+      await request.save({ session });
 
       await this.auditLogModel.create(
         [
@@ -549,8 +545,9 @@ export class SuperAdminService {
             performedBy: new Types.ObjectId(superAdminId),
             targetUser: instructorObjId,
             details: {
-              amount: totalAmount,
-              earningsCount: pendingEarnings.length,
+              requestId: request._id.toString(),
+              amount: request.amount,
+              earningsCount: request.earningsCount,
               method: dto.method,
               reference: dto.reference,
             },
@@ -564,7 +561,7 @@ export class SuperAdminService {
           {
             userId: instructorObjId,
             title: 'Payout Processed',
-            message: `Your payout of ${totalAmount} EGP has been processed successfully. Reference: ${dto.reference}`,
+            message: `Your payout of ${request.amount} EGP has been processed successfully. Reference: ${dto.reference}`,
             type: 'PAYOUT_PROCESSED',
             isRead: false,
           },
@@ -576,12 +573,99 @@ export class SuperAdminService {
       session.endSession();
 
       return {
-        instructorId,
-        amount: totalAmount,
+        requestId: request._id.toString(),
+        instructorId: instructorObjId.toString(),
+        amount: request.amount,
         status: EarningStatus.PAID_OUT,
         processedBy: superAdminId,
-        processedAt: new Date(),
+        processedAt,
         reference: dto.reference,
+      };
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  }
+
+  /**
+   * Superadmin DECLINES a payout request: the instructor's REQUESTED earnings
+   * revert to PENDING (so they can request again later) and the request is
+   * marked REJECTED with a reason. The instructor is notified.
+   */
+  async rejectPayout(
+    requestId: string,
+    superAdminId: string,
+    dto: RejectPayoutDto,
+  ): Promise<PayoutProcessResponse> {
+    const request = await this.payoutRequestModel.findById(requestId).exec();
+    if (!request) {
+      throw new NotFoundException('Payout request not found');
+    }
+    if (request.status !== PayoutRequestStatus.PENDING) {
+      throw new BadRequestException(
+        'This payout request has already been processed',
+      );
+    }
+
+    const instructorObjId = request.instructorId;
+    const processedAt = new Date();
+
+    const session = await this.earningModel.db.startSession();
+    session.startTransaction();
+    try {
+      await this.earningModel.updateMany(
+        { instructorId: instructorObjId, status: EarningStatus.REQUESTED },
+        { $set: { status: EarningStatus.PENDING } },
+        { session },
+      );
+
+      request.status = PayoutRequestStatus.REJECTED;
+      request.note = dto.reason;
+      request.processedBy = new Types.ObjectId(superAdminId);
+      request.processedAt = processedAt;
+      await request.save({ session });
+
+      await this.auditLogModel.create(
+        [
+          {
+            action: 'PAYOUT_REJECTED',
+            performedBy: new Types.ObjectId(superAdminId),
+            targetUser: instructorObjId,
+            details: {
+              requestId: request._id.toString(),
+              amount: request.amount,
+              reason: dto.reason,
+            },
+          },
+        ],
+        { session },
+      );
+
+      await this.notificationModel.create(
+        [
+          {
+            userId: instructorObjId,
+            title: 'Payout Request Declined',
+            message: `Your payout request of ${request.amount} EGP was declined. Reason: ${dto.reason}`,
+            type: 'PAYOUT_REJECTED',
+            isRead: false,
+          },
+        ],
+        { session },
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return {
+        requestId: request._id.toString(),
+        instructorId: instructorObjId.toString(),
+        amount: request.amount,
+        status: PayoutRequestStatus.REJECTED,
+        processedBy: superAdminId,
+        processedAt,
+        note: dto.reason,
       };
     } catch (error) {
       await session.abortTransaction();

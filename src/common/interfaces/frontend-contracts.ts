@@ -537,16 +537,59 @@ export interface InstructorStudentListItem {
   enrolledAt: Date;
 }
 
+export type EarningStatusValue =
+  | 'PENDING'
+  | 'CLEARED'
+  | 'REQUESTED'
+  | 'PAID_OUT';
+export type PayoutRequestStatusValue = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface InstructorPayoutRequestItem {
+  id: string;
+  amount: number;
+  earningsCount: number;
+  status: PayoutRequestStatusValue;
+  method: string | null;
+  reference: string | null;
+  note: string | null;
+  requestedAt: Date;
+  processedAt: Date | null;
+}
+
 export interface EarningsPayoutResponse {
+  // The instructor only ever sees their share — never the full course price.
+  config: {
+    instructorSharePercent: number;
+    platformFeePercent: number;
+    minimumPayoutThreshold: number;
+  };
+  totals: {
+    totalEarned: number;
+    pending: number;
+    inReview: number;
+    paidOut: number;
+  };
+  /** Back-compat alias of totals.totalEarned. */
   totalEarned: number;
+  /** Back-compat alias of totals.pending. */
   pendingPayout: number;
+  canRequest: boolean;
+  openRequest: {
+    id: string;
+    amount: number;
+    earningsCount: number;
+    status: PayoutRequestStatusValue;
+    requestedAt: Date;
+  } | null;
   breakdown: {
     fromFullCourses: number;
     fromSections: number;
   };
+  requests: InstructorPayoutRequestItem[];
   history: Array<{
     date: Date;
     amount: number;
+    status: EarningStatusValue;
     type: 'full_course' | 'section';
     courseTitle: string;
     sectionTitle: string | null;
@@ -815,23 +858,26 @@ export interface AdminActivityItem {
 export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> {}
 
 export interface PendingPayoutListItem {
+  requestId: string;
   instructorId: string;
   instructorName: string;
+  instructorEmail: string;
   amount: number;
   earningsCount: number;
-  periodStart: Date;
-  periodEnd: Date;
+  requestedAt: Date;
 }
 
 export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}
 
 export interface PayoutProcessResponse {
+  requestId: string;
   instructorId: string;
   amount: number;
   status: string;
   processedBy: string;
   processedAt: Date;
-  reference: string;
+  reference?: string;
+  note?: string;
 }
 
 export interface PlatformConfigResponse {
