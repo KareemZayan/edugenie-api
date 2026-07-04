@@ -41,7 +41,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
         // Short-lived on purpose: sessions are kept alive by the rotating
         // refresh token (POST /auth/refresh), not by a long JWT.
         // Keep in sync with ACCESS_TOKEN_TTL_MS in utils/cookie.util.ts.
-        signOptions: { expiresIn: '15m' },
+        signOptions: { expiresIn: '2h' },
       }),
     }),
   ],

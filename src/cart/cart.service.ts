@@ -125,6 +125,18 @@ export class CartService {
         );
       }
       priceToSnapshot = section.price;
+    } else {
+      // FULL_COURSE: if the student already bought some sections, only charge
+      // the remaining balance so they never pay more than the full price total.
+      // (Fulfillment already upgrades their enrollment to full access on pay.)
+      const pricing = await this.enrollmentsService.getCoursePricingForStudent(
+        studentId,
+        courseId,
+      );
+      if (pricing.remainingPrice <= 0) {
+        throw new ConflictException('You already have access to this content');
+      }
+      priceToSnapshot = pricing.remainingPrice;
     }
 
     // Recognise an equivalent item already in the cart: a full-course purchase

@@ -130,6 +130,77 @@ export class EnrollmentsService {
     };
   }
 
+  /**
+   * What a student would pay to buy the FULL course *now*, given what they
+   * already own. If they bought individual sections, they only owe the balance:
+   *   remaining = max(0, fullPrice − Σ price(owned sections))
+   * so the total they ever pay never exceeds the full price. Used both to price
+   * a full-course add-to-cart and to show the right number on course cards.
+   */
+  async getCoursePricingForStudent(
+    studentId: string,
+    courseId: string,
+  ): Promise<{
+    courseId: string;
+    fullPrice: number;
+    ownedSectionValue: number;
+    remainingPrice: number;
+    owned: 'none' | 'section' | 'full';
+    ownedSectionCount: number;
+    totalSections: number;
+  }> {
+    const course = await this.courseModel
+      .findById(courseId)
+      .select('price sections');
+    if (!course) throw new NotFoundException('Course not found');
+
+    const fullPrice = course.price ?? 0;
+    const totalSections = course.sections.length;
+
+    const enrollment = await this.enrollmentModel.findOne({
+      studentId: new Types.ObjectId(studentId),
+      courseId: new Types.ObjectId(courseId),
+    });
+
+    if (enrollment?.type === PurchaseType.FULL_COURSE) {
+      return {
+        courseId,
+        fullPrice,
+        ownedSectionValue: fullPrice,
+        remainingPrice: 0,
+        owned: 'full',
+        ownedSectionCount: totalSections,
+        totalSections,
+      };
+    }
+
+    const ownedIds = new Set(
+      (enrollment?.sectionIds ?? []).map((id) => id.toString()),
+    );
+    let ownedSectionValue = 0;
+    for (const section of course.sections) {
+      if (ownedIds.has(section._id.toString())) {
+        ownedSectionValue += section.price ?? 0;
+      }
+    }
+
+    // round to cents to avoid float drift (e.g. 41 − 13.83)
+    const remainingPrice = Math.max(
+      0,
+      Math.round((fullPrice - ownedSectionValue) * 100) / 100,
+    );
+
+    return {
+      courseId,
+      fullPrice,
+      ownedSectionValue,
+      remainingPrice,
+      owned: ownedIds.size > 0 ? 'section' : 'none',
+      ownedSectionCount: ownedIds.size,
+      totalSections,
+    };
+  }
+
   // 1. "My Learning" Dashboard: Get all courses the student owns
   async getMyEnrollments(studentId: string, query: PaginateQueryDto) {
     const page = query.page || 1;

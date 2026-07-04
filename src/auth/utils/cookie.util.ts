@@ -1,7 +1,7 @@
 import type { Response, CookieOptions } from 'express';
 
 /** Access-token (JWT) lifetime — keep in sync with JwtModule signOptions. */
-export const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+export const ACCESS_TOKEN_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 /**
  * The refresh cookie is Path-scoped to the auth controller (global prefix
