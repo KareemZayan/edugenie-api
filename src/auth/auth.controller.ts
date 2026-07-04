@@ -414,9 +414,28 @@ export class AuthController {
   @ApiBody({ type: VerifyEmailDto })
   async verifyEmail(
     @Body() dto: VerifyEmailDto,
-  ): Promise<ApiResponse<{ message: string }>> {
-    const result = await this.authService.verifyEmail(dto.token);
-    return { success: true, data: result };
+    @Req() request: express.Request,
+    @Res({ passthrough: true }) response: express.Response,
+  ): Promise<ApiResponse<AuthResponse>> {
+    const ip = extractClientIp(request);
+    const userAgent = request.headers['user-agent'] || '';
+    const { message, token, isExchangeToken, refreshToken, refreshTtlMs, user } =
+      await this.authService.verifyEmail(dto.token, ip, userAgent);
+
+    // Staff/instructors get their session cookies now; students finalize at
+    // verify-exchange-token — the same handshake as login.
+    if (!isExchangeToken && token) {
+      setAuthCookies(response, {
+        accessToken: token,
+        refreshToken,
+        refreshTtlMs,
+      });
+    }
+
+    return {
+      success: true,
+      data: { message, user, exchangeToken: token },
+    };
   }
 
   @HttpCode(HttpStatus.OK)

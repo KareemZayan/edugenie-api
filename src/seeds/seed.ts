@@ -44,6 +44,7 @@ async function bootstrap() {
     firstName: 'System',
     lastName: 'Admin',
     role: UserRole.SUPERADMIN,
+    isVerified: true,
   });
 
   const instructor = await userModel.create({
@@ -52,6 +53,7 @@ async function bootstrap() {
     firstName: 'Jane',
     lastName: 'Doe',
     role: UserRole.INSTRUCTOR,
+    isVerified: true,
   });
 
   const student = await userModel.create({
@@ -60,6 +62,7 @@ async function bootstrap() {
     firstName: 'John',
     lastName: 'Smith',
     role: UserRole.STUDENT,
+    isVerified: true,
   });
 
   // 3. Seed Courses
