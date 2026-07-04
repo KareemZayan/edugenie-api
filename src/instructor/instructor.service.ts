@@ -33,107 +33,123 @@ export class InstructorService {
   ) { }
 
   async getDashboardOverview(
-    instructorId: string,
-  ): Promise<DashboardOverviewResponse> {
-    const instructorObjId = new Types.ObjectId(instructorId);
+  instructorId: string,
+): Promise<DashboardOverviewResponse> {
+  const instructorObjId = new Types.ObjectId(instructorId);
 
-    // 1. Total Earnings
-    const totalEarningsResult = await this.earningModel.aggregate([
-      { $match: { instructorId: instructorObjId } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-    const totalEarnings = totalEarningsResult[0]?.total || 0;
+  // 1. Total Earnings
+  const totalEarningsResult = await this.earningModel.aggregate([
+    { $match: { instructorId: instructorObjId } },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  const totalEarnings = totalEarningsResult[0]?.total || 0;
 
-    // 2. Earnings Change Percent
-    const now = new Date();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(now.getDate() - 30);
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(now.getDate() - 60);
+  // 2. Earnings Change Percent
+  const now = new Date();
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(now.getDate() - 30);
+  const sixtyDaysAgo = new Date();
+  sixtyDaysAgo.setDate(now.getDate() - 60);
 
-    const recentEarningsResult = await this.earningModel.aggregate([
-      {
-        $match: {
-          instructorId: instructorObjId,
-          createdAt: { $gte: thirtyDaysAgo },
-        },
+  const recentEarningsResult = await this.earningModel.aggregate([
+    {
+      $match: {
+        instructorId: instructorObjId,
+        createdAt: { $gte: thirtyDaysAgo },
       },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-    const recentEarnings = recentEarningsResult[0]?.total || 0;
+    },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  const recentEarnings = recentEarningsResult[0]?.total || 0;
 
-    const previousEarningsResult = await this.earningModel.aggregate([
-      {
-        $match: {
-          instructorId: instructorObjId,
-          createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo },
-        },
+  const previousEarningsResult = await this.earningModel.aggregate([
+    {
+      $match: {
+        instructorId: instructorObjId,
+        createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo },
       },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-    const previousEarnings = previousEarningsResult[0]?.total || 0;
+    },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  const previousEarnings = previousEarningsResult[0]?.total || 0;
 
-    let earningsChangePercent = 0;
-    if (previousEarnings === 0) {
-      earningsChangePercent = recentEarnings > 0 ? 100 : 0;
-    } else {
-      earningsChangePercent =
-        ((recentEarnings - previousEarnings) / previousEarnings) * 100;
-    }
-
-    // 3. Get instructor courses
-    const courses = await this.courseModel
-      .find({ instructorId: instructorObjId })
-      .select('_id')
-      .exec();
-    const courseIds = courses.map((c) => c._id);
-    const totalCourses = courseIds.length;
-
-    // 4. Total Students & New Students
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(now.getDate() - 7);
-
-    const totalStudentsResult = await this.enrollmentModel.distinct(
-      'studentId',
-      { courseId: { $in: courseIds } },
-    );
-    const totalStudents = totalStudentsResult.length;
-
-    const newStudentsResult = await this.enrollmentModel.distinct('studentId', {
-      courseId: { $in: courseIds },
-      createdAt: { $gte: sevenDaysAgo },
-    });
-    const newStudentsThisWeek = newStudentsResult.length;
-
-    // 5. Average Rating
-    const avgRatingResult = await this.reviewModel.aggregate([
-      { $match: { courseId: { $in: courseIds } } },
-      { $group: { _id: null, avg: { $avg: '$rating' } } },
-    ]);
-    const averageRating = avgRatingResult[0]?.avg || 0;
-
-    // 6. Pending Payout
-    const pendingPayoutResult = await this.earningModel.aggregate([
-      { $match: { instructorId: instructorObjId, status: 'PENDING' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-    const pendingPayout = pendingPayoutResult[0]?.total || 0;
-
-    // NOTE: nextPayoutDate is a placeholder — wire to real payout schedule when superadmin payout system is built
-    const nextPayoutDate = new Date();
-    nextPayoutDate.setDate(now.getDate() + (15 - (now.getDate() % 15)));
-
-    return {
-      totalEarnings,
-      earningsChangePercent,
-      totalStudents,
-      newStudentsThisWeek,
-      averageRating,
-      totalCourses,
-      pendingPayout,
-      nextPayoutDate,
-    };
+  let earningsChangePercent = 0;
+  if (previousEarnings === 0) {
+    earningsChangePercent = recentEarnings > 0 ? 100 : 0;
+  } else {
+    earningsChangePercent =
+      ((recentEarnings - previousEarnings) / previousEarnings) * 100;
   }
+
+  // 3. Get instructor courses
+  const courses = await this.courseModel
+    .find({ instructorId: instructorObjId })
+    .select('_id title courseStatus')
+    .exec();
+
+  const courseIds = courses.map((c) => c._id);
+
+  const activeCourses = courses.filter(
+    (c) => c.courseStatus === CourseStatus.PUBLISHED,
+  );
+
+  const totalCourses = activeCourses.length;
+
+  // ===== DEBUG =====
+  console.log(
+    courses.map((c) => ({
+      title: c.title,
+      status: c.courseStatus,
+    })),
+  );
+
+  console.log('Published Courses:', totalCourses);
+  // =================
+
+  // 4. Total Students & New Students
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(now.getDate() - 7);
+
+  const totalStudentsResult = await this.enrollmentModel.distinct(
+    'studentId',
+    { courseId: { $in: courseIds } },
+  );
+  const totalStudents = totalStudentsResult.length;
+
+  const newStudentsResult = await this.enrollmentModel.distinct('studentId', {
+    courseId: { $in: courseIds },
+    createdAt: { $gte: sevenDaysAgo },
+  });
+  const newStudentsThisWeek = newStudentsResult.length;
+
+  // 5. Average Rating
+  const avgRatingResult = await this.reviewModel.aggregate([
+    { $match: { courseId: { $in: courseIds } } },
+    { $group: { _id: null, avg: { $avg: '$rating' } } },
+  ]);
+  const averageRating = avgRatingResult[0]?.avg || 0;
+
+  // 6. Pending Payout
+  const pendingPayoutResult = await this.earningModel.aggregate([
+    { $match: { instructorId: instructorObjId, status: 'PENDING' } },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  const pendingPayout = pendingPayoutResult[0]?.total || 0;
+
+  const nextPayoutDate = new Date();
+  nextPayoutDate.setDate(now.getDate() + (15 - (now.getDate() % 15)));
+
+  return {
+    totalEarnings,
+    earningsChangePercent,
+    totalStudents,
+    newStudentsThisWeek,
+    averageRating,
+    totalCourses,
+    pendingPayout,
+    nextPayoutDate,
+  };
+}
 
   async getAttentionItems(
     instructorId: string,

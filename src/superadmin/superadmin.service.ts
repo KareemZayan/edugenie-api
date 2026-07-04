@@ -265,16 +265,23 @@ export class SuperAdminService {
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+    // Fetch platform config first to apply the correct fee/share split
+    const config = await this.platformConfigModel.findOne().lean().exec();
+    const platformFeePercent = config?.platformFeePercent ?? 20;
+    const instructorSharePercent = config?.instructorSharePercent ?? 80;
+
     const [
-      platformRevenueResult,
-      payoutLiabilityResult,
+      grossRevenueResult,
+      unpaidGrossResult,
       activeAdminsCount,
       pendingPayoutsResult,
       webhookFailures,
     ] = await Promise.all([
+      // Total gross sales (full course price collected)
       this.earningModel
         .aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
         .exec(),
+      // Gross sales not yet paid out to instructors
       this.earningModel
         .aggregate([
           { $match: { status: { $ne: EarningStatus.PAID_OUT } } },
@@ -301,8 +308,13 @@ export class SuperAdminService {
         .exec(),
     ]);
 
-    const platformRevenue = platformRevenueResult[0]?.total || 0;
-    const payoutLiability = payoutLiabilityResult[0]?.total || 0;
+    const grossRevenue = grossRevenueResult[0]?.total || 0;
+    const unpaidGross = unpaidGrossResult[0]?.total || 0;
+
+    // Platform Revenue = only the platform's share (e.g. 20% of gross)
+    const platformRevenue = Math.round((grossRevenue * platformFeePercent) / 100 * 100) / 100;
+    // Payout Liability = what the platform owes instructors from unpaid earnings (e.g. 80% of unpaid gross)
+    const payoutLiability = Math.round((unpaidGross * instructorSharePercent) / 100 * 100) / 100;
     const pendingPayouts = pendingPayoutsResult.length;
 
     const criticalAlerts: any[] = [];
@@ -347,12 +359,67 @@ export class SuperAdminService {
       });
     }
 
+    // ── Last 7 days daily revenue chart (platform share only) ────────────────
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const last7Earnings = await this.earningModel
+      .find({ createdAt: { $gte: sevenDaysAgo } })
+      .lean()
+      .exec();
+
+    // Build day buckets: key = "YYYY-M-D"
+    const buckets: { [key: string]: number } = {};
+    const chartLabels: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      buckets[key] = 0;
+      chartLabels.push(dayNames[d.getDay()]);
+    }
+    for (const e of last7Earnings) {
+      const d = new Date((e as any).createdAt);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (buckets[key] !== undefined) {
+        buckets[key] += (e.amount * platformFeePercent) / 100;
+      }
+    }
+    const chartData = Object.values(buckets).map(v => Math.round(v * 100) / 100);
+
+    // ── Revenue growth: this week vs previous week (platform share) ──────────
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    fourteenDaysAgo.setHours(0, 0, 0, 0);
+
+    const prevWeekEarnings = await this.earningModel
+      .find({ createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } })
+      .lean()
+      .exec();
+
+    const thisWeekGross = last7Earnings.reduce((sum, e) => sum + e.amount, 0);
+    const prevWeekGross = prevWeekEarnings.reduce((sum, e) => sum + e.amount, 0);
+
+    const thisWeekRev = (thisWeekGross * platformFeePercent) / 100;
+    const prevWeekRev = (prevWeekGross * platformFeePercent) / 100;
+
+    let revenueGrowthPercent = 0;
+    if (prevWeekRev > 0) {
+      revenueGrowthPercent = Math.round(((thisWeekRev - prevWeekRev) / prevWeekRev) * 1000) / 10;
+    } else if (thisWeekRev > 0) {
+      revenueGrowthPercent = 100;
+    }
+
     return {
       systemStatus: webhookFailures.length === 0 ? 'operational' : 'degraded',
       platformRevenue,
       payoutLiability,
       activeAdmins: activeAdminsCount,
       pendingPayouts,
+      revenueGrowthPercent,
+      revenueChart: { labels: chartLabels, data: chartData },
       criticalAlerts,
     };
   }
@@ -364,6 +431,25 @@ export class SuperAdminService {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
+
+    // ── Single aggregate: get last activity date per admin ──────────────────
+    const adminIds = admins.map((a) => a._id);
+    const lastActivityAgg = await this.auditLogModel
+      .aggregate([
+        { $match: { performedBy: { $in: adminIds } } },
+        {
+          $group: {
+            _id: '$performedBy',
+            lastActiveAt: { $max: '$createdAt' },
+          },
+        },
+      ])
+      .exec();
+
+    // Build a lookup map: adminId string → lastActiveAt Date
+    const lastActivityMap = new Map<string, Date>(
+      lastActivityAgg.map((r) => [r._id.toString(), r.lastActiveAt]),
+    );
 
     const adminList = await Promise.all(
       admins.map(async (admin) => {
@@ -380,8 +466,7 @@ export class SuperAdminService {
           email: admin.email,
           role: admin.role,
           status: admin.status,
-          // NOTE: lastActiveAt requires a login-timestamp field on User — not currently tracked
-          lastActiveAt: null,
+          lastActiveAt: lastActivityMap.get(admin._id.toString()) ?? null,
           actionsThisMonth,
         };
       }),
