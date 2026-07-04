@@ -76,6 +76,8 @@ export class NotificationsService {
     courseId?: string,
   ): Promise<NotificationDocument> {
     const userIdStr = userId.toString();
+    console.log(`[NOTIFICATION] Creating notification for user ${userIdStr}, type: ${type}`);
+    
     const notification = await this.notificationModel.create({
       userId: new Types.ObjectId(userId),
       title,
@@ -85,12 +87,19 @@ export class NotificationsService {
       isRead: false,
     });
 
+    console.log(`[NOTIFICATION] Notification created with ID ${notification._id}, triggering Pusher on channel user-${userIdStr}`);
+    
     // 👇 push it in real time to the user's channel
-    await this.pusherService.trigger(
-      `user-${userIdStr}`,
-      'new-notification',
-      new NotificationSerializer(notification.toObject() as any),
-    );
+    try {
+      await this.pusherService.trigger(
+        `user-${userIdStr}`,
+        'new-notification',
+        new NotificationSerializer(notification.toObject() as any),
+      );
+      console.log(`[NOTIFICATION] Pusher trigger SUCCESS for user ${userIdStr}`);
+    } catch (err) {
+      console.error(`[NOTIFICATION] Pusher trigger FAILED for user ${userIdStr}:`, err);
+    }
 
     // 👇 fan the same event out to email (Phase 3). Awaited so the send
     // actually completes on serverless (Vercel), but fully guarded so a mail
