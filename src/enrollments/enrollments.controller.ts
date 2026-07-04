@@ -99,6 +99,25 @@ export class EnrollmentsController {
     return this.enrollmentsService.getCourseAccess(user.userId, courseId);
   }
 
+  // What the student would pay to buy the full course now (full price minus the
+  // value of sections they already own). Drives the "remaining" price on cards.
+  @Get('pricing/:courseId')
+  @ApiOperation({ summary: 'Get the remaining full-course price for this user' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiParam({ name: 'courseId', type: String })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  getCoursePricing(
+    @Param('courseId') courseId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.enrollmentsService.getCoursePricingForStudent(
+      user.userId,
+      courseId,
+    );
+  }
+
   // The button click: "Mark Lesson as Complete"
   @Patch(':courseId/lessons/:lessonId/complete')
   @ApiOperation({ summary: 'Mark lesson complete' })
