@@ -211,6 +211,7 @@ export class AdminCoursesService {
     id: string,
     adminId: string,
   ): Promise<CourseApprovalResponse> {
+    console.log(`[APPROVE] Admin ${adminId} approving course ${id}`);
     const course = await this.courseModel.findById(id).exec();
     if (!course) {
       throw new NotFoundException('Course not found');
@@ -220,6 +221,7 @@ export class AdminCoursesService {
       throw new BadRequestException('Course is not pending review');
     }
 
+    console.log(`[APPROVE] Instructor ID: ${course.instructorId}`);
     course.courseStatus = CourseStatus.PUBLISHED;
     (course as any).approvedBy = new Types.ObjectId(adminId);
     (course as any).approvedAt = new Date();
@@ -235,6 +237,7 @@ export class AdminCoursesService {
       details: { courseId: course._id.toString(), courseTitle: course.title },
     });
 
+    console.log(`[APPROVE] Sending notification to instructor ${course.instructorId}`);
     await this.notificationsService.create(
       course.instructorId as Types.ObjectId,
       'Course Approved',
@@ -256,6 +259,7 @@ export class AdminCoursesService {
     adminId: string,
     dto: RejectCourseDto,
   ): Promise<CourseRejectionResponse> {
+    console.log(`[REJECT] Admin ${adminId} rejecting course ${id}`);
     const course = await this.courseModel.findById(id).exec();
     if (!course) {
       throw new NotFoundException('Course not found');
@@ -269,6 +273,7 @@ export class AdminCoursesService {
       throw new BadRequestException('Rejection reason is required');
     }
 
+    console.log(`[REJECT] Instructor ID: ${course.instructorId}`);
     course.courseStatus = CourseStatus.REJECTED;
     course.rejectionReason = dto.rejectionReason;
     course.rejectedBy = new Types.ObjectId(adminId);
@@ -289,6 +294,7 @@ export class AdminCoursesService {
       },
     });
 
+    console.log(`[REJECT] Sending notification to instructor ${course.instructorId}`);
     await this.notificationsService.create(
       course.instructorId as Types.ObjectId,
       'Course Rejected',
