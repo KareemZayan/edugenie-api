@@ -25,6 +25,7 @@ describe('AuthService', () => {
     lastName: 'User',
     avatar: null,
     isDeleted: false,
+    isVerified: true,
     status: UserStatus.ACTIVE,
     toObject: () => ({ _id: userId, firstName: 'Test', lastName: 'User' }),
   };

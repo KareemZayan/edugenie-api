@@ -164,8 +164,23 @@ export class AuthService {
     });
   }
 
-  /** Confirms an email-verification token. */
-  async verifyEmail(rawToken: string): Promise<{ message: string }> {
+  /**
+   * Confirms an email-verification token AND signs the user in, so a freshly
+   * verified user lands authenticated instead of being bounced to the login
+   * form. Returns the same session shape as `login`.
+   */
+  async verifyEmail(
+    rawToken: string,
+    ip: string,
+    userAgent: string,
+  ): Promise<{
+    message: string;
+    token: string;
+    isExchangeToken: boolean;
+    refreshToken?: string;
+    refreshTtlMs?: number;
+    user: UserSerializer;
+  }> {
     const user = await this.usersService.consumeEmailVerification(
       this.hashToken(rawToken),
     );
@@ -174,7 +189,28 @@ export class AuthService {
         'This verification link is invalid or has expired.',
       );
     }
-    return { message: 'Email verified successfully' };
+
+    // A deactivated account can verify its email but must not get a session.
+    if (user.isDeleted || user.status !== UserStatus.ACTIVE) {
+      return {
+        message: 'Email verified successfully',
+        token: '',
+        isExchangeToken: true,
+        user: this.serializeUser(user),
+      };
+    }
+
+    // rememberMe:false — a fresh device arriving straight from an email link.
+    const session = await this.issueSession(user, {
+      rememberMe: false,
+      ip,
+      userAgent,
+    });
+    return {
+      message: 'Email verified successfully',
+      ...session,
+      user: this.serializeUser(user),
+    };
   }
 
   /** Re-sends a verification link. Response is generic to avoid leaking accounts. */
@@ -549,29 +585,22 @@ export class AuthService {
       );
     }
 
-    let token: string;
-    let isExchangeToken = false;
-    let refreshToken: string | undefined;
-    let refreshTtlMs: number | undefined;
+    // The email must be verified before the first sign-in. The `code` lets the
+    // client detect this specific case and offer a "resend verification" action.
+    if (!user.isVerified) {
+      throw new ForbiddenException({
+        message:
+          'Please verify your email to sign in. Check your inbox for the verification link we sent you.',
+        code: 'EMAIL_NOT_VERIFIED',
+      });
+    }
 
-    if (user.role === UserRole.STUDENT) {
-      // Students get their cookies at verify-exchange-token; carry rememberMe
-      // on the exchange token so that step can pick the refresh TTL.
-      token = await this.generateExchangeToken(
-        user._id,
-        loginDto.rememberMe ?? false,
-      );
-      isExchangeToken = true;
-    } else {
-      const tokens = await this.issueTokenPair(user, {
+    const { token, isExchangeToken, refreshToken, refreshTtlMs } =
+      await this.issueSession(user, {
         rememberMe: loginDto.rememberMe,
         ip,
         userAgent,
       });
-      token = tokens.accessToken;
-      refreshToken = tokens.refreshToken;
-      refreshTtlMs = tokens.refreshTtlMs;
-    }
 
     // Don't block the login response on geo lookups / notification creation
     this.checkLoginDevice(user, ip, userAgent).catch((err) =>
@@ -584,6 +613,41 @@ export class AuthService {
       refreshToken,
       refreshTtlMs,
       user: this.serializeUser(user),
+    };
+  }
+
+  /**
+   * Mints a session for an already-authenticated user. Students receive a
+   * single-use exchange token (cookies are finalized at verify-exchange-token);
+   * staff/instructors receive an access + refresh token pair directly. Shared
+   * by `login` and `verifyEmail` so both sign-in paths behave identically.
+   */
+  private async issueSession(
+    user: User,
+    opts: { rememberMe?: boolean; ip: string; userAgent: string },
+  ): Promise<{
+    token: string;
+    isExchangeToken: boolean;
+    refreshToken?: string;
+    refreshTtlMs?: number;
+  }> {
+    if (user.role === UserRole.STUDENT) {
+      const token = await this.generateExchangeToken(
+        user._id,
+        opts.rememberMe ?? false,
+      );
+      return { token, isExchangeToken: true };
+    }
+    const tokens = await this.issueTokenPair(user, {
+      rememberMe: opts.rememberMe,
+      ip: opts.ip,
+      userAgent: opts.userAgent,
+    });
+    return {
+      token: tokens.accessToken,
+      isExchangeToken: false,
+      refreshToken: tokens.refreshToken,
+      refreshTtlMs: tokens.refreshTtlMs,
     };
   }
 
