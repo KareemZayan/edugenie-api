@@ -66,7 +66,11 @@ export class CloudinaryController {
   @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
   @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
   signUploadRequest(@Body() body: SignUploadDto) {
-    return this.cloudinaryService.generateSignature(body.folder, body.context);
+    return this.cloudinaryService.generateSignature(
+      body.folder,
+      body.context,
+      body.transcribe,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -144,7 +148,7 @@ export class CloudinaryController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @Post('trigger-transcription')
-  @ApiOperation({ summary: 'Manually trigger transcription for a video' })
+  @ApiOperation({ summary: 'Manually re-run transcription for a video (in place)' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
   @ApiCookieAuth('jwt')
   @ApiBearerAuth()
@@ -153,8 +157,8 @@ export class CloudinaryController {
   async triggerTranscription(
     @Body() body: { publicId: string; courseId: string; sectionId: string; lessonId: string },
   ) {
-    return this.cloudinaryService.triggerTranscription(
-      body.publicId,  
+    return this.cloudinaryService.retryTranscription(
+      body.publicId,
       body.courseId,
       body.sectionId,
       body.lessonId,

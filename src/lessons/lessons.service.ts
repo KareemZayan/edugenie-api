@@ -36,6 +36,12 @@ export class LessonsService {
     instructorId: string,
     createLessonDto: CreateLessonDto,
   ) {
+    // A lesson with a video starts as 'pending' — transcription was requested on
+    // the original signed upload; adoptTranscriptForPublicId flips it to 'ready'.
+    if (createLessonDto.videoUrl && createLessonDto.videoPublicId) {
+      (createLessonDto as any).transcriptStatus = 'pending';
+    }
+
     const updated = await this.courseModel
       .findOneAndUpdate(
         {
@@ -61,16 +67,16 @@ export class LessonsService {
     const createdLesson = lessons[lessons.length - 1];
     const lessonId = createdLesson?._id?.toString();
 
-    // after: const lessonId = createdLesson?._id?.toString();
-
-if (lessonId && createLessonDto.videoUrl && createLessonDto.videoPublicId) {
-  this.cloudinaryService.triggerTranscription(
-    createLessonDto.videoPublicId,
-    courseId,
-    sectionId,
-    lessonId,
-  ).catch(err => console.warn('Transcription trigger failed:', err));
-}
+    // Transcription was requested on the original signed upload, so there is
+    // nothing to (re)trigger here. Adopt the transcript now that the lesson
+    // exists — if the completion webhook already landed it in PendingTranscript
+    // this writes it straight onto the lesson; otherwise it checks Cloudinary.
+    // Best-effort, non-blocking.
+    if (lessonId && createLessonDto.videoPublicId) {
+      this.cloudinaryService
+        .adoptTranscriptForPublicId(createLessonDto.videoPublicId)
+        .catch((err) => console.warn('Transcript adoption failed:', err));
+    }
 
     // New Content Published — notify students with access to this section
     // Only notify if the lesson has a real video (not empty)
@@ -211,9 +217,12 @@ if (lessonId && createLessonDto.videoUrl && createLessonDto.videoPublicId) {
       updateLessonDto[safeKey];
   });
 
-  // If a new video is being attached, clear the stale transcript so polling re-checks Cloudinary
+  // If a new video is being attached, clear the stale transcript and mark it
+  // pending — the replacement is its own signed upload carrying raw_convert, so
+  // its completion webhook delivers a fresh transcript.
 if (updateLessonDto.videoPublicId) {
   updateFields['sections.$[s].lessons.$[l].transcript'] = undefined;
+  updateFields['sections.$[s].lessons.$[l].transcriptStatus'] = 'pending';
 }
   const updated = await this.courseModel
     .findOneAndUpdate(
@@ -240,15 +249,13 @@ if (updateLessonDto.videoPublicId) {
 
   await this.coursesService.syncMetadata(courseId);
 
-  // If the video was changed/added in this update, (re)trigger transcription
-  if (updateLessonDto.videoUrl && updateLessonDto.videoPublicId) {
-  this.cloudinaryService.triggerTranscription(
-    updateLessonDto.videoPublicId,
-    courseId,
-    sectionId,
-    lessonId,
-  ).catch(err => console.warn('Transcription trigger failed:', err));
-}
+  // If the video was changed/added, adopt the transcript for the new asset
+  // (webhook may have already landed it). Best-effort, non-blocking.
+  if (updateLessonDto.videoPublicId) {
+    this.cloudinaryService
+      .adoptTranscriptForPublicId(updateLessonDto.videoPublicId)
+      .catch((err) => console.warn('Transcript adoption failed:', err));
+  }
 
   return updated
     .toObject()
@@ -317,11 +324,17 @@ if (updateLessonDto.videoPublicId) {
         transcriptReady: true,
         transcript: lesson.transcript,
         videoReady: true,
+        transcriptStatus: 'ready' as const,
       };
     }
 
     if (!lesson.videoPublicId) {
-      return { videoReady: false, transcriptReady: false, transcript: null };
+      return {
+        videoReady: false,
+        transcriptReady: false,
+        transcript: null,
+        transcriptStatus: lesson.transcriptStatus ?? null,
+      };
     }
 
     const status = await this.cloudinaryService.getTranscriptionStatus(
@@ -329,26 +342,17 @@ if (updateLessonDto.videoPublicId) {
     );
 
     if (status.transcriptReady && status.transcriptText !== null) {
-      await this.courseModel
-        .updateOne(
-          { _id: new Types.ObjectId(courseId) },
-          {
-            $set: {
-              'sections.$[s].lessons.$[l].transcript': status.transcriptText,
-            },
-          },
-          {
-            arrayFilters: [
-              { 's._id': new Types.ObjectId(sectionId) },
-              { 'l._id': new Types.ObjectId(lessonId) },
-            ],
-          },
-        )
-        .exec();
+      // Persist + re-index through the shared funnel (matches by videoPublicId,
+      // sets transcriptStatus, and calls onTranscriptSaved) rather than a bare
+      // updateOne that skips RAG indexing.
+      await this.cloudinaryService.adoptTranscriptForPublicId(
+        lesson.videoPublicId,
+      );
       return {
         videoReady: true,
         transcriptReady: true,
         transcript: status.transcriptText,
+        transcriptStatus: 'ready' as const,
       };
     }
 
@@ -356,6 +360,7 @@ if (updateLessonDto.videoPublicId) {
       videoReady: status.videoReady,
       transcriptReady: false,
       transcript: null,
+      transcriptStatus: lesson.transcriptStatus ?? 'pending',
     };
   }
 

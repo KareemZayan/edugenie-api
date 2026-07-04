@@ -399,49 +399,10 @@ export class WebhooksController {
         }
       }
 
-      // ── Handle transcription completion ─────────────────────────
-      if (
-        body.notification_type === 'raw_convert' &&
-        body.status === 'complete' &&
-        body.output_public_id
-      ) {
-        const videoPublicId: string = (body.output_public_id as string).replace(/\.transcript$/, '');
-        const transcriptUrl: string = body.secure_url || body.url || '';
-        let transcriptText: string | null = null;
-
-        try {
-          if (transcriptUrl) {
-            const response = await fetch(transcriptUrl);
-            if (response.ok) {
-              const json = await response.json() as any;
-              if (json?.results && Array.isArray(json.results)) {
-                transcriptText = json.results
-                  .map((r: any) => r.alternatives?.[0]?.transcript || '')
-                  .filter(Boolean)
-                  .join(' ')
-                  .trim() || null;
-              } else if (Array.isArray(json)) {
-                transcriptText = json
-                  .map((r: any) => r.alternatives?.[0]?.transcript || r.transcript || '')
-                  .filter(Boolean)
-                  .join(' ')
-                  .trim() || null;
-              }
-            }
-          }
-
-          if (transcriptText && videoPublicId) {
-            await this.courseModel.updateOne(
-              { 'sections.lessons.videoPublicId': videoPublicId },
-              { $set: { 'sections.$[].lessons.$[l].transcript': transcriptText } },
-              { arrayFilters: [{ 'l.videoPublicId': videoPublicId }] },
-            );
-            console.log(`[Webhook] Transcript saved for ${videoPublicId}`);
-          }
-        } catch (err) {
-          console.error('[Webhook] Failed to save transcript:', err);
-        }
-      }
+      // Transcription completion is handled solely by the SIGNED endpoint
+      // POST /api/cloudinary/webhook (CloudinaryService.processTranscriptionWebhook),
+      // which also re-indexes RAG and holds transcripts that arrive before their
+      // lesson exists. This unsigned endpoint only syncs video duration.
 
       res.status(200).send();
     } catch (error) {
