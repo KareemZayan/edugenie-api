@@ -11,6 +11,11 @@ import helmet from 'helmet';
 import express from 'express';
 import { IncomingMessage, ServerResponse } from 'http';
 
+// Raise the serverless function timeout: the Cloudinary upload webhook runs
+// Gemini transcription inline (~15-40s for a lesson's audio). Default ~10s would
+// kill it. 60s is the Hobby ceiling; raise further on Pro if needed.
+export const config = { maxDuration: 60 };
+
 let cachedApp: express.Express | null = null;
 
 async function createApp(): Promise<express.Express> {

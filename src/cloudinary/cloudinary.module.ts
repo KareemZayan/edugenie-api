@@ -7,6 +7,7 @@ import { CoursesModule } from '../courses/courses.module';
 import { CloudinaryController } from './cloudinary.controller';
 import { CloudinaryService } from './cloudinary.service';
 import { RagModule } from '../rag/rag.module';
+import { GeminiTranscriptionProvider } from '../ai/gemini-transcription.provider';
 import {
   PendingTranscript,
   PendingTranscriptSchema,
@@ -23,7 +24,7 @@ import {
     RagModule,
   ],
   controllers: [CloudinaryController],
-  providers: [CloudinaryService],
+  providers: [CloudinaryService, GeminiTranscriptionProvider],
   exports: [CloudinaryService],
 })
 export class CloudinaryModule {}

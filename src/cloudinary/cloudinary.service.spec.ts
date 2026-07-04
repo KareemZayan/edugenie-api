@@ -4,8 +4,8 @@ import { CloudinaryService } from './cloudinary.service';
 
 /**
  * Focused unit tests for the network-free signing logic. We instantiate the
- * service directly (rather than via a Nest TestingModule) so no Mongoose models
- * or Cloudinary network calls are exercised.
+ * service directly (no Nest TestingModule) so no Mongoose models / Cloudinary
+ * network calls are exercised.
  */
 describe('CloudinaryService.generateSignature', () => {
   const API_SECRET = 'test_secret_key';
@@ -31,14 +31,15 @@ describe('CloudinaryService.generateSignature', () => {
 
     return new CloudinaryService(
       config,
-      {} as any, // courseModel — unused by generateSignature
-      {} as any, // pendingTranscriptModel — unused by generateSignature
+      {} as any, // courseModel
+      {} as any, // pendingTranscriptModel
       {} as any, // coursesService
       {} as any, // indexing
+      {} as any, // transcription
     );
   };
 
-  it('omits raw_convert / notification_url when transcribe is not set', () => {
+  it('omits notification_url when transcribe is not set', () => {
     const res = makeService().generateSignature('edugenie/x', 'courseId=1');
     expect(res.raw_convert).toBe('');
     expect(res.notification_url).toBe('');
@@ -50,23 +51,18 @@ describe('CloudinaryService.generateSignature', () => {
     expect(res.signature).toBe(expected);
   });
 
-  it('signs raw_convert + notification_url when transcribe is true', () => {
-    const res = makeService().generateSignature(
-      'edugenie/x',
-      'courseId=1',
-      true,
-    );
-    expect(res.raw_convert).toBe('google_speech');
+  it('signs notification_url (but never raw_convert) when transcribe is true', () => {
+    const res = makeService().generateSignature('edugenie/x', 'courseId=1', true);
+    expect(res.raw_convert).toBe('');
     expect(res.notification_url).toBe(WEBHOOK);
 
-    // The signature MUST cover the exact params (including raw_convert +
-    // notification_url) the frontend will re-send, or Cloudinary rejects it.
+    // The signature must cover the exact params the frontend re-sends
+    // (notification_url), or Cloudinary rejects the upload.
     const expected = cloudinary.utils.api_sign_request(
       {
         timestamp: res.timestamp,
         folder: 'edugenie/x',
         context: 'courseId=1',
-        raw_convert: 'google_speech',
         notification_url: WEBHOOK,
       },
       API_SECRET,
