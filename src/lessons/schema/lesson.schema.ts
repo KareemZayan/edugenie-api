@@ -19,6 +19,11 @@ export class Lesson {
 
   @Prop({ trim: true })
   transcript?: string;
+
+  // Lifecycle of the auto-generated transcript: 'pending' while google_speech
+  // runs, 'ready' once saved, 'failed' if it never produced usable text.
+  @Prop({ enum: ['pending', 'ready', 'failed'] })
+  transcriptStatus?: 'pending' | 'ready' | 'failed';
 }
 
 export const LessonSchema = SchemaFactory.createForClass(Lesson);

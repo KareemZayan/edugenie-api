@@ -22,6 +22,9 @@ export class LessonSerializer {
   @ApiProperty({ example: 'string_example' })
   transcript: string;
   @Expose()
+  @ApiProperty({ required: false, example: 'ready' })
+  transcriptStatus?: 'pending' | 'ready' | 'failed';
+  @Expose()
   @ApiProperty({ example: 1 })
   order: number;
   @Expose()

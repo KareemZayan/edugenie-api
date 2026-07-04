@@ -6,6 +6,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { Course } from '../courses/schema/course.schema';
 import { CoursesService } from '../courses/courses.service';
 import { IndexingService } from '../rag/indexing.service';
+import { PendingTranscript } from './schema/pending-transcript.schema';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -15,6 +16,8 @@ export class CloudinaryService {
   constructor(
     private configService: ConfigService,
     @InjectModel(Course.name) private courseModel: Model<Course>,
+    @InjectModel(PendingTranscript.name)
+    private pendingTranscriptModel: Model<PendingTranscript>,
     private coursesService: CoursesService,
     private readonly indexing: IndexingService,
   ) {
@@ -25,22 +28,44 @@ export class CloudinaryService {
     });
   }
 
-  generateSignature(folderPath: string, context?: string) {
+  /**
+   * Sign a direct Cloudinary upload. When `transcribe` is set (lesson videos
+   * only), the google_speech add-on is requested ON THE ORIGINAL UPLOAD via
+   * `raw_convert` — so transcription runs in the same pass, with no second
+   * full-video round-trip, no duplicate `_transcribed_` asset, and no delete.
+   * Completion is delivered to `CLOUDINARY_WEBHOOK_URL` (per-upload, so avatar/
+   * thumbnail/attachment uploads never hit the transcript webhook).
+   *
+   * Cloudinary signs every param except file/api_key/resource_type/cloud_name/
+   * signature, so the frontend MUST append the returned `raw_convert` /
+   * `notification_url` strings verbatim or the signature won't match.
+   */
+  generateSignature(folderPath: string, context?: string, transcribe?: boolean) {
     const timestamp = Math.round(Date.now() / 1000);
 
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
     const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
+    const notificationUrl = this.configService.get<string>(
+      'CLOUDINARY_WEBHOOK_URL',
+    );
 
     const paramsToSign: Record<string, any> = {
       timestamp,
       folder: folderPath,
-      // raw_convert removed — transcription is now triggered explicitly,
-      // after the lesson exists, via triggerTranscription()
     };
 
     if (context) {
       paramsToSign.context = context;
+    }
+
+    let rawConvert = '';
+    if (transcribe) {
+      rawConvert = 'google_speech';
+      paramsToSign.raw_convert = rawConvert;
+      if (notificationUrl) {
+        paramsToSign.notification_url = notificationUrl;
+      }
     }
 
     const signature = cloudinary.utils.api_sign_request(
@@ -52,7 +77,10 @@ export class CloudinaryService {
       timestamp,
       apiKey,
       cloudName,
-      raw_convert: '', // no longer sent for signing; kept in shape only if frontend still reads it
+      // Echo back the EXACT signed strings so the frontend appends them
+      // byte-for-byte to the upload FormData.
+      raw_convert: rawConvert,
+      notification_url: transcribe && notificationUrl ? notificationUrl : '',
     };
   }
 
@@ -155,16 +183,9 @@ export class CloudinaryService {
       if (updated.modifiedCount > 0) {
         this.logger.log(`Updated lesson ${lessonId} with video data`);
         await this.coursesService.syncMetadata(courseId);
-
-        // Trigger transcription for the newly uploaded video
-        // This handles the case where transcription wasn't set up at upload time
-        // (e.g., when draft IDs were used)
-        try {
-          await this.triggerTranscription(public_id, courseId, sectionId, lessonId);
-        } catch (transcribeError) {
-          // Non-blocking - transcription is a best-effort feature
-          this.logger.warn(`Failed to trigger transcription for lesson ${lessonId}:`, transcribeError);
-        }
+        // Transcription is now requested on the ORIGINAL signed upload
+        // (raw_convert=google_speech), so there is nothing to trigger here —
+        // its completion arrives separately via processTranscriptionWebhook.
       } else {
         this.logger.warn(`No lesson found for ${lessonId}`);
       }
@@ -217,13 +238,14 @@ export class CloudinaryService {
     }
 
     // Match the lesson by videoPublicId rather than threading course/section/
-    // lesson ids through the webhook — triggerTranscription already stored this
-    // asset id on the lesson, so it is a unique handle back to the right lesson.
+    // lesson ids through the webhook — the signed upload stored this asset id on
+    // the lesson, so it is a unique handle back to the right lesson.
     const result = await this.courseModel.updateOne(
       { 'sections.lessons.videoPublicId': publicId },
       {
         $set: {
           'sections.$[].lessons.$[l].transcript': status.transcriptText,
+          'sections.$[].lessons.$[l].transcriptStatus': 'ready',
         },
       },
       { arrayFilters: [{ 'l.videoPublicId': publicId }] },
@@ -240,92 +262,104 @@ export class CloudinaryService {
       if (course) await this.indexing.onTranscriptSaved(course._id.toString());
       return true;
     }
-    this.logger.warn(
-      `No lesson found with videoPublicId ${publicId} to save transcript`,
+
+    // No lesson references this asset yet — the completion webhook beat the
+    // course-builder's lesson-create. Hold the transcript keyed by publicId so
+    // addLesson/updateLesson can adopt it once the lesson exists. TTL cleans up
+    // holds whose lesson is never created.
+    await this.pendingTranscriptModel.updateOne(
+      { videoPublicId: publicId },
+      { $set: { transcript: status.transcriptText, createdAt: new Date() } },
+      { upsert: true },
+    );
+    this.logger.log(
+      `No lesson yet for ${publicId}; held transcript in PendingTranscript`,
     );
     return false;
   }
 
   /**
-   * Retroactively schedule google_speech transcription on an already-uploaded
-   * Cloudinary video. Called after addLesson/updateLesson when we finally have
-   * a real lessonId that was not available at upload time (draft system).
+   * Adopt a transcript for a lesson that was just created/updated to reference
+   * `publicId`. Fast path: if the completion webhook already landed and parked
+   * the transcript in PendingTranscript, write it straight onto the lesson (no
+   * Cloudinary call). Otherwise fall back to fetching from Cloudinary. Either
+   * way the lesson is updated + re-indexed if the transcript is ready. Called
+   * (fire-and-forget) from addLesson/updateLesson.
    */
-  async triggerTranscription(
+  async adoptTranscriptForPublicId(publicId: string): Promise<boolean> {
+    const held = await this.pendingTranscriptModel
+      .findOneAndDelete({ videoPublicId: publicId })
+      .lean<{ transcript?: string } | null>()
+      .exec();
+
+    if (held?.transcript) {
+      const result = await this.courseModel.updateOne(
+        { 'sections.lessons.videoPublicId': publicId },
+        {
+          $set: {
+            'sections.$[].lessons.$[l].transcript': held.transcript,
+            'sections.$[].lessons.$[l].transcriptStatus': 'ready',
+          },
+        },
+        { arrayFilters: [{ 'l.videoPublicId': publicId }] },
+      );
+
+      if (result.modifiedCount > 0) {
+        const course = await this.courseModel
+          .findOne({ 'sections.lessons.videoPublicId': publicId })
+          .select('_id')
+          .lean<{ _id: Types.ObjectId } | null>()
+          .exec();
+        if (course) await this.indexing.onTranscriptSaved(course._id.toString());
+        this.logger.log(`Adopted held transcript for ${publicId}`);
+        return true;
+      }
+
+      // Lesson vanished/changed between hold and adoption — re-park the hold so
+      // a late-arriving lesson can still pick it up.
+      await this.pendingTranscriptModel.updateOne(
+        { videoPublicId: publicId },
+        { $set: { transcript: held.transcript, createdAt: new Date() } },
+        { upsert: true },
+      );
+      return false;
+    }
+
+    // Nothing held yet — the webhook may not have arrived. Try Cloudinary
+    // directly; persistTranscriptForPublicId saves it if ready (and re-holds if
+    // the lesson isn't matchable, which shouldn't happen here).
+    return this.persistTranscriptForPublicId(publicId);
+  }
+
+  /**
+   * Re-run google_speech transcription IN PLACE on an already-uploaded video,
+   * without re-uploading or creating a duplicate asset — used only by the
+   * manual "retry transcription" endpoint. `explicit()` applies the add-on to
+   * the existing asset; completion arrives via processTranscriptionWebhook.
+   */
+  async retryTranscription(
     publicId: string,
     courseId: string,
     sectionId: string,
     lessonId: string,
   ): Promise<{ queued: boolean }> {
     try {
-      const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
-      const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
-      const folderPath = publicId.substring(0, publicId.lastIndexOf('/'));
-      const newPublicId = `${publicId}_transcribed_${Date.now()}`;
+      const notificationUrl =
+        this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
 
-      const result = await cloudinary.uploader.upload(existing.secure_url, {
-        resource_type: 'video',
+      await cloudinary.uploader.explicit(publicId, {
         type: 'upload',
-        public_id: newPublicId,
-        asset_folder: folderPath,
+        resource_type: 'video',
         raw_convert: 'google_speech',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
 
-      if (result?.secure_url && result?.public_id) {
-        await this.courseModel.updateOne(
-          { _id: new Types.ObjectId(courseId) },
-          {
-            $set: {
-              'sections.$[s].lessons.$[l].videoUrl': result.secure_url,
-              'sections.$[s].lessons.$[l].videoPublicId': result.public_id,
-            },
-          },
-          {
-            arrayFilters: [
-              { 's._id': new Types.ObjectId(sectionId) },
-              { 'l._id': new Types.ObjectId(lessonId) },
-            ],
-          },
-        );
-
-        cloudinary.uploader.destroy(publicId, { resource_type: 'video' }).catch(() => { });
-
-        // NEW: poll internally until the transcript is ready, then save it ourselves
-        this.pollAndSaveTranscript(result.public_id, courseId, sectionId, lessonId);
-      }
-
-      this.logger.log(`Triggered transcription via new asset ${newPublicId}: ${JSON.stringify(result?.info)}`);
-      return { queued: true };
-    } catch (error: any) {
-      this.logger.error(`Failed to trigger transcription for ${publicId}:`, error?.message || error);
-      return { queued: false };
-    }
-  }
-
-  private async pollAndSaveTranscript(
-    publicId: string,
-    courseId: string,
-    sectionId: string,
-    lessonId: string,
-    attempt = 0,
-  ): Promise<void> {
-    const MAX_ATTEMPTS = 20;       // ~20 * 10s = ~3.3 minutes max
-    const INTERVAL_MS = 10_000;
-
-    if (attempt >= MAX_ATTEMPTS) {
-      this.logger.warn(`Gave up polling transcript for ${publicId} after ${MAX_ATTEMPTS} attempts`);
-      return;
-    }
-
-    const status = await this.getTranscriptionStatus(publicId);
-
-    if (status.transcriptReady && status.transcriptText) {
+      // Reflect that a transcript is (re)generating for this lesson.
       await this.courseModel.updateOne(
         { _id: new Types.ObjectId(courseId) },
         {
           $set: {
-            'sections.$[s].lessons.$[l].transcript': status.transcriptText,
+            'sections.$[s].lessons.$[l].transcriptStatus': 'pending',
           },
         },
         {
@@ -335,29 +369,25 @@ export class CloudinaryService {
           ],
         },
       );
-      this.logger.log(`Saved transcript for lesson ${lessonId}`);
-      // A transcript landed → (re)index that course's content chunks for RAG.
-      await this.indexing.onTranscriptSaved(courseId);
-      return;
-    }
 
-    setTimeout(
-      () => this.pollAndSaveTranscript(publicId, courseId, sectionId, lessonId, attempt + 1),
-      INTERVAL_MS,
-    );
+      this.logger.log(`Re-queued transcription in place for ${publicId}`);
+      return { queued: true };
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to retry transcription for ${publicId}:`,
+        error?.message || error,
+      );
+      return { queued: false };
+    }
   }
 
   async testTranscription(publicId: string) {
     try {
       const notificationUrl = this.configService.get<string>('CLOUDINARY_WEBHOOK_URL');
-      const existing = await cloudinary.api.resource(publicId, { resource_type: 'video' });
 
-      const result = await cloudinary.uploader.upload(existing.secure_url, {
-        resource_type: 'video',
+      const result = await cloudinary.uploader.explicit(publicId, {
         type: 'upload',
-        public_id: publicId,
-        overwrite: true,
-        invalidate: true,
+        resource_type: 'video',
         raw_convert: 'google_speech',
         ...(notificationUrl ? { notification_url: notificationUrl } : {}),
       } as any);
