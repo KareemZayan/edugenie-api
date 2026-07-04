@@ -122,21 +122,10 @@ export class CloudinaryController {
 
     const notificationType = body.notification_type;
 
+    // Upload complete → save video metadata and transcribe the audio via Gemini
+    // (runs inside this webhook invocation; serverless-safe).
     if (notificationType === 'upload') {
       await this.cloudinaryService.processUploadWebhook(body);
-    }
-
-    // raw_convert add-on completion (e.g. google_speech) arrives as an `info`
-    // notification. This is the serverless-safe path that persists the
-    // transcript without depending on the dashboard staying open or an
-    // in-process timer (both of which die on Vercel). Handle defensively in
-    // case the add-on result is delivered under a different notification_type.
-    if (
-      notificationType === 'info' ||
-      body.info_kind === 'google_speech' ||
-      (body as { info?: { raw_convert?: unknown } }).info?.raw_convert !== undefined
-    ) {
-      await this.cloudinaryService.processTranscriptionWebhook(body);
     }
 
     return { success: true };
@@ -164,9 +153,4 @@ export class CloudinaryController {
       body.lessonId,
     );
   }
-
-  @Get('test-transcript')
-async testTranscript(@Query('publicId') publicId: string) {
-  return this.cloudinaryService.testTranscription(publicId);
-}
 }

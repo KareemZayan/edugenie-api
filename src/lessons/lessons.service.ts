@@ -337,27 +337,11 @@ if (updateLessonDto.videoPublicId) {
       };
     }
 
-    const status = await this.cloudinaryService.getTranscriptionStatus(
-      lesson.videoPublicId,
-    );
-
-    if (status.transcriptReady && status.transcriptText !== null) {
-      // Persist + re-index through the shared funnel (matches by videoPublicId,
-      // sets transcriptStatus, and calls onTranscriptSaved) rather than a bare
-      // updateOne that skips RAG indexing.
-      await this.cloudinaryService.adoptTranscriptForPublicId(
-        lesson.videoPublicId,
-      );
-      return {
-        videoReady: true,
-        transcriptReady: true,
-        transcript: status.transcriptText,
-        transcriptStatus: 'ready' as const,
-      };
-    }
-
+    // Gemini (triggered by the Cloudinary upload webhook) is the transcript
+    // source now — no Cloudinary `.transcript` fetch. Just report stored state;
+    // the dashboard poll surfaces the transcript once the webhook saves it.
     return {
-      videoReady: status.videoReady,
+      videoReady: true,
       transcriptReady: false,
       transcript: null,
       transcriptStatus: lesson.transcriptStatus ?? 'pending',
