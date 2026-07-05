@@ -846,6 +846,11 @@ export interface SuperAdminDashboardOverviewResponse {
     labels: string[];
     data: number[];
   };
+  activityChart: {
+    labels: string[];
+    data: number[];
+  };
+  totalActivities7Days: number;
   criticalAlerts: Array<{
     type: 'webhook_failure' | 'payout_backlog';
     service?: string;
