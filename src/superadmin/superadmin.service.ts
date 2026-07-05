@@ -342,24 +342,7 @@ export class SuperAdminService {
     const payoutLiability = Math.round((unpaidGross * instructorSharePercent) / 100 * 100) / 100;
     const pendingPayouts = pendingPayoutsResult.length;
 
-    // Build 7-day chart labels + data
-    const chartLabels: string[] = [];
-    const chartData: number[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      const key = d.toISOString().split('T')[0];
-      chartLabels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-      const found = dailyRevenueLast7.find((r: any) => r._id === key);
-      chartData.push(found?.total ?? 0);
-    }
 
-    // Revenue growth: last 7 days vs previous 7 days
-    const currentWeekRevenue = chartData.reduce((a, b) => a + b, 0);
-    const prevWeekRevenue = dailyRevenuePrev7[0]?.total || 0;
-    const revenueGrowthPercent =
-      prevWeekRevenue === 0
-        ? currentWeekRevenue > 0 ? 100 : 0
-        : +((((currentWeekRevenue - prevWeekRevenue) / prevWeekRevenue) * 100).toFixed(1));
 
     const criticalAlerts: any[] = [];
 
@@ -405,12 +388,12 @@ export class SuperAdminService {
 
     // ── Last 7 days daily revenue chart (platform share only) ────────────────
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-    sevenDaysAgo.setHours(0, 0, 0, 0);
+    const chartSevenDaysAgo = new Date();
+    chartSevenDaysAgo.setDate(chartSevenDaysAgo.getDate() - 6);
+    chartSevenDaysAgo.setHours(0, 0, 0, 0);
 
     const last7Earnings = await this.earningModel
-      .find({ createdAt: { $gte: sevenDaysAgo } })
+      .find({ createdAt: { $gte: chartSevenDaysAgo } })
       .lean()
       .exec();
 
@@ -434,12 +417,12 @@ export class SuperAdminService {
     const chartData = Object.values(buckets).map(v => Math.round(v * 100) / 100);
 
     // ── Revenue growth: this week vs previous week (platform share) ──────────
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    fourteenDaysAgo.setHours(0, 0, 0, 0);
+    const chartFourteenDaysAgo = new Date();
+    chartFourteenDaysAgo.setDate(chartFourteenDaysAgo.getDate() - 14);
+    chartFourteenDaysAgo.setHours(0, 0, 0, 0);
 
     const prevWeekEarnings = await this.earningModel
-      .find({ createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } })
+      .find({ createdAt: { $gte: chartFourteenDaysAgo, $lt: chartSevenDaysAgo } })
       .lean()
       .exec();
 
