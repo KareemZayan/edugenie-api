@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -45,6 +46,7 @@ import {
   AdminInviteDocument,
 } from './schema/admin-invite.schema';
 import { MailService } from '../mail/mail.service';
+import { DisbursementService } from '../disbursement/disbursement.service';
 import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
 import {
   SuperAdminDashboardOverviewResponse,
@@ -75,7 +77,8 @@ export class SuperAdminService {
     private adminInviteModel: Model<AdminInviteDocument>,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
-  ) { }
+    private readonly disbursementService: DisbursementService,
+  ) {}
 
   private readonly INVITE_TTL_HOURS = 48;
 
@@ -565,8 +568,13 @@ export class SuperAdminService {
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
 
-    // List open payout REQUESTS (instructor-initiated) awaiting a decision.
-    const match = { status: PayoutRequestStatus.PENDING };
+    // Open payout REQUESTS awaiting a decision: PENDING (new) + FAILED (a
+    // gateway payout that needs a retry or cancellation).
+    const match = {
+      status: {
+        $in: [PayoutRequestStatus.PENDING, PayoutRequestStatus.FAILED],
+      },
+    };
     const total = await this.payoutRequestModel.countDocuments(match);
 
     const requests = await this.payoutRequestModel
@@ -595,6 +603,9 @@ export class SuperAdminService {
       amount: r.amount,
       earningsCount: r.earningsCount,
       requestedAt: r.createdAt,
+      paypalEmail: r.destination?.paypalEmail ?? null,
+      status: r.status,
+      failureReason: r.failureReason ?? null,
     }));
 
     return {
@@ -624,7 +635,12 @@ export class SuperAdminService {
     if (!request) {
       throw new NotFoundException('Payout request not found');
     }
-    if (request.status !== PayoutRequestStatus.PENDING) {
+    // PENDING = first decision; FAILED = a gateway payout that can be retried
+    // (approve) or cancelled (reject, reverting the earnings to PENDING).
+    if (
+      request.status !== PayoutRequestStatus.PENDING &&
+      request.status !== PayoutRequestStatus.FAILED
+    ) {
       throw new BadRequestException(
         'This payout request has already been processed',
       );
@@ -632,6 +648,119 @@ export class SuperAdminService {
 
     const instructorObjId = request.instructorId;
     const processedAt = new Date();
+
+    // AUTOMATED path: when the PayPal gateway is configured, initiate a real
+    // payout. PayPal payouts are async, so the request moves to PROCESSING and
+    // the covered earnings stay REQUESTED until the webhook confirms delivery
+    // (DisbursementService.applyWebhookEvent flips them to PAID_OUT).
+    if (this.disbursementService.isConfigured) {
+      if (!request.destination?.paypalEmail) {
+        throw new BadRequestException(
+          'This payout request has no PayPal destination on file.',
+        );
+      }
+
+      let reference: string;
+      try {
+        const result = await this.disbursementService.disburse({
+          _id: request._id,
+          amount: request.amount,
+          destination: request.destination,
+        });
+        if (result.status !== 'processing') {
+          // isConfigured is true here, so 'unconfigured' shouldn't occur —
+          // treat any non-processing result as a failure to be safe.
+          throw new Error('Gateway did not accept the payout');
+        }
+        reference = result.reference;
+      } catch (err) {
+        request.status = PayoutRequestStatus.FAILED;
+        request.failureReason = (err as Error)?.message ?? 'Payout failed';
+        request.method = 'paypal';
+        request.processedBy = new Types.ObjectId(superAdminId);
+        request.processedAt = processedAt;
+        await request.save();
+        await this.auditLogModel.create([
+          {
+            action: 'PAYOUT_FAILED',
+            performedBy: new Types.ObjectId(superAdminId),
+            targetUser: instructorObjId,
+            details: {
+              requestId: request._id.toString(),
+              amount: request.amount,
+              gateway: 'paypal',
+              reason: request.failureReason,
+            },
+          },
+        ]);
+        await this.notificationModel.create([
+          {
+            userId: instructorObjId,
+            title: 'Payout Failed',
+            message: `We could not start your payout of ${request.amount} EGP (${request.failureReason}). Our team will retry.`,
+            type: 'PAYOUT_FAILED',
+            isRead: false,
+          },
+        ]);
+        throw new ServiceUnavailableException(
+          `PayPal payout could not be initiated: ${request.failureReason}`,
+        );
+      }
+
+      request.status = PayoutRequestStatus.PROCESSING;
+      request.method = 'paypal';
+      request.gatewayProvider = 'paypal';
+      request.gatewayReference = reference;
+      request.reference = reference;
+      request.processedBy = new Types.ObjectId(superAdminId);
+      request.processedAt = processedAt;
+      await request.save();
+
+      await this.auditLogModel.create([
+        {
+          action: 'PAYOUT_PROCESSED',
+          performedBy: new Types.ObjectId(superAdminId),
+          targetUser: instructorObjId,
+          details: {
+            requestId: request._id.toString(),
+            amount: request.amount,
+            earningsCount: request.earningsCount,
+            gateway: 'paypal',
+            reference,
+          },
+        },
+      ]);
+
+      await this.notificationModel.create([
+        {
+          userId: instructorObjId,
+          title: 'Payout Initiated',
+          message: `Your payout of ${request.amount} EGP is being sent to your PayPal account. Reference: ${reference}`,
+          type: 'PAYOUT_PROCESSED',
+          isRead: false,
+        },
+      ]);
+
+      return {
+        requestId: request._id.toString(),
+        instructorId: instructorObjId.toString(),
+        amount: request.amount,
+        status: PayoutRequestStatus.PROCESSING,
+        processedBy: superAdminId,
+        processedAt,
+        reference,
+      };
+    }
+
+    // MANUAL fallback (gateway unconfigured): the superadmin sends the money
+    // externally and records the method + reference here.
+    if (!dto.method || !dto.reference) {
+      throw new BadRequestException(
+        'A payout method and reference are required to approve a payout manually.',
+      );
+    }
+    const method = dto.method;
+    const reference = dto.reference;
 
     const session = await this.earningModel.db.startSession();
     session.startTransaction();
@@ -644,8 +773,8 @@ export class SuperAdminService {
       );
 
       request.status = PayoutRequestStatus.APPROVED;
-      request.method = dto.method;
-      request.reference = dto.reference;
+      request.method = method;
+      request.reference = reference;
       request.processedBy = new Types.ObjectId(superAdminId);
       request.processedAt = processedAt;
       await request.save({ session });
@@ -714,7 +843,12 @@ export class SuperAdminService {
     if (!request) {
       throw new NotFoundException('Payout request not found');
     }
-    if (request.status !== PayoutRequestStatus.PENDING) {
+    // PENDING = first decision; FAILED = a gateway payout that can be retried
+    // (approve) or cancelled (reject, reverting the earnings to PENDING).
+    if (
+      request.status !== PayoutRequestStatus.PENDING &&
+      request.status !== PayoutRequestStatus.FAILED
+    ) {
       throw new BadRequestException(
         'This payout request has already been processed',
       );

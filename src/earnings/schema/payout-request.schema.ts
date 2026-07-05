@@ -1,4 +1,4 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Prop, Schema, SchemaFactory, raw } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { PayoutRequestStatus } from '../../common/enums/payout-request-status.enum';
 
@@ -29,12 +29,39 @@ export class PayoutRequest {
   })
   status: PayoutRequestStatus;
 
-  // Set at approval time (bank_transfer | paypal) + external reference.
+  // Set at approval time (bank_transfer | paypal) + external reference. For a
+  // gateway (PayPal) payout, `reference` also mirrors the gateway batch id.
   @Prop({ type: String, default: null })
   method: string | null;
 
   @Prop({ type: String, default: null })
   reference: string | null;
+
+  // Snapshot of the instructor's chosen payout destination, taken at request
+  // time so a later profile edit can't reroute an in-flight payout. Currently
+  // PayPal only.
+  // `raw()` is required here because this nested object has a field literally
+  // named `type` — without it Mongoose treats `destination` as a String path
+  // and rejects the object ("Cast to Object failed at path destination.type").
+  @Prop(
+    raw({
+      type: { type: String }, // 'paypal'
+      paypalEmail: { type: String },
+    }),
+  )
+  destination?: { type: string; paypalEmail: string } | null;
+
+  // Automated-disbursement bookkeeping. `gatewayProvider` is the gateway that
+  // handled (or is handling) the payout; `gatewayReference` is its batch/txn id;
+  // `failureReason` is set when a gateway payout is denied/returned.
+  @Prop({ type: String, default: null })
+  gatewayProvider: string | null;
+
+  @Prop({ type: String, default: null })
+  gatewayReference: string | null;
+
+  @Prop({ type: String, default: null })
+  failureReason: string | null;
 
   // Rejection reason / free note.
   @Prop({ type: String, default: null })

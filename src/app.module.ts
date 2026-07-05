@@ -32,6 +32,7 @@ import { EarningsModule } from './earnings/earnings.module';
 import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
 import { SuperAdminModule } from './superadmin/superadmin.module';
+import { DisbursementModule } from './disbursement/disbursement.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AttachmentsModule } from './attachments/attachments.module';
 @Module({
@@ -90,6 +91,21 @@ import { AttachmentsModule } from './attachments/attachments.module';
         GOOGLE_SUCCESS_REDIRECT: Joi.string().uri().allow('').optional(),
         CORS_ORIGINS: Joi.string().optional(),
         CLOUDINARY_WEBHOOK_URL: Joi.string().uri().optional(),
+        // Instructor payouts via PayPal Payouts API. All optional: without the
+        // client id/secret, disbursement degrades to the manual approve path.
+        PAYPAL_CLIENT_ID: Joi.string().allow('').optional(),
+        PAYPAL_CLIENT_SECRET: Joi.string().allow('').optional(),
+        PAYPAL_API_BASE: Joi.string()
+          .uri()
+          .allow('')
+          .default('https://api-m.sandbox.paypal.com'),
+        PAYPAL_WEBHOOK_ID: Joi.string().allow('').optional(),
+        // PayPal Payouts does not support EGP. Earnings are in EGP, so the payout
+        // is sent in PAYOUT_CURRENCY after multiplying by PAYOUT_FX_RATE
+        // (payout_amount = egp_amount * rate). Set a real rate before production;
+        // default 1 is only correct when PAYOUT_CURRENCY is itself EGP.
+        PAYOUT_CURRENCY: Joi.string().default('USD'),
+        PAYOUT_FX_RATE: Joi.number().positive().default(1),
       }),
     }),
     MongooseModule.forRootAsync({
@@ -131,6 +147,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     ReportsModule,
     AdminModule,
     SuperAdminModule,
+    DisbursementModule,
     AttachmentsModule,
   ],
 

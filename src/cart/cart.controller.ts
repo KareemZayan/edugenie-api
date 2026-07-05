@@ -70,6 +70,30 @@ export class CartController {
     return { success: true, message: 'Added to cart', data: response };
   }
 
+  @Post('course/:courseId')
+  @ApiOperation({
+    summary:
+      'Add a course, paying only for what the student does not already own',
+  })
+  @SwaggerApiResponse({ status: 201, description: 'Created successfully.' })
+  @SwaggerApiResponse({ status: 400, description: 'Bad Request.' })
+  @SwaggerApiResponse({ status: 409, description: 'Already fully owned.' })
+  @ApiParam({ name: 'courseId', type: String })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async addCourseSmart(
+    @Param('courseId') courseId: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const response = await this.cartService.addCourseSmart(
+      user.userId,
+      courseId,
+    );
+    return { success: true, message: 'Added to cart', data: response };
+  }
+
   @Delete(':itemId')
   @ApiOperation({ summary: 'Remove from cart' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })

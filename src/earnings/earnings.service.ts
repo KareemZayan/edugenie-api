@@ -9,6 +9,7 @@ import { Earning } from './schema/earning.schema';
 import { PayoutRequest } from './schema/payout-request.schema';
 import { Course } from '../courses/schema/course.schema';
 import { PlatformConfig } from '../superadmin/schema/platform-config.schema';
+import { User } from '../users/schema/user.schema';
 import { EarningStatus } from '../common/enums/earning-status.enum';
 import { PayoutRequestStatus } from '../common/enums/payout-request-status.enum';
 import {
@@ -31,7 +32,77 @@ export class EarningsService {
     @InjectModel(Course.name) private courseModel: Model<Course>,
     @InjectModel(PlatformConfig.name)
     private platformConfigModel: Model<PlatformConfig>,
+    @InjectModel(User.name) private userModel: Model<User>,
   ) {}
+
+  /** Partially hide an email for display: `jane@example.com` → `j***@example.com`. */
+  private maskEmail(email: string): string {
+    const [local, domain] = email.split('@');
+    if (!domain) return email;
+    const head = local.slice(0, 1);
+    return `${head}***@${domain}`;
+  }
+
+  /** Return the instructor's saved PayPal payout email (masked), or null. */
+  async getPayoutMethod(
+    instructorId: string,
+  ): Promise<{ paypalEmail: string | null; updatedAt: Date | null }> {
+    const user = await this.userModel
+      .findById(instructorId)
+      .select('payoutPaypal')
+      .lean<{ payoutPaypal?: { email?: string; updatedAt?: Date } | null }>()
+      .exec();
+    const email = user?.payoutPaypal?.email ?? null;
+    return {
+      paypalEmail: email ? this.maskEmail(email) : null,
+      updatedAt: user?.payoutPaypal?.updatedAt ?? null,
+    };
+  }
+
+  /** Set/replace the instructor's PayPal payout email. */
+  async setPayoutMethod(
+    instructorId: string,
+    paypalEmail: string,
+  ): Promise<{ paypalEmail: string; updatedAt: Date }> {
+    const email = paypalEmail.trim().toLowerCase();
+    const updatedAt = new Date();
+    await this.userModel
+      .updateOne(
+        { _id: new Types.ObjectId(instructorId) },
+        { $set: { payoutPaypal: { email, verifiedAt: null, updatedAt } } },
+      )
+      .exec();
+    return { paypalEmail: this.maskEmail(email), updatedAt };
+  }
+
+  /**
+   * Clear the saved PayPal payout email. Blocked while a payout is open
+   * (PENDING/PROCESSING) so we never lose the destination of an in-flight payout.
+   */
+  async clearPayoutMethod(instructorId: string): Promise<{ cleared: boolean }> {
+    const instructorObjId = new Types.ObjectId(instructorId);
+    const open = await this.payoutRequestModel
+      .findOne({
+        instructorId: instructorObjId,
+        status: {
+          $in: [PayoutRequestStatus.PENDING, PayoutRequestStatus.PROCESSING],
+        },
+      })
+      .lean()
+      .exec();
+    if (open) {
+      throw new ConflictException(
+        'You have a payout in progress. You can change your PayPal email after it is resolved.',
+      );
+    }
+    await this.userModel
+      .updateOne(
+        { _id: instructorObjId },
+        { $set: { payoutPaypal: null } },
+      )
+      .exec();
+    return { cleared: true };
+  }
 
   private async getConfig() {
     const config = await this.platformConfigModel.findOne().lean().exec();
@@ -74,6 +145,8 @@ export class EarningsService {
           status: string;
           method: string | null;
           reference: string | null;
+          gatewayReference?: string | null;
+          failureReason?: string | null;
           note: string | null;
           processedAt: Date | null;
           createdAt: Date;
@@ -146,7 +219,9 @@ export class EarningsService {
     history.sort((a, b) => b.date.getTime() - a.date.getTime());
 
     const openRequestDoc = requests.find(
-      (r) => r.status === PayoutRequestStatus.PENDING,
+      (r) =>
+        r.status === PayoutRequestStatus.PENDING ||
+        r.status === PayoutRequestStatus.PROCESSING,
     );
 
     return {
@@ -177,6 +252,8 @@ export class EarningsService {
         status: r.status as PayoutRequestStatusValue,
         method: r.method,
         reference: r.reference,
+        gatewayReference: r.gatewayReference ?? null,
+        failureReason: r.failureReason ?? null,
         note: r.note,
         requestedAt: r.createdAt,
         processedAt: r.processedAt,
@@ -193,17 +270,32 @@ export class EarningsService {
     const instructorObjId = new Types.ObjectId(instructorId);
     const config = await this.getConfig();
 
+    // A payout destination is required — this is where the money will be sent.
+    const user = await this.userModel
+      .findById(instructorId)
+      .select('payoutPaypal')
+      .lean<{ payoutPaypal?: { email?: string } | null }>()
+      .exec();
+    const paypalEmail = user?.payoutPaypal?.email;
+    if (!paypalEmail) {
+      throw new BadRequestException(
+        'Add a PayPal payout email before requesting a payout.',
+      );
+    }
+
     // One open request at a time.
     const existing = await this.payoutRequestModel
       .findOne({
         instructorId: instructorObjId,
-        status: PayoutRequestStatus.PENDING,
+        status: {
+          $in: [PayoutRequestStatus.PENDING, PayoutRequestStatus.PROCESSING],
+        },
       })
       .lean()
       .exec();
     if (existing) {
       throw new ConflictException(
-        'You already have a payout request awaiting approval.',
+        'You already have a payout request in progress.',
       );
     }
 
@@ -241,6 +333,9 @@ export class EarningsService {
             amount,
             earningsCount: pendingEarnings.length,
             status: PayoutRequestStatus.PENDING,
+            // Snapshot the destination so a later profile edit can't reroute
+            // this in-flight payout.
+            destination: { type: 'paypal', paypalEmail },
           },
         ],
         { session },
