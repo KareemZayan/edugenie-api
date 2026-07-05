@@ -3,6 +3,8 @@ import {
   IsOptional,
   IsArray,
   IsString,
+  IsNotEmpty,
+  IsEnum,
   IsBoolean,
   ValidateNested,
 } from 'class-validator';
@@ -18,15 +20,22 @@ class EditedQuestionDto {
   @ApiProperty({ required: false, description: 'Existing question _id. Omit for a new instructor-authored question.' })
   questionId?: string;
 
+  @IsString()
+  @IsNotEmpty()
   @ApiProperty({ example: 'string_example' })
   questionText!: string;
 
-  @ApiProperty()
+  @IsEnum(QuestionType)
+  @ApiProperty({ enum: QuestionType })
   type!: QuestionType;
 
+  @IsArray()
+  @IsString({ each: true })
   @ApiProperty({ example: ['string_example'], type: [String] })
   options!: string[];
 
+  @IsArray()
+  @IsString({ each: true })
   @ApiProperty({ example: ['string_example'], type: [String] })
   correctAnswers!: string[];
 
@@ -39,6 +48,11 @@ class EditedQuestionDto {
 }
 
 export class ApproveQuizDto {
+  @IsOptional()
+  @IsString()
+  @ApiProperty({ required: false, description: 'Required for new manual quizzes' })
+  sectionId?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
