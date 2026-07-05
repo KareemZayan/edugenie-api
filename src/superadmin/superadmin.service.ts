@@ -265,8 +265,9 @@ export class SuperAdminService {
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
     const now = new Date();
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const chartSevenDaysAgo = new Date();
+    chartSevenDaysAgo.setDate(chartSevenDaysAgo.getDate() - 6);
+    chartSevenDaysAgo.setHours(0, 0, 0, 0);
 
     // Fetch platform config first to apply the correct fee/share split
     const config = await this.platformConfigModel.findOne().lean().exec();
@@ -279,8 +280,8 @@ export class SuperAdminService {
       activeAdminsCount,
       pendingPayoutsResult,
       webhookFailures,
-      dailyRevenueLast7,
-      dailyRevenuePrev7,
+      dailyActivityLast7,
+      totalActivityLast7,
     ] = await Promise.all([
       // Total gross sales (full course price collected)
       this.earningModel
@@ -311,26 +312,20 @@ export class SuperAdminService {
         .find({ occurredAt: { $gte: twentyFourHoursAgo } })
         .sort({ occurredAt: -1 })
         .exec(),
-      // Last 7 days revenue grouped by day
-      this.earningModel
+      // Last 7 days activity grouped by day
+      this.auditLogModel
         .aggregate([
-          { $match: { createdAt: { $gte: sevenDaysAgo } } },
+          { $match: { createdAt: { $gte: chartSevenDaysAgo } } },
           {
             $group: {
               _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-              total: { $sum: '$amount' },
+              count: { $sum: 1 },
             },
           },
-          { $sort: { _id: 1 } },
         ])
         .exec(),
-      // Previous 7 days for growth calculation
-      this.earningModel
-        .aggregate([
-          { $match: { createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } } },
-          { $group: { _id: null, total: { $sum: '$amount' } } },
-        ])
-        .exec(),
+      // Total activities in last 7 days
+      this.auditLogModel.countDocuments({ createdAt: { $gte: chartSevenDaysAgo } }).exec(),
     ]);
 
     const grossRevenue = grossRevenueResult[0]?.total || 0;
@@ -388,9 +383,6 @@ export class SuperAdminService {
 
     // ── Last 7 days daily revenue chart (platform share only) ────────────────
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const chartSevenDaysAgo = new Date();
-    chartSevenDaysAgo.setDate(chartSevenDaysAgo.getDate() - 6);
-    chartSevenDaysAgo.setHours(0, 0, 0, 0);
 
     const last7Earnings = await this.earningModel
       .find({ createdAt: { $gte: chartSevenDaysAgo } })
@@ -415,6 +407,23 @@ export class SuperAdminService {
       }
     }
     const chartData = Object.values(buckets).map(v => Math.round(v * 100) / 100);
+
+    // ── Platform Activity Chart ──────────────────────────────────────────────
+    const activityBuckets: { [key: string]: number } = {};
+    const activityChartLabels: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+      activityBuckets[key] = 0;
+      activityChartLabels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    }
+    for (const act of dailyActivityLast7) {
+      if (activityBuckets[act._id] !== undefined) {
+        activityBuckets[act._id] = act.count;
+      }
+    }
+    const activityChartData = Object.values(activityBuckets);
 
     // ── Revenue growth: this week vs previous week (platform share) ──────────
     const chartFourteenDaysAgo = new Date();
@@ -447,6 +456,8 @@ export class SuperAdminService {
       pendingPayouts,
       revenueGrowthPercent,
       revenueChart: { labels: chartLabels, data: chartData },
+      activityChart: { labels: activityChartLabels, data: activityChartData },
+      totalActivities7Days: totalActivityLast7,
       criticalAlerts,
     };
   }
