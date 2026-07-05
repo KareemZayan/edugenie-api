@@ -19,6 +19,8 @@ import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { ApproveQuizDto, EditedQuestionDto } from './dto/approve-quiz.dto';
 import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.enum';
+import { QuizDifficulty } from '../common/enums/quizDifficulty.enum';
+import { QuestionType } from '../common/enums/questionsType.enum';
 import { ProgressService } from '../progress/progress.service';
 import { QuizSerializer } from './serializers/quiz.serializer';
 import { AiService } from '../ai/ai.service';
@@ -718,19 +720,71 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
     instructorId: string,
     dto: ApproveQuizDto,
   ) {
-    const quiz = await this.quizModel.findById(quizId).exec();
-    if (!quiz) throw new NotFoundException('Quiz not found');
+    let quiz;
+    let course;
+    if (!quizId || quizId === 'new' || quizId === 'undefined') {
+      if (!dto.sectionId) {
+        throw new BadRequestException('sectionId is required to approve a new manual quiz');
+      }
+      course = await this.courseModel
+        .findOne({ 'sections._id': new Types.ObjectId(dto.sectionId) })
+        .select('instructorId _id')
+        .exec();
+      if (!course) throw new NotFoundException('Section not found');
+      if (course.instructorId.toString() !== instructorId) {
+        throw new ForbiddenException('You do not own this section');
+      }
 
-    const course = await this.courseModel
-      .findOne({ 'sections._id': quiz.sectionId })
-      .select('instructorId _id')
-      .exec();
-    if (!course) throw new NotFoundException('Course for this quiz not found');
+      // Check: Maximum quizzes per section limit (5)
+      const approvedCount = await this.quizModel.countDocuments({
+        sectionId: new Types.ObjectId(dto.sectionId),
+        status: 'approved',
+      });
+      if (approvedCount >= MAX_QUIZZES_PER_SECTION) {
+        throw new ForbiddenException(
+          `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} quizzes.`,
+        );
+      }
 
-    // OWNERSHIP CHECK ENFORCED
-    if (course.instructorId.toString() !== instructorId) {
-      throw new ForbiddenException('You do not own this quiz');
+      // Delete non-approved quizzes
+      await this.quizModel.deleteMany({
+        sectionId: new Types.ObjectId(dto.sectionId),
+        status: { $ne: 'approved' },
+      });
+
+      const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
+        course._id.toString(),
+        dto.sectionId,
+      );
+
+      quiz = await this.quizModel.create({
+        sectionId: new Types.ObjectId(dto.sectionId),
+        difficulty: QuizDifficulty.MEDIUM,
+        numberOfQuestions: dto.editedQuestions?.length || 0,
+        questionType: QuestionType.MIXED,
+        generationStatus: QuizGenerationStatus.COMPLETED,
+        passingScore: 80,
+        questions: [],
+        enrollmentCountAtGeneration: currentEnrollmentCount,
+        quizGenerationNumber: approvedCount + 1,
+        enrollmentCountAtApproval: currentEnrollmentCount,
+      });
+    } else {
+      quiz = await this.quizModel.findById(quizId).exec();
+      if (!quiz) throw new NotFoundException('Quiz not found');
+
+      course = await this.courseModel
+        .findOne({ 'sections._id': quiz.sectionId })
+        .select('instructorId _id')
+        .exec();
+      if (!course) throw new NotFoundException('Course for this quiz not found');
+
+      // OWNERSHIP CHECK ENFORCED
+      if (course.instructorId.toString() !== instructorId) {
+        throw new ForbiddenException('You do not own this quiz');
+      }
     }
+
 
     const editedQuestions: EditedQuestionDto[] = dto.editedQuestions ?? [];
 
