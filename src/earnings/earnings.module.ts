@@ -12,6 +12,7 @@ import {
   PlatformConfig,
   PlatformConfigSchema,
 } from '../superadmin/schema/platform-config.schema';
+import { User, UserSchema } from '../users/schema/user.schema';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import {
       { name: PayoutRequest.name, schema: PayoutRequestSchema },
       { name: Course.name, schema: CourseSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
+      { name: User.name, schema: UserSchema },
     ]),
   ],
   controllers: [EarningsController],

@@ -28,9 +28,11 @@ import {
   AdminInvite,
   AdminInviteSchema,
 } from './schema/admin-invite.schema';
+import { DisbursementModule } from '../disbursement/disbursement.module';
 
 @Module({
   imports: [
+    DisbursementModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Earning.name, schema: EarningSchema },

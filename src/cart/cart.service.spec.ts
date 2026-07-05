@@ -10,6 +10,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 
 describe('CartService', () => {
   let service: CartService;
@@ -115,6 +116,180 @@ describe('CartService', () => {
       await expect(
         service.addToCart(studentId, 'full_course', courseId),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('addCourseSmart', () => {
+    const studentId = new Types.ObjectId().toString();
+    const courseId = new Types.ObjectId().toString();
+    const s1 = new Types.ObjectId();
+    const s2 = new Types.ObjectId();
+    const s3 = new Types.ObjectId();
+
+    beforeEach(() => {
+      enrollmentsService.getCourseAccess = jest.fn();
+      coursesService.findCourseDocument = jest.fn();
+      jest
+        .spyOn(service, 'getCart')
+        .mockResolvedValue({ items: [], subtotal: 0, total: 0 });
+    });
+
+    it('owns nothing → adds the full course once', async () => {
+      enrollmentsService.getCourseAccess.mockResolvedValue({
+        accessType: 'none',
+        accessibleSections: [],
+        totalSections: 3,
+      });
+      const add = jest
+        .spyOn(service, 'addToCart')
+        .mockResolvedValue({ items: [], subtotal: 0, total: 0 });
+
+      await service.addCourseSmart(studentId, courseId);
+
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(add).toHaveBeenCalledWith(
+        studentId,
+        PurchaseType.FULL_COURSE,
+        courseId,
+      );
+    });
+
+    it('owns some, all remaining priced → adds each unowned section', async () => {
+      enrollmentsService.getCourseAccess.mockResolvedValue({
+        accessType: 'section',
+        accessibleSections: [s1.toString()],
+        totalSections: 3,
+      });
+      coursesService.findCourseDocument.mockResolvedValue({
+        sections: [
+          { _id: s1, price: 10 },
+          { _id: s2, price: 20 },
+          { _id: s3, price: 30 },
+        ],
+      });
+      const add = jest
+        .spyOn(service, 'addToCart')
+        .mockResolvedValue({ items: [], subtotal: 0, total: 0 });
+
+      await service.addCourseSmart(studentId, courseId);
+
+      expect(add).toHaveBeenCalledTimes(2);
+      expect(add).toHaveBeenCalledWith(
+        studentId,
+        PurchaseType.SECTION,
+        courseId,
+        s2.toString(),
+      );
+      expect(add).toHaveBeenCalledWith(
+        studentId,
+        PurchaseType.SECTION,
+        courseId,
+        s3.toString(),
+      );
+      expect(add).not.toHaveBeenCalledWith(
+        studentId,
+        PurchaseType.FULL_COURSE,
+        courseId,
+      );
+    });
+
+    it('owns some, a remaining section is unpriced → falls back to full course', async () => {
+      enrollmentsService.getCourseAccess.mockResolvedValue({
+        accessType: 'section',
+        accessibleSections: [s1.toString()],
+        totalSections: 3,
+      });
+      coursesService.findCourseDocument.mockResolvedValue({
+        sections: [
+          { _id: s1, price: 10 },
+          { _id: s2, price: 20 },
+          { _id: s3, price: null },
+        ],
+      });
+      const add = jest
+        .spyOn(service, 'addToCart')
+        .mockResolvedValue({ items: [], subtotal: 0, total: 0 });
+
+      await service.addCourseSmart(studentId, courseId);
+
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(add).toHaveBeenCalledWith(
+        studentId,
+        PurchaseType.FULL_COURSE,
+        courseId,
+      );
+    });
+
+    it('already fully owns → ConflictException', async () => {
+      enrollmentsService.getCourseAccess.mockResolvedValue({
+        accessType: 'full_course',
+        accessibleSections: [s1.toString(), s2.toString(), s3.toString()],
+        totalSections: 3,
+      });
+      const add = jest.spyOn(service, 'addToCart');
+
+      await expect(
+        service.addCourseSmart(studentId, courseId),
+      ).rejects.toThrow(ConflictException);
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it('swallows a per-section "already in cart" conflict and keeps going', async () => {
+      enrollmentsService.getCourseAccess.mockResolvedValue({
+        accessType: 'section',
+        accessibleSections: [s1.toString()],
+        totalSections: 3,
+      });
+      coursesService.findCourseDocument.mockResolvedValue({
+        sections: [
+          { _id: s1, price: 10 },
+          { _id: s2, price: 20 },
+          { _id: s3, price: 30 },
+        ],
+      });
+      const add = jest
+        .spyOn(service, 'addToCart')
+        .mockRejectedValueOnce(new ConflictException('already in cart'))
+        .mockResolvedValue({ items: [], subtotal: 0, total: 0 });
+
+      await expect(
+        service.addCourseSmart(studentId, courseId),
+      ).resolves.toBeDefined();
+      expect(add).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('validateCart', () => {
+    it('re-prices a full-course item to the remaining balance (not the raw price)', async () => {
+      const studentId = new Types.ObjectId().toString();
+      const courseId = new Types.ObjectId();
+      const mockCart = {
+        _id: new Types.ObjectId(),
+        items: [
+          {
+            itemType: PurchaseType.FULL_COURSE,
+            courseId,
+            sectionId: undefined,
+            price: 78,
+          },
+        ],
+        save: jest.fn(),
+      };
+      cartModel.findOne = jest.fn().mockResolvedValue(mockCart);
+      enrollmentsService.hasDuplicate = jest.fn().mockResolvedValue(false);
+      coursesService.findCourseDocument = jest
+        .fn()
+        .mockResolvedValue({ price: 628, sections: [] });
+      enrollmentsService.getCoursePricingForStudent = jest
+        .fn()
+        .mockResolvedValue({ remainingPrice: 78 });
+
+      const result = await service.validateCart(studentId);
+
+      // Priced at remaining (78) → unchanged → no throw, no save.
+      expect(result).toBe(mockCart);
+      expect(mockCart.save).not.toHaveBeenCalled();
+      expect(enrollmentsService.getCoursePricingForStudent).toHaveBeenCalled();
     });
   });
 

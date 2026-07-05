@@ -542,7 +542,18 @@ export type EarningStatusValue =
   | 'CLEARED'
   | 'REQUESTED'
   | 'PAID_OUT';
-export type PayoutRequestStatusValue = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type PayoutRequestStatusValue =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'FAILED';
+
+export interface PayoutMethodResponse {
+  /** Masked PayPal email (e.g. `j***@example.com`), or null if none saved. */
+  paypalEmail: string | null;
+  updatedAt: Date | null;
+}
 
 export interface InstructorPayoutRequestItem {
   id: string;
@@ -551,6 +562,8 @@ export interface InstructorPayoutRequestItem {
   status: PayoutRequestStatusValue;
   method: string | null;
   reference: string | null;
+  gatewayReference?: string | null;
+  failureReason?: string | null;
   note: string | null;
   requestedAt: Date;
   processedAt: Date | null;
@@ -865,6 +878,12 @@ export interface PendingPayoutListItem {
   amount: number;
   earningsCount: number;
   requestedAt: Date;
+  /** PayPal destination the instructor chose (snapshot), if any. */
+  paypalEmail?: string | null;
+  /** PENDING (new) or FAILED (a gateway payout awaiting retry). */
+  status?: string;
+  /** Set when a gateway payout failed — why it failed. */
+  failureReason?: string | null;
 }
 
 export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}

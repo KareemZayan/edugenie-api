@@ -87,6 +87,23 @@ export class User extends Document {
     expiresAt: Date;
   };
 
+  // Instructor's PayPal payout destination. Where approved earnings are sent via
+  // the PayPal Payouts API. `verifiedAt` is reserved for a future email-confirm
+  // step (unused for now).
+  @Prop({
+    type: {
+      email: { type: String },
+      verifiedAt: { type: Date, default: null },
+      updatedAt: { type: Date },
+    },
+    _id: false,
+  })
+  payoutPaypal?: {
+    email: string;
+    verifiedAt?: Date | null;
+    updatedAt?: Date;
+  } | null;
+
   @Prop({ required: true, default: false })
   isVerified!: boolean;
 

@@ -185,6 +185,83 @@ export class CartService {
     return this.getCart(studentId);
   }
 
+  /**
+   * One-click "add this course, pay only what I don't own":
+   *  - owns nothing            → add the FULL course (full price).
+   *  - owns some sections      → add each unowned, individually-priced SECTION,
+   *                              so the cart shows the real remaining sum.
+   *  - a remaining section has  → fall back to a FULL_COURSE item (priced at the
+   *    no individual price        remaining balance by addToCart) so all
+   *                              remaining content is still purchasable.
+   *  - already fully owns       → Conflict.
+   * Per-item conflicts (already owned / already in cart) are swallowed, matching
+   * PlacementService.addRecommendedToCart.
+   */
+  async addCourseSmart(
+    studentId: string,
+    courseId: string,
+  ): Promise<CartResponse> {
+    if (!Types.ObjectId.isValid(courseId))
+      throw new BadRequestException('Invalid Course ID');
+
+    const access = await this.enrollmentsService.getCourseAccess(
+      studentId,
+      courseId,
+    );
+    const owned = new Set(access.accessibleSections);
+    if (
+      access.accessType === PurchaseType.FULL_COURSE ||
+      (access.totalSections > 0 && owned.size >= access.totalSections)
+    ) {
+      throw new ConflictException('You already have access to this content');
+    }
+
+    // Owns nothing → buy the whole course.
+    if (access.accessType === 'none' || owned.size === 0) {
+      await this.tryAdd(() =>
+        this.addToCart(studentId, PurchaseType.FULL_COURSE, courseId),
+      );
+      return this.getCart(studentId);
+    }
+
+    // Owns some sections → add the ones they don't have yet.
+    const course = await this.coursesService.findCourseDocument(courseId);
+    const unowned = course.sections.filter(
+      (s: any) => !owned.has(s._id.toString()),
+    );
+    const anyUnpriced = unowned.some(
+      (s: any) => s.price === null || s.price === undefined,
+    );
+
+    if (anyUnpriced) {
+      await this.tryAdd(() =>
+        this.addToCart(studentId, PurchaseType.FULL_COURSE, courseId),
+      );
+    } else {
+      for (const s of unowned) {
+        await this.tryAdd(() =>
+          this.addToCart(
+            studentId,
+            PurchaseType.SECTION,
+            courseId,
+            (s as any)._id.toString(),
+          ),
+        );
+      }
+    }
+
+    return this.getCart(studentId);
+  }
+
+  /** Run an add, swallowing "already owned / already in cart" conflicts. */
+  private async tryAdd(fn: () => Promise<unknown>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      if (!(e instanceof ConflictException)) throw e;
+    }
+  }
+
   async removeFromCart(
     studentId: string,
     itemId: string,
@@ -257,6 +334,16 @@ export class CartService {
             continue;
           }
           currentPrice = section.price;
+        } else {
+          // FULL_COURSE is charged at the remaining balance (full price minus the
+          // value of any sections the student already owns) — mirror addToCart so
+          // a partial owner isn't re-priced up to the full course price here.
+          const pricing =
+            await this.enrollmentsService.getCoursePricingForStudent(
+              studentId,
+              item.courseId.toString(),
+            );
+          currentPrice = pricing.remainingPrice;
         }
 
         if (item.price !== currentPrice) {
