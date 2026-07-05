@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Delete,
   Patch,
   Param,
   Body,
@@ -37,7 +36,7 @@ import {
 @Controller('admin/users')
 @ApiTags('Admin Users')
 export class AdminUsersController {
-  constructor(private readonly adminUsersService: AdminUsersService) {}
+  constructor(private readonly adminUsersService: AdminUsersService) { }
 
   @Get()
   @ApiOperation({ summary: 'Get users' })

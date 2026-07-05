@@ -75,7 +75,7 @@ export class SuperAdminService {
     private adminInviteModel: Model<AdminInviteDocument>,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
-  ) {}
+  ) { }
 
   private readonly INVITE_TTL_HOURS = 48;
 
@@ -263,7 +263,10 @@ export class SuperAdminService {
   }
 
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
+    const now = new Date();
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     // Fetch platform config first to apply the correct fee/share split
     const config = await this.platformConfigModel.findOne().lean().exec();
@@ -276,6 +279,8 @@ export class SuperAdminService {
       activeAdminsCount,
       pendingPayoutsResult,
       webhookFailures,
+      dailyRevenueLast7,
+      dailyRevenuePrev7,
     ] = await Promise.all([
       // Total gross sales (full course price collected)
       this.earningModel
@@ -306,6 +311,26 @@ export class SuperAdminService {
         .find({ occurredAt: { $gte: twentyFourHoursAgo } })
         .sort({ occurredAt: -1 })
         .exec(),
+      // Last 7 days revenue grouped by day
+      this.earningModel
+        .aggregate([
+          { $match: { createdAt: { $gte: sevenDaysAgo } } },
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              total: { $sum: '$amount' },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .exec(),
+      // Previous 7 days for growth calculation
+      this.earningModel
+        .aggregate([
+          { $match: { createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ])
+        .exec(),
     ]);
 
     const grossRevenue = grossRevenueResult[0]?.total || 0;
@@ -316,6 +341,25 @@ export class SuperAdminService {
     // Payout Liability = what the platform owes instructors from unpaid earnings (e.g. 80% of unpaid gross)
     const payoutLiability = Math.round((unpaidGross * instructorSharePercent) / 100 * 100) / 100;
     const pendingPayouts = pendingPayoutsResult.length;
+
+    // Build 7-day chart labels + data
+    const chartLabels: string[] = [];
+    const chartData: number[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const key = d.toISOString().split('T')[0];
+      chartLabels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+      const found = dailyRevenueLast7.find((r: any) => r._id === key);
+      chartData.push(found?.total ?? 0);
+    }
+
+    // Revenue growth: last 7 days vs previous 7 days
+    const currentWeekRevenue = chartData.reduce((a, b) => a + b, 0);
+    const prevWeekRevenue = dailyRevenuePrev7[0]?.total || 0;
+    const revenueGrowthPercent =
+      prevWeekRevenue === 0
+        ? currentWeekRevenue > 0 ? 100 : 0
+        : +((((currentWeekRevenue - prevWeekRevenue) / prevWeekRevenue) * 100).toFixed(1));
 
     const criticalAlerts: any[] = [];
 
@@ -916,11 +960,11 @@ export class SuperAdminService {
       webhookFailuresLast24h: failuresCount,
       lastWebhookFailure: lastFailure
         ? {
-            service: lastFailure.service,
-            endpoint: lastFailure.endpoint,
-            errorMessage: lastFailure.errorMessage,
-            occurredAt: lastFailure.occurredAt,
-          }
+          service: lastFailure.service,
+          endpoint: lastFailure.endpoint,
+          errorMessage: lastFailure.errorMessage,
+          occurredAt: lastFailure.occurredAt,
+        }
         : null,
     };
   }
