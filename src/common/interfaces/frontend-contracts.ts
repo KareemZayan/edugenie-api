@@ -174,8 +174,8 @@ export interface CourseResponse {
   level: string;
   courseStatus: string;
   instructor:
-    | Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'>
-    | string;
+  | Pick<UserResponse, 'id' | 'firstName' | 'lastName' | 'email' | 'avatar'>
+  | string;
   category: { id: string; name: string } | string;
   goals: string[];
   requirements: string[];
@@ -693,7 +693,7 @@ export interface PendingCourseListItem {
   totalLessons: number;
 }
 
-export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> {}
+export interface PendingCourseListResponse extends PaginatedResponse<PendingCourseListItem> { }
 
 export interface RejectedCourseListItem {
   courseId: string;
@@ -712,7 +712,7 @@ export interface RejectedCourseListItem {
   rejectedAt: Date;
 }
 
-export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> {}
+export interface RejectedCourseListResponse extends PaginatedResponse<RejectedCourseListItem> { }
 
 export interface CourseReviewDetailResponse {
   courseId: string;
@@ -759,7 +759,7 @@ export interface AdminUserListItem {
   createdAt: Date;
 }
 
-export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> {}
+export interface AdminUserListResponse extends PaginatedResponse<AdminUserListItem> { }
 
 export interface UserStatusChangeResponse {
   userId: string;
@@ -779,7 +779,7 @@ export interface ReportListItem {
   createdAt: Date;
 }
 
-export interface ReportListResponse extends PaginatedResponse<ReportListItem> {}
+export interface ReportListResponse extends PaginatedResponse<ReportListItem> { }
 
 export interface ReportResolutionResponse {
   reportId: string;
@@ -841,6 +841,11 @@ export interface SuperAdminDashboardOverviewResponse {
   payoutLiability: number;
   activeAdmins: number;
   pendingPayouts: number;
+  revenueGrowthPercent: number;
+  revenueChart: {
+    labels: string[];
+    data: number[];
+  };
   criticalAlerts: Array<{
     type: 'webhook_failure' | 'payout_backlog';
     service?: string;
@@ -868,7 +873,7 @@ export interface AdminActivityItem {
   createdAt: Date;
 }
 
-export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> {}
+export interface AdminActivityPaginatedResponse extends PaginatedResponse<AdminActivityItem> { }
 
 export interface PendingPayoutListItem {
   requestId: string;
@@ -886,7 +891,7 @@ export interface PendingPayoutListItem {
   failureReason?: string | null;
 }
 
-export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}
+export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> { }
 
 export interface PayoutProcessResponse {
   requestId: string;
@@ -917,7 +922,7 @@ export interface AuditLogItem {
   createdAt: Date;
 }
 
-export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> {}
+export interface AuditLogPaginatedResponse extends PaginatedResponse<AuditLogItem> { }
 
 export interface SystemHealthResponse {
   apiStatus: string;

@@ -36,8 +36,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (status === 500) {
       this.logger.error(
-        `[${request.method}] ${request.url} - ${
-          exception instanceof Error ? exception.message : 'Unknown error'
+        `[${request.method}] ${request.url} - ${exception instanceof Error ? exception.message : 'Unknown error'
         }`,
         exception instanceof Error ? exception.stack : '',
       );
@@ -48,10 +47,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
-      message:
-        typeof message === 'object' && message !== null && 'message' in message
-          ? message.message
-          : message,
+      ...(typeof message === 'object' && message !== null
+        ? message   // spread the full object — preserves isBlocked, deactivated, code, etc.
+        : { message }),
     });
   }
 }

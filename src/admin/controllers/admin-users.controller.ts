@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Delete,
   Patch,
   Param,
   Body,
@@ -22,7 +21,7 @@ import {
 import { AdminUsersService } from '../services/admin-users.service';
 import { AdminUsersFilterDto } from '../dto/admin-users-filter.dto';
 import { DeactivateUserDto } from '../dto/deactivate-user.dto';
-import { DeleteUserDto } from '../dto/delete-user.dto';
+import { BlockUserDto } from '../dto/block-user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -37,7 +36,7 @@ import {
 @Controller('admin/users')
 @ApiTags('Admin Users')
 export class AdminUsersController {
-  constructor(private readonly adminUsersService: AdminUsersService) {}
+  constructor(private readonly adminUsersService: AdminUsersService) { }
 
   @Get()
   @ApiOperation({ summary: 'Get users' })
@@ -72,6 +71,24 @@ export class AdminUsersController {
     return this.adminUsersService.deactivateUser(id, req.user.userId, dto);
   }
 
+  @Patch(':id/block')
+  @ApiOperation({ summary: 'Block user' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 409, description: 'Conflict.' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: BlockUserDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async blockUser(
+    @Param('id') id: string,
+    @Body() dto: BlockUserDto,
+    @Request() req: any,
+  ): Promise<UserStatusChangeResponse> {
+    return this.adminUsersService.blockUser(id, req.user.userId, dto);
+  }
+
   @Patch(':id/reactivate')
   @ApiOperation({ summary: 'Reactivate user' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
@@ -86,23 +103,5 @@ export class AdminUsersController {
     @Request() req: any,
   ): Promise<UserStatusChangeResponse> {
     return this.adminUsersService.reactivateUser(id, req.user.userId);
-  }
-
-  @Delete(':id')
-  @ApiOperation({ summary: 'Soft delete a user' })
-  @SwaggerApiResponse({ status: 200, description: 'User deleted successfully.' })
-  @SwaggerApiResponse({ status: 404, description: 'User not found.' })
-  @ApiParam({ name: 'id', type: String })
-  @ApiBody({ type: DeleteUserDto })
-  @ApiCookieAuth('jwt')
-  @ApiBearerAuth()
-  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
-  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
-  async deleteUser(
-    @Param('id') id: string,
-    @Body() dto: DeleteUserDto,
-    @Request() req: any,
-  ): Promise<{ message: string }> {
-    return this.adminUsersService.deleteUser(id, req.user.userId, dto);
   }
 }
