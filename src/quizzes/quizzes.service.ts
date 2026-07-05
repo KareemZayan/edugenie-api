@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Quiz } from './schema/quiz.schema';
+import { Quiz, QuizQuestion } from './schema/quiz.schema';
 import { QuizAttempt } from './schema/quiz-attempt.schema';
 import { Notification } from '../notifications/schema/notification.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
@@ -17,6 +17,7 @@ import { User } from '../users/schema/user.schema';
 import { CreateQuizDto } from './dto/create-quiz.dto';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
+import { ApproveQuizDto, EditedQuestionDto } from './dto/approve-quiz.dto';
 import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.enum';
 import { ProgressService } from '../progress/progress.service';
 import { QuizSerializer } from './serializers/quiz.serializer';
@@ -97,32 +98,10 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
         `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} quizzes. No more quizzes can be generated.`,
       );
     }
-
-    // Check: Enrollment threshold
-    const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
-      courseId,
-      dto.sectionId,
-    );
     
     // Calculate the next quiz generation number
     const nextQuizNumber = approvedCount + 1;
-    
-    // If this is NOT the first quiz, check enrollment threshold
-    if (approvedCount > 0) {
-      const lastApprovedQuiz = approvedQuizzes[0]; // Most recent approved quiz
-      const lastApprovalCount = lastApprovedQuiz.enrollmentCountAtApproval || lastApprovedQuiz.enrollmentCountAtGeneration;
-      
-      const newEnrollments = currentEnrollmentCount - lastApprovalCount;
-      
-      if (newEnrollments < QUIZ_REGEN_ENROLLMENT_THRESHOLD) {
-        const remaining = QUIZ_REGEN_ENROLLMENT_THRESHOLD - newEnrollments;
-        throw new ForbiddenException(
-          `You need ${remaining} more new student enrollments in this section to generate a new quiz.`,
-        );
-      }
-    }
-    
-    console.log(`[QUIZ GENERATION] Allowing quiz #${nextQuizNumber} for section ${dto.sectionId}. Current enrollments: ${currentEnrollmentCount}`);
+    console.log(`[QUIZ GENERATION] Allowing quiz #${nextQuizNumber} for section ${dto.sectionId}.`);
   }
 
   // Step 3: Delete all non-approved quizzes (pending_review, rejected, etc.) when generating new quiz
@@ -171,7 +150,7 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
       numberOfQuestions: dto.numberOfQuestions,
     });
 
-    quiz.questions = questions;
+    quiz.questions = questions as unknown as QuizQuestion[];
     quiz.generationStatus = QuizGenerationStatus.COMPLETED;
     await quiz.save();
 
@@ -286,7 +265,11 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
     throw new ForbiddenException('You have used all available attempts for this quiz');
   }
 
-  const questions = quiz.questions.map((q, index) => {
+  const activeQuizQuestions = quiz.questions.filter(
+    (q) => !(q as unknown as { isIgnored?: boolean }).isIgnored,
+  );
+
+  const questions = activeQuizQuestions.map((q, index) => {
     const qObj = q as unknown as {
       _id?: Types.ObjectId; questionText: string; type: string; options: string[];
     };
@@ -351,7 +334,9 @@ async startAttempt(sectionId: string, studentId: string): Promise<QuizStartRespo
       attemptNumber: attemptCount + 1,
       startedAt: new Date(),
       timeLimit: quiz.timeLimit,
-      totalQuestions: quiz.questions.length,
+      totalQuestions: quiz.questions.filter(
+        (q) => !(q as unknown as { isIgnored?: boolean }).isIgnored,
+      ).length,
       status: 'in_progress',
     });
   } catch (error: unknown) {
@@ -447,20 +432,30 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       throw new NotFoundException('Quiz not found');
     }
 
+    // CRUCIAL FIX: ignored questions must not count toward the denominator,
+    // and answers submitted against an ignored question must not affect scoring.
+    const activeQuestions = quiz.questions.filter(
+      (q) => !(q as unknown as { isIgnored?: boolean }).isIgnored,
+    ) as unknown as { _id?: Types.ObjectId; correctAnswers: string[] }[];
+
+    if (activeQuestions.length === 0) {
+      throw new BadRequestException(
+        'This quiz currently has no active questions and cannot be scored',
+      );
+    }
+
     let correctCount = 0;
 
     for (const submittedAnswer of dto.answers) {
-      // Find matching question by checking if string ID matches or index matches
-      const question = quiz.questions.find((q: unknown, idx: number) => {
-        const qObj = q as { _id?: Types.ObjectId; correctAnswers: string[] };
-        const idStr = qObj._id ? qObj._id.toString() : idx.toString();
+      const question = activeQuestions.find((q) => {
+        const idStr = q._id ? q._id.toString() : undefined;
         return idStr === submittedAnswer.questionId;
-      }) as { _id?: Types.ObjectId; correctAnswers: string[] } | undefined;
+      });
 
       if (!question) {
-        throw new BadRequestException(
-          `Invalid questionId: ${submittedAnswer.questionId}`,
-        );
+        // Either an invalid ID, or the question has since been ignored by
+        // the instructor — either way it cannot contribute to the score.
+        continue;
       }
 
       const correctSorted = [...question.correctAnswers].sort();
@@ -475,7 +470,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       }
     }
 
-    const score = Math.round((correctCount / quiz.questions.length) * 100);
+    const score = Math.round((correctCount / activeQuestions.length) * 100);
     const passed = score >= quiz.passingScore;
 
     const updateResult = await this.quizAttemptModel.updateOne(
@@ -576,7 +571,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       passed,
       score,
       correctAnswers: correctCount,
-      totalQuestions: quiz.questions.length,
+      totalQuestions: activeQuestions.length,
       attemptNumber: attempt.attemptNumber,
       remainingAttempts,
       progressReset,
@@ -698,6 +693,8 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
           questionText: string;
           options: string[];
           correctAnswers: string[];
+          isIgnored?: boolean;
+          createdBy?: string;
         };
         return {
           questionId: questionObj._id
@@ -709,6 +706,8 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
             text: opt,
           })),
           correctAnswers: questionObj.correctAnswers,
+          isIgnored: questionObj.isIgnored ?? false,
+          createdBy: questionObj.createdBy ?? 'AI',
         };
       }),
     };
@@ -717,7 +716,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
   async approveQuiz(
     quizId: string,
     instructorId: string,
-    dto: Record<string, unknown>,
+    dto: ApproveQuizDto,
   ) {
     const quiz = await this.quizModel.findById(quizId).exec();
     if (!quiz) throw new NotFoundException('Quiz not found');
@@ -733,16 +732,62 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       throw new ForbiddenException('You do not own this quiz');
     }
 
-    const editedQuestions = dto.editedQuestions as
-      | Array<{
-          questionText: string;
-          type: string;
-          options: string[];
-          correctAnswers: string[];
-        }>
-      | undefined;
-    if (editedQuestions && editedQuestions.length > 0) {
-      quiz.questions = editedQuestions as unknown as typeof quiz.questions;
+    const editedQuestions: EditedQuestionDto[] = dto.editedQuestions ?? [];
+
+    if (dto.editedQuestions) {
+      const submittedIds = new Set(
+        editedQuestions.map((q) => q.questionId).filter((id): id is string => !!id),
+      );
+      quiz.questions = quiz.questions.filter((q) => {
+        const idStr = (q as any)._id?.toString();
+        return !idStr || submittedIds.has(idStr);
+      }) as any;
+    }
+
+    for (const edit of editedQuestions) {
+      if (edit.questionId) {
+        // ---- Existing AI (or previously instructor-added) question ----
+        const existing = quiz.questions.find(
+          (q) => (q as unknown as { _id: Types.ObjectId })._id?.toString() === edit.questionId,
+        );
+
+        if (!existing) {
+          throw new BadRequestException(
+            `Invalid questionId: ${edit.questionId} does not belong to this quiz`,
+          );
+        }
+
+        existing.questionText = edit.questionText ?? existing.questionText;
+        existing.type = (edit.type as typeof existing.type) ?? existing.type;
+        existing.options = edit.options ?? existing.options;
+        existing.correctAnswers = edit.correctAnswers ?? existing.correctAnswers;
+
+        if (typeof edit.isIgnored === 'boolean') {
+          existing.isIgnored = edit.isIgnored;
+        }
+      } else {
+        // ---- Brand-new, instructor-authored question ----
+        quiz.questions.push({
+          _id: new Types.ObjectId(),
+          questionText: edit.questionText,
+          type: edit.type,
+          options: edit.options,
+          correctAnswers: edit.correctAnswers,
+          isIgnored: false,
+          createdBy: 'INSTRUCTOR',
+        } as unknown as (typeof quiz.questions)[number]);
+      }
+    }
+
+
+    // Guard: a quiz must retain at least one active (non-ignored) question.
+    const activeCount = quiz.questions.filter(
+      (q) => !(q as unknown as { isIgnored?: boolean }).isIgnored,
+    ).length;
+    if (activeCount === 0) {
+      throw new BadRequestException(
+        'A quiz must have at least one active (non-ignored) question to be approved',
+      );
     }
 
     // Get current enrollment count when approving
@@ -750,7 +795,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       course._id.toString(),
       quiz.sectionId.toString(),
     );
-    
+
     quiz.status = 'approved';
     quiz.enrollmentCountAtApproval = currentEnrollmentCount;
     await quiz.save();
@@ -803,6 +848,8 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
         questionText: string;
         options: string[];
         correctAnswers: string[];
+        isIgnored?: boolean;
+        createdBy?: string;
       };
       return {
         questionId: questionObj._id
@@ -814,6 +861,8 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
           text: opt,
         })),
         correctAnswers: questionObj.correctAnswers,
+        isIgnored: questionObj.isIgnored ?? false,
+        createdBy: questionObj.createdBy ?? 'AI',
       };
     }),
   };
@@ -862,6 +911,8 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
             questionText: string;
             options: string[];
             correctAnswers: string[];
+            isIgnored?: boolean;
+            createdBy?: string;
           };
           return {
             questionId: questionObj._id
@@ -873,6 +924,8 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
               text: opt,
             })),
             correctAnswers: questionObj.correctAnswers,
+            isIgnored: questionObj.isIgnored ?? false,
+            createdBy: questionObj.createdBy ?? 'AI',
           };
         }),
       })),
@@ -888,77 +941,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
     sectionId: string,
     instructorId: string,
   ): Promise<void> {
-    try {
-      // Get current enrollment count for this section
-      const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
-        courseId,
-        sectionId,
-      );
-
-      // Find the last approved quiz for this section
-      const lastApprovedQuiz = await this.quizModel
-        .findOne({
-          sectionId: new Types.ObjectId(sectionId),
-          status: 'approved',
-        })
-        .sort({ createdAt: -1 })
-        .select('enrollmentCountAtApproval enrollmentCountAtGeneration regenNotified')
-        .exec();
-
-      if (!lastApprovedQuiz) return; // No approved quiz yet, no notification needed
-
-      // BUG 1 FIX: Check if we already notified for this cycle (one-shot guard)
-      if (lastApprovedQuiz.regenNotified) {
-        console.log(`[QUIZ NOTIFICATION] Already notified for section ${sectionId}, skipping`);
-        return;
-      }
-
-      // BUG 2 FIX: Use enrollmentCountAtApproval (matching saveQuizConfig's baseline)
-      // Fall back to enrollmentCountAtGeneration for backwards compatibility
-      const baselineEnrollmentCount = lastApprovedQuiz.enrollmentCountAtApproval || lastApprovedQuiz.enrollmentCountAtGeneration;
-      const newEnrollments = currentEnrollmentCount - baselineEnrollmentCount;
-
-      console.log(`[QUIZ NOTIFICATION] Section ${sectionId}: baseline=${baselineEnrollmentCount}, current=${currentEnrollmentCount}, new=${newEnrollments}, threshold=${QUIZ_REGEN_ENROLLMENT_THRESHOLD}`);
-
-      if (newEnrollments >= QUIZ_REGEN_ENROLLMENT_THRESHOLD) {
-        // Check if we haven't exceeded max quizzes per section
-        const approvedQuizzesCount = await this.quizModel.countDocuments({
-          sectionId: new Types.ObjectId(sectionId),
-          status: 'approved',
-        });
-
-        if (approvedQuizzesCount < MAX_QUIZZES_PER_SECTION) {
-          // Get section and course details
-          const course = await this.courseModel
-            .findOne({ 'sections._id': new Types.ObjectId(sectionId) })
-            .select('title sections')
-            .lean()
-            .exec();
-
-          const section = course?.sections.find(s => s._id.toString() === sectionId);
-
-          if (section) {
-            // Send notification to instructor
-            await this.notificationsService.create(
-              new Types.ObjectId(instructorId),
-              'New Quiz Generation Available',
-              `Your section "${section.title}" in "${course?.title}" has reached ${QUIZ_REGEN_ENROLLMENT_THRESHOLD} new enrollments. You can now generate another quiz!`,
-              NotificationType.QUIZ_GENERATION_AVAILABLE,
-              courseId,
-            );
-            
-            // BUG 1 FIX: Mark as notified to prevent duplicate notifications
-            lastApprovedQuiz.regenNotified = true;
-            await lastApprovedQuiz.save();
-            
-            console.log(`[QUIZ NOTIFICATION] Sent quiz generation available notification for section ${sectionId}`);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('[QUIZ NOTIFICATION] Failed to check and notify:', error);
-      // Don't throw - this is a background check
-    }
+    return;
   }
 
   /**
@@ -1000,34 +983,26 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       .select('enrollmentCountAtApproval enrollmentCountAtGeneration quizGenerationNumber')
       .exec();
 
-    let canGenerateQuiz = true;
-    let enrollmentsNeeded = 0;
-    let baselineEnrollmentCount = 0;
-    let newEnrollmentsSinceLastApproval = 0;
+    const approvedCount = await this.quizModel.countDocuments({
+      sectionId: new Types.ObjectId(sectionId),
+      status: 'approved',
+    });
 
-    if (lastApprovedQuiz) {
-      // Use enrollmentCountAtApproval, fall back to enrollmentCountAtGeneration for backwards compatibility
-      baselineEnrollmentCount = lastApprovedQuiz.enrollmentCountAtApproval || lastApprovedQuiz.enrollmentCountAtGeneration || 0;
-      newEnrollmentsSinceLastApproval = currentEnrollmentCount - baselineEnrollmentCount;
-      
-      if (newEnrollmentsSinceLastApproval < QUIZ_REGEN_ENROLLMENT_THRESHOLD) {
-        canGenerateQuiz = false;
-        enrollmentsNeeded = QUIZ_REGEN_ENROLLMENT_THRESHOLD - newEnrollmentsSinceLastApproval;
-      }
-    } else {
-      // First quiz - no baseline needed
-      canGenerateQuiz = true;
-      enrollmentsNeeded = 0;
-    }
+    const baselineEnrollmentCount = lastApprovedQuiz
+      ? (lastApprovedQuiz.enrollmentCountAtApproval || lastApprovedQuiz.enrollmentCountAtGeneration || 0)
+      : 0;
+    const newEnrollmentsSinceLastApproval = lastApprovedQuiz
+      ? Math.max(0, currentEnrollmentCount - baselineEnrollmentCount)
+      : 0;
 
     return {
       sectionId,
       currentEnrollmentCount,
       baselineEnrollmentCount,
       newEnrollmentsSinceLastApproval,
-      enrollmentThreshold: QUIZ_REGEN_ENROLLMENT_THRESHOLD,
-      enrollmentsNeeded,
-      canGenerateQuiz,
+      enrollmentThreshold: 0,
+      enrollmentsNeeded: 0,
+      canGenerateQuiz: approvedCount < MAX_QUIZZES_PER_SECTION,
       hasApprovedQuiz: !!lastApprovedQuiz,
       lastApprovedQuizGeneration: lastApprovedQuiz?.quizGenerationNumber || 0,
     };

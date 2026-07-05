@@ -6,8 +6,12 @@ import { QuizAttempt } from './schema/quiz-attempt.schema';
 import { Notification } from '../notifications/schema/notification.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Course } from '../courses/schema/course.schema';
+import { User } from '../users/schema/user.schema';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { ProgressService } from '../progress/progress.service';
+import { AiService } from '../ai/ai.service';
+import { RemediationService } from '../ai/remediation.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Types } from 'mongoose';
 import { BadRequestException } from '@nestjs/common';
 
@@ -37,13 +41,24 @@ describe('QuizzesService', () => {
     findOne: jest.fn(),
   };
 
+  const mockUserModel = {};
+
   const mockEnrollmentsService = {
     canAccessSection: jest.fn(),
+    countEnrollmentsForSection: jest.fn(),
   };
 
   const mockProgressService = {
     markQuizPassed: jest.fn(),
   };
+
+  const mockAiService = {};
+
+  const mockRemediationService = {
+    resolveOnPass: jest.fn(),
+  };
+
+  const mockNotificationsService = {};
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -63,8 +78,12 @@ describe('QuizzesService', () => {
           useValue: mockEnrollmentModel,
         },
         { provide: getModelToken(Course.name), useValue: mockCourseModel },
+        { provide: getModelToken(User.name), useValue: mockUserModel },
         { provide: EnrollmentsService, useValue: mockEnrollmentsService },
         { provide: ProgressService, useValue: mockProgressService },
+        { provide: AiService, useValue: mockAiService },
+        { provide: RemediationService, useValue: mockRemediationService },
+        { provide: NotificationsService, useValue: mockNotificationsService },
       ],
     }).compile();
 
@@ -187,6 +206,174 @@ describe('QuizzesService', () => {
       );
 
       expect(mockQuizAttemptModel.updateOne).toHaveBeenCalled();
+    });
+
+    it('scoring excludes ignored questions', async () => {
+      const attempt = createMockAttempt();
+      mockQuizAttemptModel.findById.mockResolvedValue(attempt);
+      mockQuizAttemptModel.updateOne.mockResolvedValue({ modifiedCount: 1 });
+      
+      const mockQuizWithIgnored = {
+        _id: quizId,
+        passingScore: 70,
+        maxAttempts: 3,
+        questions: [
+          { _id: 'q1', correctAnswers: ['A'], isIgnored: false },
+          { _id: 'q2', correctAnswers: ['C'], isIgnored: true },
+        ],
+      };
+      mockQuizModel.findById.mockResolvedValue(mockQuizWithIgnored);
+      mockQuizAttemptModel.countDocuments.mockResolvedValue(1);
+
+      mockCourseModel.findOne.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+        }),
+      });
+
+      const dto = {
+        attemptId,
+        answers: [
+          { questionId: 'q1', selectedOptionIds: ['A'] },
+          { questionId: 'q2', selectedOptionIds: ['C'] },
+        ],
+      };
+
+      const result = await service.submitAttempt(sectionId, dto, studentId);
+
+      expect(result.score).toBe(100);
+      expect(result.passed).toBe(true);
+      expect(result.correctAnswers).toBe(1);
+      expect(result.totalQuestions).toBe(1);
+    });
+  });
+
+  describe('approveQuiz', () => {
+    const quizId = new Types.ObjectId().toString();
+    const instructorId = new Types.ObjectId().toString();
+    
+    it('Approving with editedQuestions omitted behaves as before', async () => {
+      const mockQuiz = {
+        _id: quizId,
+        sectionId: new Types.ObjectId(),
+        questions: [
+          { _id: 'q1', questionText: 'Q1 Text', type: 'TRUE_FALSE', options: ['True', 'False'], correctAnswers: ['True'], isIgnored: false, createdBy: 'AI' }
+        ],
+        status: 'pending_review',
+        save: jest.fn().mockResolvedValue(true),
+      };
+      
+      mockQuizModel.findById = jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockQuiz),
+      });
+      
+      mockCourseModel.findOne = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            _id: new Types.ObjectId(),
+            instructorId: instructorId,
+          }),
+        }),
+      });
+      
+      mockEnrollmentsService.countEnrollmentsForSection = jest.fn().mockResolvedValue(5);
+      
+      const result = await service.approveQuiz(quizId, instructorId, {});
+      
+      expect(result.status).toBe('approved');
+      expect(mockQuiz.questions.length).toBe(1);
+      expect(mockQuiz.save).toHaveBeenCalled();
+    });
+
+    it('Approving with a new question adds it with createdBy INSTRUCTOR', async () => {
+      const mockQuiz = {
+        _id: quizId,
+        sectionId: new Types.ObjectId(),
+        questions: [
+          { _id: 'q1', questionText: 'Q1 Text', type: 'TRUE_FALSE', options: ['True', 'False'], correctAnswers: ['True'], isIgnored: false, createdBy: 'AI' }
+        ],
+        status: 'pending_review',
+        save: jest.fn().mockResolvedValue(true),
+      };
+      
+      mockQuizModel.findById = jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockQuiz),
+      });
+      
+      mockCourseModel.findOne = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            _id: new Types.ObjectId(),
+            instructorId: instructorId,
+          }),
+        }),
+      });
+      
+      mockEnrollmentsService.countEnrollmentsForSection = jest.fn().mockResolvedValue(5);
+      
+      const result = await service.approveQuiz(quizId, instructorId, {
+        editedQuestions: [
+          {
+            questionId: 'q1',
+            questionText: 'Q1 Text',
+            type: 'TRUE_FALSE' as any,
+            options: ['True', 'False'],
+            correctAnswers: ['True'],
+            isIgnored: false,
+          },
+          {
+            questionText: 'Instructor Question',
+            type: 'SINGLE_CHOICE' as any,
+            options: ['A', 'B'],
+            correctAnswers: ['A'],
+          }
+        ]
+      });
+      
+      expect(result.status).toBe('approved');
+      expect(mockQuiz.questions.length).toBe(2);
+      expect(mockQuiz.questions[1].createdBy).toBe('INSTRUCTOR');
+      expect(mockQuiz.save).toHaveBeenCalled();
+    });
+
+    it('Approving which would leave zero active questions throws BadRequestException', async () => {
+      const mockQuiz = {
+        _id: quizId,
+        sectionId: new Types.ObjectId(),
+        questions: [
+          { _id: 'q1', questionText: 'Q1 Text', type: 'TRUE_FALSE', options: ['True', 'False'], correctAnswers: ['True'], isIgnored: false, createdBy: 'AI' }
+        ],
+        status: 'pending_review',
+        save: jest.fn().mockResolvedValue(true),
+      };
+      
+      mockQuizModel.findById = jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockQuiz),
+      });
+      
+      mockCourseModel.findOne = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            _id: new Types.ObjectId(),
+            instructorId: instructorId,
+          }),
+        }),
+      });
+      
+      await expect(
+        service.approveQuiz(quizId, instructorId, {
+          editedQuestions: [
+            {
+              questionId: 'q1',
+              questionText: 'Q1 Text',
+              type: 'TRUE_FALSE' as any,
+              options: ['True', 'False'],
+              correctAnswers: ['True'],
+              isIgnored: true,
+            }
+          ]
+        })
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });
