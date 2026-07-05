@@ -74,11 +74,7 @@ export class InstructorQuizzesController {
     @Body() dto: ApproveQuizDto,
     @CurrentUser() user: { userId: string },
   ): Promise<QuizApproveResponse> {
-    return this.quizzesService.approveQuiz(
-      id,
-      user.userId,
-      dto as unknown as Record<string, unknown>,
-    );
+    return this.quizzesService.approveQuiz(id, user.userId, dto);
   }
 
   @Roles(UserRole.INSTRUCTOR)
