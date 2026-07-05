@@ -15,9 +15,8 @@ import { CreateAttachmentDto } from './dto/create-attachment.dto';
 import { UpdateAttachmentDto } from './dto/update-attachment.dto';
 import { AttachmentSerializer } from './serializers/attachments.serializer';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
-import { EnrollmentsService } from '../enrollments/enrollments.service';
 
-const MAX_ATTACHMENTS_PER_SECTION = 5;
+const MAX_ATTACHMENTS_PER_LESSON = 5;
 
 @Injectable()
 export class AttachmentsService {
@@ -28,73 +27,69 @@ export class AttachmentsService {
         @InjectModel(Enrollment.name)
         private readonly enrollmentModel: Model<Enrollment>,
         private readonly cloudinaryService: CloudinaryService,
-        private readonly enrollmentsService: EnrollmentsService,
     ) { }
 
     /**
-     * Verifies that the given course/section combination actually exists and
-     * is owned by instructorId. Attachment is a separate collection with no
-     * FK guarantee, so we verify this explicitly before writing.
+     * Verifies that the lesson (and therefore its parent section and course)
+     * exists and is owned by instructorId. Throws otherwise.
      */
-    private async verifyOwnershipAndExistence(
+    private async verifyLessonOwnership(
         courseId: string,
         sectionId: string,
+        lessonId: string,
         instructorId: string,
     ): Promise<void> {
-        if (!Types.ObjectId.isValid(courseId)) {
-            throw new BadRequestException('Invalid course ID');
-        }
-        if (!Types.ObjectId.isValid(sectionId)) {
-            throw new BadRequestException('Invalid section ID');
-        }
+        if (!Types.ObjectId.isValid(courseId)) throw new BadRequestException('Invalid course ID');
+        if (!Types.ObjectId.isValid(sectionId)) throw new BadRequestException('Invalid section ID');
+        if (!Types.ObjectId.isValid(lessonId)) throw new BadRequestException('Invalid lesson ID');
 
         const exists = await this.courseModel.exists({
             _id: new Types.ObjectId(courseId),
             instructorId: new Types.ObjectId(instructorId),
             'sections._id': new Types.ObjectId(sectionId),
+            'sections.lessons._id': new Types.ObjectId(lessonId),
         });
 
         if (!exists) {
-            throw new NotFoundException(
-                'Section not found, or course not owned by you',
-            );
+            throw new NotFoundException('Lesson not found, or course not owned by you');
         }
     }
 
     private buildParentFilter(
         courseId: string,
         sectionId: string,
+        lessonId: string,
     ): Record<string, unknown> {
         return {
             courseId: new Types.ObjectId(courseId),
             sectionId: new Types.ObjectId(sectionId),
+            lessonId: new Types.ObjectId(lessonId),
         };
     }
 
     async create(
         courseId: string,
         sectionId: string,
+        lessonId: string,
         instructorId: string,
         dto: CreateAttachmentDto,
     ): Promise<AttachmentSerializer> {
-        await this.verifyOwnershipAndExistence(courseId, sectionId, instructorId);
+        await this.verifyLessonOwnership(courseId, sectionId, lessonId, instructorId);
 
-        const parentFilter = this.buildParentFilter(courseId, sectionId);
+        const parentFilter = this.buildParentFilter(courseId, sectionId, lessonId);
 
-        const currentCount = await this.attachmentModel.countDocuments(
-            parentFilter,
-        );
-        if (currentCount >= MAX_ATTACHMENTS_PER_SECTION) {
+        const currentCount = await this.attachmentModel.countDocuments(parentFilter);
+        if (currentCount >= MAX_ATTACHMENTS_PER_LESSON) {
             throw new BadRequestException(
-                `Maximum of ${MAX_ATTACHMENTS_PER_SECTION} attachments reached for this section`,
+                `Maximum of ${MAX_ATTACHMENTS_PER_LESSON} attachments reached for this lesson`,
             );
         }
 
         const created = await this.attachmentModel.create({
             ...dto,
-            isPublic: dto.isPublic ?? false,
             courseId: new Types.ObjectId(courseId),
             sectionId: new Types.ObjectId(sectionId),
+            lessonId: new Types.ObjectId(lessonId),
             instructorId: new Types.ObjectId(instructorId),
         });
 
@@ -102,23 +97,23 @@ export class AttachmentsService {
     }
 
     /**
-     * Student/public read, enrollment-gated.
+     * Student read — enrollment-gated. All lesson attachments are private;
+     * the student must be enrolled in the course (full or via the parent section).
      */
-    async findByParent(
+    async findByLesson(
         courseId: string,
         sectionId: string,
+        lessonId: string,
         requestingUser?: { userId: string; role: UserRole },
     ): Promise<AttachmentSerializer[]> {
-        const parentFilter = this.buildParentFilter(courseId, sectionId);
+        const parentFilter = this.buildParentFilter(courseId, sectionId, lessonId);
 
         const attachments = await this.attachmentModel
             .find(parentFilter)
             .sort({ createdAt: 1 })
             .exec();
 
-        if (attachments.length === 0) {
-            return [];
-        }
+        if (attachments.length === 0) return [];
 
         const requestingUserId = requestingUser?.userId;
         const requestingUserRole = requestingUser?.role;
@@ -127,74 +122,57 @@ export class AttachmentsService {
             requestingUserRole === UserRole.ADMIN ||
             requestingUserRole === UserRole.SUPERADMIN;
 
+        if (!requestingUserId && !isAdminOrSuperAdmin) return [];
+
         const course = await this.courseModel
             .findById(courseId)
             .select('instructorId')
             .exec();
-        if (!course) {
-            throw new NotFoundException('Course not found');
-        }
+        if (!course) throw new NotFoundException('Course not found');
 
         const isInstructor =
             requestingUserId &&
             course.instructorId.toString() === requestingUserId;
 
-        let enrollment = null;
-        if (requestingUserId && !isAdminOrSuperAdmin && !isInstructor) {
-            enrollment = await this.enrollmentModel.findOne({
-                studentId: new Types.ObjectId(requestingUserId),
-                courseId: new Types.ObjectId(courseId),
-            });
+        if (isAdminOrSuperAdmin || isInstructor) {
+            return attachments.map((a) => new AttachmentSerializer(a.toObject()));
         }
 
-        const filtered = attachments.filter((attachment) => {
-            // Public attachments are visible to anyone
-            if (attachment.isPublic) {
-                return true;
-            }
-
-            // Restricted attachments require authentication
-            if (!requestingUserId) {
-                return false;
-            }
-
-            // Admins, Super Admins, and course Instructor can access any attachment
-            if (isAdminOrSuperAdmin || isInstructor) {
-                return true;
-            }
-
-            // Other users require a valid enrollment covering this section
-            if (!enrollment) {
-                return false;
-            }
-
-            if (enrollment.type === PurchaseType.FULL_COURSE) {
-                return true;
-            }
-            if (enrollment.sectionIds) {
-                return enrollment.sectionIds
-                    .map((id: any) => id.toString())
-                    .includes(sectionId);
-            }
-
-            return false;
+        // Regular student: must be enrolled
+        const enrollment = await this.enrollmentModel.findOne({
+            studentId: new Types.ObjectId(requestingUserId!),
+            courseId: new Types.ObjectId(courseId),
         });
 
-        return filtered.map((a) => new AttachmentSerializer(a.toObject()));
+        if (!enrollment) return [];
+
+        if (enrollment.type === PurchaseType.FULL_COURSE) {
+            return attachments.map((a) => new AttachmentSerializer(a.toObject()));
+        }
+
+        // Section-level purchase: must cover the lesson's parent section
+        const hasSection = enrollment.sectionIds
+            ?.map((id: any) => id.toString())
+            .includes(sectionId);
+
+        if (!hasSection) return [];
+
+        return attachments.map((a) => new AttachmentSerializer(a.toObject()));
     }
 
     /**
-     * Instructor-facing read for the course builder — same data, no enrollment
-     * gating, but ownership-checked instead.
+     * Instructor-facing read for the course builder — ownership-checked, no
+     * enrollment gating.
      */
-    async findByParentForInstructor(
+    async findByLessonForInstructor(
         courseId: string,
-        instructorId: string,
         sectionId: string,
+        lessonId: string,
+        instructorId: string,
     ): Promise<AttachmentSerializer[]> {
-        await this.verifyOwnershipAndExistence(courseId, sectionId, instructorId);
+        await this.verifyLessonOwnership(courseId, sectionId, lessonId, instructorId);
 
-        const parentFilter = this.buildParentFilter(courseId, sectionId);
+        const parentFilter = this.buildParentFilter(courseId, sectionId, lessonId);
 
         const attachments = await this.attachmentModel
             .find(parentFilter)
@@ -266,23 +244,23 @@ export class AttachmentsService {
     }
 
     /**
-     * Cascading delete, called from CoursesService.remove and
-     * SectionsService.removeSection. Destroys the Cloudinary asset for every
-     * matching attachment, then removes the DB records in bulk.
+     * Cascading delete — called from CoursesService.remove and
+     * SectionsService / LessonsService delete hooks.
      *
      * Pass only courseId to wipe everything under a course.
-     * Pass courseId + sectionId to wipe one section's attachments.
+     * Pass courseId + sectionId to wipe one section's lessons' attachments.
+     * Pass all three to wipe one lesson's attachments.
      */
     async removeAllFor(
         courseId: string,
         sectionId?: string,
+        lessonId?: string,
     ): Promise<void> {
         const filter: Record<string, unknown> = {
             courseId: new Types.ObjectId(courseId),
         };
-        if (sectionId) {
-            filter.sectionId = new Types.ObjectId(sectionId);
-        }
+        if (sectionId) filter.sectionId = new Types.ObjectId(sectionId);
+        if (lessonId) filter.lessonId = new Types.ObjectId(lessonId);
 
         const attachments = await this.attachmentModel.find(filter).exec();
         if (attachments.length === 0) return;
