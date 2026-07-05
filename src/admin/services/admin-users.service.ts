@@ -19,11 +19,11 @@ import { UserStatus } from '../../common/enums/user-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { AdminUsersFilterDto } from '../dto/admin-users-filter.dto';
 import { DeactivateUserDto } from '../dto/deactivate-user.dto';
-import { DeleteUserDto } from '../dto/delete-user.dto';
 import {
   AdminUserListResponse,
   UserStatusChangeResponse,
 } from '../../common/interfaces/frontend-contracts';
+import { BlockUserDto } from '../dto/block-user.dto';
 
 @Injectable()
 export class AdminUsersService {
@@ -141,6 +141,53 @@ export class AdminUsersService {
     };
   }
 
+  async blockUser(
+    id: string,
+    adminId: string,
+    dto: BlockUserDto,
+  ): Promise<UserStatusChangeResponse> {
+    const user = await this.userModel.findById(id).exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.role === UserRole.ADMIN || user.role === UserRole.SUPERADMIN) {
+      throw new ForbiddenException('Admins cannot block other admins');
+    }
+
+    if (user.status === UserStatus.BLOCKED) {
+      throw new BadRequestException('User is already blocked');
+    }
+
+    user.status = UserStatus.BLOCKED;
+    user.isBlocked = true;
+    user.blockedReason = dto.reason;
+    user.blockedAt = new Date();
+    user.blockedBy = new Types.ObjectId(adminId);
+    await user.save();
+
+    await this.auditLogModel.create({
+      action: 'USER_BLOCKED',
+      performedBy: new Types.ObjectId(adminId),
+      targetUser: user._id,
+      details: { reason: dto.reason },
+    });
+
+    await this.notificationModel.create({
+      userId: user._id,
+      title: 'Account Blocked',
+      message: `Your account has been blocked for violating platform policies. Reason: ${dto.reason}`,
+      type: 'USER_BLOCKED',
+      isRead: false,
+    });
+
+    return {
+      userId: user._id.toString(),
+      status: UserStatus.BLOCKED,
+      // Adding additional data that the frontend interface might allow (depending on how UserStatusChangeResponse is typed, we just need status and userId)
+    };
+  }
+
   async reactivateUser(
     id: string,
     adminId: string,
@@ -150,14 +197,18 @@ export class AdminUsersService {
       throw new NotFoundException('User not found');
     }
 
-    if (user.status !== UserStatus.DEACTIVATED) {
-      throw new BadRequestException('User is not deactivated');
+    if (user.status !== UserStatus.DEACTIVATED && user.status !== UserStatus.BLOCKED) {
+      throw new BadRequestException('User is neither deactivated nor blocked');
     }
 
     user.status = UserStatus.ACTIVE;
     user.deactivatedReason = null;
     user.deactivatedAt = null;
     user.deactivatedBy = null;
+    user.isBlocked = false;
+    user.blockedReason = null;
+    user.blockedAt = null;
+    user.blockedBy = null;
     await user.save();
 
     await this.auditLogModel.create({
@@ -180,30 +231,5 @@ export class AdminUsersService {
       status: UserStatus.ACTIVE,
       reactivatedAt: new Date(),
     };
-  }
-
-  async deleteUser(
-    id: string,
-    adminId: string,
-    dto: DeleteUserDto,
-  ): Promise<{ message: string }> {
-    const user = await this.userModel.findById(id).exec();
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    user.isDeleted = true;
-    user.deletedAt = new Date();
-    user.deletedReason = dto.reason;
-    await user.save();
-
-    await this.auditLogModel.create({
-      action: 'USER_DELETED',
-      performedBy: new Types.ObjectId(adminId),
-      targetUser: user._id,
-      details: { reason: dto.reason },
-    });
-
-    return { message: 'User deleted successfully' };
   }
 }

@@ -509,11 +509,21 @@ export class AuthService {
   ): Promise<{ exchangeToken: string; user: User }> {
     const user = await this.usersService.findOrCreateGoogleUser(googleUser);
 
-    // SECURITY: deactivated/suspended accounts must not be able to log in.
-    if (user.status !== UserStatus.ACTIVE || user.isDeleted) {
-      throw new ForbiddenException(
-        'This account has been deactivated. Please contact support.',
-      );
+    // SECURITY: deactivated/suspended/blocked accounts must not be able to log in.
+    if (user.isDeleted) {
+      throw new ForbiddenException({ message: 'This account has been deactivated.', deactivated: true });
+    }
+    if (user.status === UserStatus.BLOCKED) {
+      throw new ForbiddenException({
+        message: 'This account has been blocked for violating platform policies.',
+        isBlocked: true,
+      });
+    }
+    if (user.status === UserStatus.DEACTIVATED) {
+      throw new ForbiddenException({
+        message: 'This account has been deactivated. Please contact support.',
+        deactivated: true,
+      });
     }
 
     const exchangeToken = await this.generateExchangeToken(user._id);
@@ -578,11 +588,18 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // SECURITY: deactivated/suspended accounts must not be able to log in.
-    if (user.status !== UserStatus.ACTIVE) {
-      throw new ForbiddenException(
-        'This account has been deactivated. Please contact support.',
-      );
+    // SECURITY: deactivated/suspended/blocked accounts must not be able to log in.
+    if (user.status === UserStatus.BLOCKED) {
+      throw new ForbiddenException({
+        message: 'This account has been blocked for violating platform policies.',
+        isBlocked: true,
+      });
+    }
+    if (user.status === UserStatus.DEACTIVATED) {
+      throw new ForbiddenException({
+        message: 'This account has been deactivated. Please contact support.',
+        deactivated: true,
+      });
     }
 
     // The email must be verified before the first sign-in. The `code` lets the

@@ -75,7 +75,7 @@ export class SuperAdminService {
     private adminInviteModel: Model<AdminInviteDocument>,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
-  ) {}
+  ) { }
 
   private readonly INVITE_TTL_HOURS = 48;
 
@@ -263,7 +263,10 @@ export class SuperAdminService {
   }
 
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
+    const now = new Date();
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     // Fetch platform config first to apply the correct fee/share split
     const config = await this.platformConfigModel.findOne().lean().exec();
@@ -276,6 +279,8 @@ export class SuperAdminService {
       activeAdminsCount,
       pendingPayoutsResult,
       webhookFailures,
+      dailyRevenueLast7,
+      dailyRevenuePrev7,
     ] = await Promise.all([
       // Total gross sales (full course price collected)
       this.earningModel
@@ -306,6 +311,26 @@ export class SuperAdminService {
         .find({ occurredAt: { $gte: twentyFourHoursAgo } })
         .sort({ occurredAt: -1 })
         .exec(),
+      // Last 7 days revenue grouped by day
+      this.earningModel
+        .aggregate([
+          { $match: { createdAt: { $gte: sevenDaysAgo } } },
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              total: { $sum: '$amount' },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .exec(),
+      // Previous 7 days for growth calculation
+      this.earningModel
+        .aggregate([
+          { $match: { createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ])
+        .exec(),
     ]);
 
     const grossRevenue = grossRevenueResult[0]?.total || 0;
@@ -316,6 +341,8 @@ export class SuperAdminService {
     // Payout Liability = what the platform owes instructors from unpaid earnings (e.g. 80% of unpaid gross)
     const payoutLiability = Math.round((unpaidGross * instructorSharePercent) / 100 * 100) / 100;
     const pendingPayouts = pendingPayoutsResult.length;
+
+
 
     const criticalAlerts: any[] = [];
 
@@ -361,12 +388,12 @@ export class SuperAdminService {
 
     // ── Last 7 days daily revenue chart (platform share only) ────────────────
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-    sevenDaysAgo.setHours(0, 0, 0, 0);
+    const chartSevenDaysAgo = new Date();
+    chartSevenDaysAgo.setDate(chartSevenDaysAgo.getDate() - 6);
+    chartSevenDaysAgo.setHours(0, 0, 0, 0);
 
     const last7Earnings = await this.earningModel
-      .find({ createdAt: { $gte: sevenDaysAgo } })
+      .find({ createdAt: { $gte: chartSevenDaysAgo } })
       .lean()
       .exec();
 
@@ -390,12 +417,12 @@ export class SuperAdminService {
     const chartData = Object.values(buckets).map(v => Math.round(v * 100) / 100);
 
     // ── Revenue growth: this week vs previous week (platform share) ──────────
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    fourteenDaysAgo.setHours(0, 0, 0, 0);
+    const chartFourteenDaysAgo = new Date();
+    chartFourteenDaysAgo.setDate(chartFourteenDaysAgo.getDate() - 14);
+    chartFourteenDaysAgo.setHours(0, 0, 0, 0);
 
     const prevWeekEarnings = await this.earningModel
-      .find({ createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } })
+      .find({ createdAt: { $gte: chartFourteenDaysAgo, $lt: chartSevenDaysAgo } })
       .lean()
       .exec();
 
@@ -916,11 +943,11 @@ export class SuperAdminService {
       webhookFailuresLast24h: failuresCount,
       lastWebhookFailure: lastFailure
         ? {
-            service: lastFailure.service,
-            endpoint: lastFailure.endpoint,
-            errorMessage: lastFailure.errorMessage,
-            occurredAt: lastFailure.occurredAt,
-          }
+          service: lastFailure.service,
+          endpoint: lastFailure.endpoint,
+          errorMessage: lastFailure.errorMessage,
+          occurredAt: lastFailure.occurredAt,
+        }
         : null,
     };
   }
