@@ -6,8 +6,6 @@ import {
     IsNumber,
     Min,
     Max,
-    IsBoolean,
-    IsOptional,
 } from 'class-validator';
 
 // One server-side ceiling matching the 25MB client-side check, so a request
@@ -51,8 +49,4 @@ export class CreateAttachmentDto {
     @ApiProperty({ example: 204800 })
     fileSize!: number;
 
-    @IsBoolean()
-    @IsOptional()
-    @ApiProperty({ example: false, required: false })
-    isPublic?: boolean;
 }

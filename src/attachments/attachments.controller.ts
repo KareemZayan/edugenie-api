@@ -41,20 +41,22 @@ export class AttachmentsController {
 
   // ── Instructor: create ──────────────────────────────────────────────
 
-  @Post('courses/:courseId/sections/:sectionId/attachments')
+  @Post('courses/:courseId/sections/:sectionId/lessons/:lessonId/attachments')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Add a section-level attachment' })
-  async addSectionAttachment(
+  @ApiOperation({ summary: 'Add a lesson-level attachment (instructor only)' })
+  async addLessonAttachment(
     @Param('courseId') courseId: string,
     @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
     @Req() req: RequestWithUser,
     @Body() dto: CreateAttachmentDto,
   ): Promise<AttachmentSerializer> {
     return this.attachmentsService.create(
       courseId,
       sectionId,
+      lessonId,
       req.user.userId,
       dto,
     );
@@ -62,37 +64,41 @@ export class AttachmentsController {
 
   // ── Instructor: read own attachments (course builder view) ─────────
 
-  @Get('courses/:courseId/sections/:sectionId/attachments/manage')
+  @Get('courses/:courseId/sections/:sectionId/lessons/:lessonId/attachments/manage')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List section-level attachments (instructor view)' })
-  async listSectionAttachmentsForInstructor(
+  @ApiOperation({ summary: 'List lesson attachments (instructor view)' })
+  async listLessonAttachmentsForInstructor(
     @Param('courseId') courseId: string,
     @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
     @Req() req: RequestWithUser,
   ): Promise<AttachmentSerializer[]> {
-    return this.attachmentsService.findByParentForInstructor(
+    return this.attachmentsService.findByLessonForInstructor(
       courseId,
-      req.user.userId,
       sectionId,
+      lessonId,
+      req.user.userId,
     );
   }
 
-  // ── Public / student: read ──────────────────────────────────────────
+  // ── Student / enrolled: read ────────────────────────────────────────
 
-  @Get('courses/:courseId/sections/:sectionId/attachments')
+  @Get('courses/:courseId/sections/:sectionId/lessons/:lessonId/attachments')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List section-level attachments (public or enrolled)' })
-  async listSectionAttachments(
+  @ApiOperation({ summary: 'List lesson attachments (enrolled students only)' })
+  async listLessonAttachments(
     @Param('courseId') courseId: string,
     @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
     @Req() req: RequestWithOptionalUser,
   ): Promise<AttachmentSerializer[]> {
-    return this.attachmentsService.findByParent(
+    return this.attachmentsService.findByLesson(
       courseId,
       sectionId,
+      lessonId,
       req.user,
     );
   }
@@ -103,7 +109,7 @@ export class AttachmentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.INSTRUCTOR)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update an attachment (e.g. toggle visibility)' })
+  @ApiOperation({ summary: 'Update an attachment (title, file replacement)' })
   async update(
     @Param('id') id: string,
     @Req() req: RequestWithUser,
