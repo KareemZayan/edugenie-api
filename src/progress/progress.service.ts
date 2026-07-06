@@ -12,6 +12,7 @@ import { NotificationType } from '../notifications/enums/notification-type.enum'
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { computeCourseProgress } from '../common/utils/lesson-progress.util';
 import { CertificatesService } from '../certificates/certificates.service';
+import { CoachProfileService } from '../ai/coach-profile.service';
 
 @Injectable()
 export class ProgressService {
@@ -23,6 +24,7 @@ export class ProgressService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     private readonly notificationsService: NotificationsService,
     private readonly certificatesService: CertificatesService,
+    private readonly coachProfileService: CoachProfileService,
   ) {}
 
   async trackProgress(
@@ -73,6 +75,10 @@ export class ProgressService {
       },
       { upsert: true, new: true },
     );
+
+    // Gamification: advance the learning streak for today (fire-and-forget,
+    // never throws — must not affect progress tracking).
+    void this.coachProfileService.recordActivity(studentId);
 
     // Persist completion onto the enrollment so it survives reloads and feeds
     // the player lock state, the "x/y done" counts, the coach, and "my courses".

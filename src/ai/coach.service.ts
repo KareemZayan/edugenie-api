@@ -4,8 +4,12 @@ import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { QuizAttempt } from '../quizzes/schema/quiz-attempt.schema';
+import { Progress } from '../progress/schema/progress.schema';
+import { Roadmap } from './schema/roadmap.schema';
+import { User } from '../users/schema/user.schema';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { AiService, ChatTurn } from './ai.service';
+import { CoachProfileService, weekStartUtc } from './coach-profile.service';
 
 // A course is "stalled" once it has had no activity for this many days while
 // still in progress; a quiz section is a "weak spot" below this score.
@@ -30,6 +34,19 @@ export interface WeakSpot {
   passed: boolean;
 }
 
+export interface CoachStreak {
+  current: number;
+  longest: number;
+  activeToday: boolean;
+}
+
+export interface CoachGoal {
+  target: number;
+  completedThisWeek: number;
+  remaining: number;
+  pct: number;
+}
+
 export interface CoachSnapshot {
   totalCourses: number;
   completedCount: number;
@@ -38,6 +55,11 @@ export interface CoachSnapshot {
   completed: CoachCourse[];
   weakSpots: WeakSpot[];
   recentAvgScore: number | null;
+  streak: CoachStreak;
+  goal: CoachGoal | null;
+  /** Personalization for grounding (not surfaced by the stats endpoint). */
+  studentName?: string;
+  savedGoal?: string | null;
 }
 
 /**
@@ -56,8 +78,12 @@ export class CoachService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     @InjectModel(QuizAttempt.name)
     private quizAttemptModel: Model<QuizAttempt>,
+    @InjectModel(Progress.name) private progressModel: Model<Progress>,
+    @InjectModel(Roadmap.name) private roadmapModel: Model<Roadmap>,
+    @InjectModel(User.name) private userModel: Model<User>,
     private enrollments: EnrollmentsService,
     private ai: AiService,
+    private coachProfile: CoachProfileService,
   ) {}
 
   // ── Snapshot ────────────────────────────────────────────────────────────
@@ -113,13 +139,36 @@ export class CoachService {
       }
     }
 
-    const [weakSpots, recentAvgScore] = await Promise.all([
-      this.computeWeakSpots(
-        userId,
-        courses.map((c) => c.courseId),
-      ),
-      this.recentAvgScore(userId),
-    ]);
+    const [weakSpots, recentAvgScore, profile, roadmap, user] =
+      await Promise.all([
+        this.computeWeakSpots(
+          userId,
+          courses.map((c) => c.courseId),
+        ),
+        this.recentAvgScore(userId),
+        this.coachProfile.getProfile(userId),
+        this.roadmapModel
+          .findOne({
+            userId: new Types.ObjectId(userId),
+            status: { $in: ['active', 'saved'] },
+          })
+          .sort({ updatedAt: -1 })
+          .select('goal')
+          .lean<{ goal?: string }>(),
+        this.userModel
+          .findById(userId)
+          .select('firstName')
+          .lean<{ firstName?: string }>(),
+      ]);
+
+    const streak: CoachStreak = {
+      current: this.coachProfile.effectiveStreak(profile),
+      longest: (profile as { streakLongest?: number })?.streakLongest ?? 0,
+      activeToday:
+        (profile as { lastActiveDay?: string })?.lastActiveDay ===
+        new Date().toISOString().slice(0, 10),
+    };
+    const goal = await this.computeGoal(userId, profile);
 
     return {
       totalCourses: courses.length,
@@ -129,6 +178,30 @@ export class CoachService {
       completed,
       weakSpots,
       recentAvgScore,
+      streak,
+      goal,
+      studentName: user?.firstName?.trim() || undefined,
+      savedGoal: roadmap?.goal?.trim() || null,
+    };
+  }
+
+  /** Weekly-goal progress, computed on read from this week's completed lessons. */
+  private async computeGoal(
+    userId: string,
+    profile: { weeklyGoalLessons?: number } | null,
+  ): Promise<CoachGoal | null> {
+    const target = profile?.weeklyGoalLessons ?? 0;
+    if (!target) return null;
+    const completedThisWeek = await this.progressModel.countDocuments({
+      studentId: new Types.ObjectId(userId),
+      isCompleted: true,
+      completedAt: { $gte: weekStartUtc() },
+    });
+    return {
+      target,
+      completedThisWeek,
+      remaining: Math.max(0, target - completedThisWeek),
+      pct: Math.min(100, Math.round((completedThisWeek / target) * 100)),
     };
   }
 
@@ -223,6 +296,21 @@ export class CoachService {
     const lines: string[] = [
       `Enrolled in ${s.totalCourses} course(s); ${s.completedCount} completed.`,
     ];
+    if (s.savedGoal) {
+      lines.push(`Stated learning goal: "${s.savedGoal}".`);
+    }
+    lines.push(
+      s.streak.current > 0
+        ? `Current learning streak: ${s.streak.current} day(s)` +
+            (s.streak.activeToday ? ' (active today).' : ' — not active yet today.')
+        : 'No active learning streak right now.',
+    );
+    if (s.goal) {
+      lines.push(
+        `Weekly goal: ${s.goal.completedThisWeek}/${s.goal.target} lessons this week ` +
+          `(${s.goal.pct}%${s.goal.remaining > 0 ? `, ${s.goal.remaining} to go` : ' — reached!'}).`,
+      );
+    }
     if (s.recentAvgScore !== null) {
       lines.push(`Recent average quiz score: ${s.recentAvgScore}%.`);
     }
@@ -264,8 +352,13 @@ export class CoachService {
     return (
       `You are EduGenie's AI Learning Coach. The student's REAL learning data is ` +
       `below — base everything on it; never invent courses, numbers, or links.\n` +
+      (s.studentName ? `Address the student as ${s.studentName}. ` : '') +
       `Be warm, brief, and specific. In your reply:\n` +
-      `- Open with one encouraging sentence reading where they are.\n` +
+      `- Open with one encouraging sentence reading where they are` +
+      `${s.streak.current > 0 ? ' (acknowledge their streak or weekly goal when relevant)' : ''}.\n` +
+      (s.savedGoal
+        ? `- Keep advice pointed at their stated goal; suggest the next step toward it (they can plan more at /roadmap).\n`
+        : '') +
       `- Recommend the SINGLE most important next action (resume a specific ` +
       `course/section, revisit a weak spot, or start a stalled / not-started one).\n` +
       `- If there are weak spots, name the exact section to revisit and suggest ` +
@@ -313,6 +406,14 @@ export class CoachService {
       recentAvgScore: s.recentAvgScore,
       inProgress: s.inProgress,
       weakSpots: s.weakSpots,
+      streak: s.streak,
+      goal: s.goal,
     };
+  }
+
+  /** Set the weekly goal and return the refreshed snapshot. */
+  async setGoal(userId: string, weeklyGoalLessons: number) {
+    await this.coachProfile.setGoal(userId, weeklyGoalLessons);
+    return this.getSnapshot(userId);
   }
 }

@@ -10,6 +10,7 @@ import {
 import type { Response } from 'express';
 import { AiService, ChatTurn } from './ai.service';
 import { CoachService } from './coach.service';
+import { CoachMissionsService } from './coach-missions.service';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
@@ -22,6 +23,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SetCoachGoalDto } from './dto/set-coach-goal.dto';
 
 /** Body for every AI chat tier (history + optional roadmap goal). */
 interface AiChatBody {
@@ -38,6 +40,7 @@ export class AiController {
   constructor(
     private readonly aiService: AiService,
     private readonly coachService: CoachService,
+    private readonly coachMissions: CoachMissionsService,
   ) {}
 
   /**
@@ -193,5 +196,28 @@ export class AiController {
   @SwaggerApiResponse({ status: 200, description: 'Learning snapshot.' })
   async coachSnapshot(@CurrentUser() user: { userId: string }) {
     return this.coachService.getSnapshot(user.userId);
+  }
+
+  // Set the weekly study goal; returns the refreshed snapshot.
+  @Post('coach/goal')
+  @ApiOperation({ summary: 'Set the weekly learning goal' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 201, description: 'Updated learning snapshot.' })
+  async setCoachGoal(
+    @Body() body: SetCoachGoalDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.coachService.setGoal(user.userId, body.weeklyGoalLessons);
+  }
+
+  // Today's assigned missions (auto-verified from real progress) + XP.
+  @Get('coach/missions')
+  @ApiOperation({ summary: "Today's coach missions + XP" })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 200, description: 'Daily missions.' })
+  async coachMissionsToday(@CurrentUser() user: { userId: string }) {
+    return this.coachMissions.getToday(user.userId);
   }
 }
