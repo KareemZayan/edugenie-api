@@ -51,9 +51,15 @@ export class User extends Document {
   @Prop({ default: 0 })
   profileViews!: number;
 
-  // Lifetime count of AI roadmap builds (capped at 3 — never decremented).
+  // AI roadmap builds used in the current calendar month (capped at 3). Resets
+  // when `roadmapQuotaMonth` no longer matches the current 'YYYY-MM'.
   @Prop({ default: 0 })
   roadmapGenerationsUsed!: number;
+
+  // The 'YYYY-MM' month that `roadmapGenerationsUsed` is counted against. When a
+  // new month starts, the count is treated as 0 and reset on the next build.
+  @Prop({ default: '' })
+  roadmapQuotaMonth!: string;
 
   // Track instructor quiz generations (for rate limiting)
   @Prop({ default: 0 })

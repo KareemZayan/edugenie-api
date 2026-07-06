@@ -19,7 +19,7 @@ export interface RoadmapMilestone {
   items: RoadmapItem[];
 }
 
-export type RoadmapStatus = 'active' | 'purchased';
+export type RoadmapStatus = 'active' | 'saved' | 'purchased';
 
 /**
  * A persisted, structured AI learning roadmap. Generated from the student's
@@ -42,6 +42,10 @@ export class Roadmap {
   @Prop({ default: '' })
   summary: string;
 
+  /** 3–5 short "what you'll gain" bullets shown on the roadmap. */
+  @Prop({ type: [String], default: [] })
+  benefits: string[];
+
   @Prop({ type: Array, default: [] })
   milestones: RoadmapMilestone[];
 
@@ -52,7 +56,7 @@ export class Roadmap {
   @Prop({ default: 0 })
   totalPrice: number;
 
-  @Prop({ default: 'active', enum: ['active', 'purchased'] })
+  @Prop({ default: 'active', enum: ['active', 'saved', 'purchased'] })
   status: RoadmapStatus;
 
   @Prop({ type: Date, default: null })

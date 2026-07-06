@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -10,6 +19,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RoadmapService } from './roadmap.service';
 import { BuildRoadmapDto } from './dto/build-roadmap.dto';
+import { UpdateRoadmapDto } from './dto/update-roadmap.dto';
 
 @UseGuards(JwtAuthGuard, ThrottlerGuard)
 @Throttle({ default: { limit: 20, ttl: 3_600_000 } })
@@ -45,11 +55,51 @@ export class RoadmapController {
     return this.roadmap.list(user.userId);
   }
 
+  // NOTE: must be declared BEFORE the ':id' route so 'active' isn't captured as an id.
+  @Get('active')
+  @ApiOperation({ summary: "Get the user's single active roadmap (or null)" })
+  @ApiBearerAuth()
+  @ApiCookieAuth('jwt')
+  getActive(@CurrentUser() user: { userId: string }) {
+    return this.roadmap.getActive(user.userId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get one saved roadmap' })
   @ApiBearerAuth()
   @ApiCookieAuth('jwt')
   getOne(@CurrentUser() user: { userId: string }, @Param('id') id: string) {
     return this.roadmap.getOne(user.userId, id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Edit an active roadmap (remove/reorder/add items)' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('jwt')
+  update(
+    @CurrentUser() user: { userId: string },
+    @Param('id') id: string,
+    @Body() dto: UpdateRoadmapDto,
+  ) {
+    return this.roadmap.update(user.userId, id, dto);
+  }
+
+  @Post(':id/save')
+  @ApiOperation({ summary: 'Save the active draft to the profile (buy later)' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('jwt')
+  saveRoadmap(
+    @CurrentUser() user: { userId: string },
+    @Param('id') id: string,
+  ) {
+    return this.roadmap.save(user.userId, id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a roadmap' })
+  @ApiBearerAuth()
+  @ApiCookieAuth('jwt')
+  remove(@CurrentUser() user: { userId: string }, @Param('id') id: string) {
+    return this.roadmap.remove(user.userId, id);
   }
 }
