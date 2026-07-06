@@ -309,6 +309,7 @@ export class SuperAdminService {
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ])
         .exec(),
+      // Gross sales not yet paid out to instructors
       this.earningModel
         .aggregate([
           {
@@ -406,6 +407,8 @@ export class SuperAdminService {
           : 0;
     const pendingPayouts = pendingPayoutsResult.length;
 
+
+
     const criticalAlerts: any[] = [];
 
     // Group webhook failures by service
@@ -471,6 +474,25 @@ export class SuperAdminService {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
+    // ── Single aggregate: get last activity date per admin ──────────────────
+    const adminIds = admins.map((a) => a._id);
+    const lastActivityAgg = await this.auditLogModel
+      .aggregate([
+        { $match: { performedBy: { $in: adminIds } } },
+        {
+          $group: {
+            _id: '$performedBy',
+            lastActiveAt: { $max: '$createdAt' },
+          },
+        },
+      ])
+      .exec();
+
+    // Build a lookup map: adminId string → lastActiveAt Date
+    const lastActivityMap = new Map<string, Date>(
+      lastActivityAgg.map((r) => [r._id.toString(), r.lastActiveAt]),
+    );
+
     const adminList = await Promise.all(
       admins.map(async (admin) => {
         const actionsThisMonth = await this.auditLogModel
@@ -486,8 +508,7 @@ export class SuperAdminService {
           email: admin.email,
           role: admin.role,
           status: admin.status,
-          // NOTE: lastActiveAt requires a login-timestamp field on User — not currently tracked
-          lastActiveAt: null,
+          lastActiveAt: lastActivityMap.get(admin._id.toString()) ?? null,
           actionsThisMonth,
         };
       }),
@@ -903,11 +924,11 @@ export class SuperAdminService {
       webhookFailuresLast24h: failuresCount,
       lastWebhookFailure: lastFailure
         ? {
-            service: lastFailure.service,
-            endpoint: lastFailure.endpoint,
-            errorMessage: lastFailure.errorMessage,
-            occurredAt: lastFailure.occurredAt,
-          }
+          service: lastFailure.service,
+          endpoint: lastFailure.endpoint,
+          errorMessage: lastFailure.errorMessage,
+          occurredAt: lastFailure.occurredAt,
+        }
         : null,
     };
   }

@@ -108,6 +108,18 @@ export class User extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', default: null })
   deactivatedBy?: Types.ObjectId | null;
 
+  @Prop({ required: false, default: false })
+  isBlocked?: boolean;
+
+  @Prop({ type: String, default: null })
+  blockedReason?: string | null;
+
+  @Prop({ type: Date, default: null })
+  blockedAt?: Date | null;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  blockedBy?: Types.ObjectId | null;
+
   @Prop({ type: String, default: null })
   lastLoginFingerprint?: string | null;
 

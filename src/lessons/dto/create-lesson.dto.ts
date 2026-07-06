@@ -5,6 +5,7 @@ import {
   IsUrl,
   IsNumber,
   Min,
+  Max,
   IsOptional,
 } from 'class-validator';
 
@@ -26,7 +27,8 @@ export class CreateLessonDto {
 
   @IsNumber()
   @Min(1)
-  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  @Max(900, { message: 'Video duration must not exceed 15 minutes (900 seconds)' })
+  @ApiProperty({ example: 480, description: 'Video duration in seconds (max 900 = 15 minutes)' })
   videoDuration!: number;
 
   @IsOptional()

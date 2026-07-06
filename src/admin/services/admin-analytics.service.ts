@@ -24,7 +24,7 @@ export class AdminAnalyticsService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Report.name) private reportModel: Model<ReportDocument>,
     @InjectModel(Earning.name) private earningModel: Model<EarningDocument>,
-  ) {}
+  ) { }
 
   async getDashboardOverview(): Promise<AdminDashboardOverviewResponse> {
     const today = new Date();
@@ -87,15 +87,15 @@ export class AdminAnalyticsService {
 
     const dateFilter = startDate ? { createdAt: { $gte: startDate } } : {};
 
-    const totalUsers = await this.userModel.countDocuments(dateFilter).exec();
+    const totalUsers = await this.userModel.countDocuments({}).exec();
     const totalInstructors = await this.userModel
-      .countDocuments({ ...dateFilter, role: UserRole.INSTRUCTOR })
+      .countDocuments({ role: UserRole.INSTRUCTOR })
       .exec();
     const totalStudents = await this.userModel
-      .countDocuments({ ...dateFilter, role: UserRole.STUDENT })
+      .countDocuments({ role: UserRole.STUDENT })
       .exec();
     const totalCourses = await this.courseModel
-      .countDocuments({ ...dateFilter, courseStatus: CourseStatus.PUBLISHED })
+      .countDocuments({ courseStatus: CourseStatus.PUBLISHED })
       .exec();
 
     const earningsAgg = await this.earningModel

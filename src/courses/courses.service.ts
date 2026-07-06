@@ -354,14 +354,51 @@ export class CoursesService {
     const course = await this.findCourseDocument(id);
     const courseObj = course.toObject();
 
-    // Tag each section with `isOwned` and each lesson with a `state` based on
-    // what THIS student purchased: full course → everything unlocked; specific
-    // section(s) → only those sections + their lessons; otherwise locked.
-    // (Video URLs are separately gated server-side by canAccessLesson — this
-    // just drives the visual lock state in the course player.)
-    await this.applyStudentAccess(courseObj, studentId);
+    // If this is an instructor viewing their course (no studentId or context indicates instructor),
+    // populate section quiz information for submission validation
+    if (!studentId) {
+      await this.populateSectionQuizInfo(courseObj);
+    } else {
+      // Student view: apply access control and compute hasQuiz based on student progress
+      await this.applyStudentAccess(courseObj, studentId);
+    }
 
     return new CourseSerializer(courseObj);
+  }
+
+  /**
+   * Populate section quiz information for instructor course submission view.
+   * This sets hasApprovedQuiz flag for each section based on approved quizzes.
+   */
+  private async populateSectionQuizInfo(courseObj: any): Promise<void> {
+    const sections: any[] = Array.isArray(courseObj?.sections)
+      ? courseObj.sections
+      : [];
+    if (sections.length === 0) return;
+
+    const sectionIds = sections
+      .map((s) => s._id)
+      .filter((id): id is Types.ObjectId => !!id);
+
+    // Find all approved quizzes with questions for these sections
+    const quizzes = await this.quizModel
+      .find({ sectionId: { $in: sectionIds }, status: 'approved' })
+      .select('_id sectionId questions')
+      .lean();
+
+    const quizBySection = new Map<string, boolean>();
+    for (const q of quizzes) {
+      quizBySection.set(
+        String((q as any).sectionId),
+        (((q as any).questions as unknown[]) ?? []).length > 0,
+      );
+    }
+
+    // Mark sections with approved quizzes
+    for (const section of sections) {
+      const sid = section._id?.toString();
+      section.hasApprovedQuiz = quizBySection.get(sid) ?? false;
+    }
   }
 
   /**
