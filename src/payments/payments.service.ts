@@ -20,6 +20,7 @@ import { Earning } from '../earnings/schema/earning.schema';
 import { PayoutRequest } from '../earnings/schema/payout-request.schema';
 import { PlatformConfig } from '../superadmin/schema/platform-config.schema';
 import { Notification } from '../notifications/schema/notification.schema';
+import { Cart } from '../cart/schema/cart.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { CourseStatus } from '../common/enums/course-status.enum';
@@ -66,6 +67,7 @@ export class PaymentsService {
     private platformConfigModel: Model<PlatformConfig>,
     @InjectModel(Notification.name)
     private notificationModel: Model<Notification>,
+    @InjectModel(Cart.name) private cartModel: Model<Cart>,
   ) {}
 
   get isConfigured(): boolean {
@@ -347,7 +349,9 @@ export class PaymentsService {
       priceCents,
       feeCents,
       destinationAccountId: destination,
-      successUrl: `${returnBase}${returnPath}?purchase=success`,
+      // {CHECKOUT_SESSION_ID} is substituted by Stripe — lets the return page
+      // confirm+fulfill without relying on the webhook.
+      successUrl: `${returnBase}${returnPath}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${returnBase}${returnPath}?purchase=cancel`,
       metadata: {
         courseId: course._id.toString(),
@@ -367,8 +371,85 @@ export class PaymentsService {
     return { url: session.url };
   }
 
+  /**
+   * Confirm + fulfill a checkout from the browser's return redirect, so a paid
+   * order is granted even when the `checkout.session.completed` webhook isn't
+   * reaching this server (common in local dev). Verifies the session is actually
+   * PAID and belongs to the caller, then runs the same idempotent fulfillment the
+   * webhook uses — so a later webhook is a harmless no-op.
+   */
+  async confirmCheckout(
+    sessionId: string,
+    buyerId: string,
+  ): Promise<{ fulfilled: boolean }> {
+    if (!this.stripe.isConfigured) {
+      throw new ServiceUnavailableException('Stripe is not configured.');
+    }
+    if (!sessionId) throw new BadRequestException('Missing session id.');
+
+    const session = await this.stripe.retrieveCheckoutSession(sessionId);
+    // Only the buyer who created the session may confirm it.
+    if (session.metadata?.buyerId && session.metadata.buyerId !== buyerId) {
+      throw new ForbiddenException('This checkout is not yours.');
+    }
+    // Not paid yet (still processing / abandoned) — nothing to fulfill.
+    if (session.payment_status !== 'paid') {
+      return { fulfilled: false };
+    }
+    await this.fulfillCheckout(session);
+    return { fulfilled: true };
+  }
+
+  /**
+   * Recover the caller's paid-but-unfulfilled cart orders (e.g. the webhook never
+   * arrived). Finds their recent PENDING orders, and for each whose Stripe session
+   * is actually PAID, runs the idempotent fulfillment. Returns how many it granted.
+   */
+  async confirmPendingOrders(buyerId: string): Promise<{ fulfilled: number }> {
+    if (!this.stripe.isConfigured) {
+      throw new ServiceUnavailableException('Stripe is not configured.');
+    }
+    const pending = await this.orderModel
+      .find({
+        studentId: new Types.ObjectId(buyerId),
+        status: OrderStatus.PENDING,
+        stripeSessionId: { $ne: null },
+      })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean<Array<{ stripeSessionId: string | null }>>()
+      .exec();
+
+    let fulfilled = 0;
+    for (const order of pending) {
+      if (!order.stripeSessionId) continue;
+      try {
+        const session = await this.stripe.retrieveCheckoutSession(
+          order.stripeSessionId,
+        );
+        if (session.payment_status === 'paid') {
+          await this.fulfillCheckout(session);
+          fulfilled++;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `confirmPendingOrders: session ${order.stripeSessionId} failed: ${(err as Error).message}`,
+        );
+      }
+    }
+    return { fulfilled };
+  }
+
   /** Fulfill a paid Checkout Session: Order + Enrollment + Earning. Idempotent. */
   async fulfillCheckout(session: Stripe.Checkout.Session): Promise<void> {
+    // Whole-cart sessions (separate charges + transfers) carry an orderId and are
+    // fulfilled per-item / per-instructor. Single-course destination charges fall
+    // through to the legacy path below.
+    if (session.metadata?.orderId) {
+      await this.fulfillCartOrder(session);
+      return;
+    }
+
     const courseId = session.metadata?.courseId;
     const buyerId = session.metadata?.buyerId;
     if (!courseId || !buyerId) {
@@ -483,6 +564,408 @@ export class PaymentsService {
         course._id.toString(),
       )
       .catch(() => {});
+
+    // Empty this course from the buyer's cart if it was sitting there.
+    await this.clearOrderItemsFromCart(studentObjId, order.items).catch(() => {});
+  }
+
+  // ---- Whole-cart checkout (separate charges + transfers) -------------------
+
+  /**
+   * Start a Stripe Checkout for the buyer's WHOLE cart in one session. The
+   * platform is merchant of record (no per-item destination), so a cart spanning
+   * multiple instructors works; `fulfillCartOrder` later issues one Transfer per
+   * instructor from the single charge. A PENDING Order is created up front and its
+   * id becomes both the Stripe `transfer_group` and the fulfillment lookup key.
+   */
+  async checkoutCart(
+    buyerId: string,
+    origin: 'dashboard' | 'student' = 'student',
+  ): Promise<{ url: string }> {
+    if (!this.stripe.isConfigured) {
+      throw new ServiceUnavailableException(
+        'Stripe is not configured. Set STRIPE_SECRET_KEY.',
+      );
+    }
+
+    const buyerObjId = new Types.ObjectId(buyerId);
+    const cart = await this.cartModel
+      .findOne({ studentId: buyerObjId })
+      .lean<{
+        items: Array<{
+          itemType: PurchaseType;
+          courseId: Types.ObjectId;
+          sectionId?: Types.ObjectId;
+          price: number;
+        }>;
+      }>()
+      .exec();
+    if (!cart || cart.items.length === 0) {
+      throw new BadRequestException('Your cart is empty.');
+    }
+
+    const orderItems: Array<{
+      courseId: Types.ObjectId;
+      itemType: PurchaseType;
+      sectionId?: Types.ObjectId;
+      instructorId: Types.ObjectId;
+      courseTitle: string;
+      price: number;
+    }> = [];
+    const lineItems: Array<{ name: string; amountCents: number }> = [];
+    const instructorIds = new Set<string>();
+
+    for (const item of cart.items) {
+      const course = await this.courseModel
+        .findById(item.courseId)
+        .select('title price instructorId courseStatus sections')
+        .lean<{
+          _id: Types.ObjectId;
+          title: string;
+          price: number;
+          instructorId: Types.ObjectId;
+          courseStatus: CourseStatus;
+          sections: Array<{
+            _id: Types.ObjectId;
+            title: string;
+            price?: number | null;
+          }>;
+        }>()
+        .exec();
+      if (!course) continue; // stale cart row (course deleted) — skip
+      if (course.courseStatus !== CourseStatus.PUBLISHED) continue;
+      if (course.instructorId.toString() === buyerId) {
+        throw new ForbiddenException('You cannot buy your own course.');
+      }
+
+      // Drop anything the buyer already owns so they're never charged for it.
+      const owned = await this.enrollmentModel
+        .findOne({ studentId: buyerObjId, courseId: course._id })
+        .lean<{ type: PurchaseType; sectionIds: Types.ObjectId[] }>()
+        .exec();
+
+      let name: string;
+      let sectionId: Types.ObjectId | undefined;
+      if (item.itemType === PurchaseType.SECTION) {
+        if (!item.sectionId) continue;
+        const section = course.sections?.find(
+          (s) => s._id.toString() === item.sectionId!.toString(),
+        );
+        if (!section) continue;
+        if (owned?.type === PurchaseType.FULL_COURSE) continue;
+        if (
+          owned?.sectionIds?.some(
+            (id) => id.toString() === item.sectionId!.toString(),
+          )
+        ) {
+          continue;
+        }
+        sectionId = item.sectionId;
+        name = `${course.title} — ${section.title}`;
+      } else {
+        if (owned) continue; // already owns (full, or some sections)
+        name = course.title;
+      }
+
+      const price = item.price;
+      if (!price || price <= 0) continue; // free items don't go through Stripe
+
+      orderItems.push({
+        courseId: course._id,
+        itemType: item.itemType,
+        sectionId,
+        instructorId: course.instructorId,
+        courseTitle: name,
+        price,
+      });
+      lineItems.push({ name, amountCents: Math.round(price * 100) });
+      instructorIds.add(course.instructorId.toString());
+    }
+
+    if (orderItems.length === 0) {
+      throw new BadRequestException(
+        'Nothing to pay for — your cart is empty, free, or already owned.',
+      );
+    }
+
+    // Every instructor must be onboarded (their Transfer needs a charges-enabled
+    // connected account). Fail early, naming who still has to set up payouts.
+    const notOnboarded: string[] = [];
+    for (const instructorId of instructorIds) {
+      const instructor = await this.userModel
+        .findById(instructorId)
+        .select('stripeAccountId firstName lastName')
+        .lean<{
+          stripeAccountId?: string | null;
+          firstName?: string;
+          lastName?: string;
+        }>()
+        .exec();
+      let ok = false;
+      if (instructor?.stripeAccountId) {
+        try {
+          const account = await this.stripe.retrieveAccount(
+            instructor.stripeAccountId,
+          );
+          ok = !!account.charges_enabled;
+        } catch {
+          ok = false;
+        }
+      }
+      if (!ok) {
+        notOnboarded.push(
+          `${instructor?.firstName ?? ''} ${instructor?.lastName ?? ''}`.trim() ||
+            'an instructor',
+        );
+      }
+    }
+    if (notOnboarded.length > 0) {
+      throw new BadRequestException(
+        `These instructors haven't set up Stripe payouts yet: ${notOnboarded.join(', ')}. Remove their items to check out the rest.`,
+      );
+    }
+
+    const totalAmount = orderItems.reduce((s, i) => s + i.price, 0);
+
+    const [order] = await this.orderModel.create([
+      {
+        studentId: buyerObjId,
+        items: orderItems,
+        totalAmount,
+        status: OrderStatus.PENDING,
+      },
+    ]);
+    const orderId = order._id.toString();
+
+    const returnBase =
+      origin === 'student' ? this.studentUrl : this.dashboardUrl;
+    const returnPath =
+      origin === 'student' ? '/checkout/stripe-success' : '/buy-test';
+
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await this.stripe.createCartCheckoutSession({
+        lineItems,
+        transferGroup: orderId,
+        successUrl: `${returnBase}${returnPath}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${returnBase}${returnPath}?purchase=cancel`,
+        metadata: { orderId, buyerId, kind: 'cart' },
+        idempotencyKey: `cart_${orderId}`,
+      });
+    } catch (err) {
+      order.status = OrderStatus.FAILED;
+      await order.save();
+      throw err;
+    }
+    if (!session.url) {
+      order.status = OrderStatus.FAILED;
+      await order.save();
+      throw new ServiceUnavailableException(
+        'Stripe did not return a checkout URL.',
+      );
+    }
+    order.stripeSessionId = session.id;
+    await order.save();
+    return { url: session.url };
+  }
+
+  /**
+   * Fulfill a whole-cart session: complete the Order, create every Enrollment,
+   * transfer each instructor's share, record the Earning ledger, and empty the
+   * bought items from the cart. Idempotent on order status.
+   */
+  private async fulfillCartOrder(
+    session: Stripe.Checkout.Session,
+  ): Promise<void> {
+    const orderId = session.metadata?.orderId;
+    if (!orderId || !Types.ObjectId.isValid(orderId)) {
+      this.logger.warn(`cart checkout: invalid orderId "${orderId}"`);
+      return;
+    }
+    const order = await this.orderModel.findById(orderId).exec();
+    if (!order) {
+      this.logger.warn(`cart checkout: order ${orderId} not found`);
+      return;
+    }
+    if (order.status === OrderStatus.COMPLETED) return; // idempotent replay
+
+    const studentObjId = order.studentId;
+    const paymentIntentId =
+      typeof session.payment_intent === 'string'
+        ? session.payment_intent
+        : (session.payment_intent?.id ?? null);
+    const chargeId = paymentIntentId
+      ? await this.stripe.getChargeId(paymentIntentId)
+      : null;
+    const stripeFee = paymentIntentId
+      ? await this.stripe.getPaymentFee(paymentIntentId)
+      : 0;
+
+    order.status = OrderStatus.COMPLETED;
+    order.paidAt = new Date();
+    order.stripeSessionId = session.id;
+    order.stripePaymentIntentId = paymentIntentId;
+    order.stripeChargeId = chargeId;
+    order.stripeFee = stripeFee;
+    await order.save();
+
+    // 1) Enrollments — one per item (section adds to sectionIds, full upgrades).
+    for (const item of order.items) {
+      await this.upsertEnrollment(
+        studentObjId,
+        item.courseId,
+        item.itemType,
+        item.sectionId ?? null,
+      );
+    }
+
+    // 2) Earnings ledger (per item) + one Stripe Transfer per instructor.
+    const { share } = await this.getShare();
+    const totalsByInstructor = new Map<string, number>();
+    for (const item of order.items) {
+      const key = item.instructorId?.toString();
+      if (!key) continue;
+      totalsByInstructor.set(
+        key,
+        (totalsByInstructor.get(key) ?? 0) + item.price,
+      );
+      const itemShare = Math.round(item.price * (share / 100) * 100) / 100;
+      await this.earningModel.create({
+        instructorId: item.instructorId,
+        orderId: order._id,
+        courseId: item.courseId,
+        sectionId: item.sectionId ?? null,
+        amount: itemShare,
+        status: EarningStatus.PENDING,
+      });
+    }
+
+    for (const [instructorId, total] of totalsByInstructor) {
+      const shareAmount = Math.round(total * (share / 100) * 100) / 100;
+      // Move the share to the instructor's connected account. Best-effort: a
+      // failed transfer is logged (the student already has access and the
+      // earning ledger stands), it can be reconciled/retried, and it never
+      // blocks fulfillment of the rest of the order.
+      if (chargeId) {
+        const instructor = await this.userModel
+          .findById(instructorId)
+          .select('stripeAccountId')
+          .lean<{ stripeAccountId?: string | null }>()
+          .exec();
+        if (instructor?.stripeAccountId) {
+          try {
+            await this.stripe.createTransfer({
+              destinationAccountId: instructor.stripeAccountId,
+              amountCents: Math.round(shareAmount * 100),
+              transferGroup: order._id.toString(),
+              sourceTransaction: chargeId,
+              idempotencyKey: `transfer_${order._id.toString()}_${instructorId}`,
+            });
+          } catch (err) {
+            this.logger.error(
+              `Transfer to ${instructorId} for order ${order._id.toString()} failed: ${(err as Error).message}`,
+            );
+          }
+        }
+      }
+      const instructorObjId = new Types.ObjectId(instructorId);
+      this.notifications
+        .create(
+          instructorObjId,
+          'New Enrollment',
+          'A student just purchased content from your courses.',
+          NotificationType.NEW_ENROLLMENT,
+        )
+        .catch(() => {});
+      this.notifications
+        .create(
+          instructorObjId,
+          'Earning Recorded',
+          `You earned ${shareAmount} from a new purchase.`,
+          NotificationType.EARNING_RECORDED,
+        )
+        .catch(() => {});
+    }
+
+    // 3) Student notification + empty the bought items from the cart.
+    this.notifications
+      .create(
+        studentObjId,
+        'Purchase Successful',
+        'Your purchase is complete. Enjoy your new content!',
+        NotificationType.PURCHASE_COMPLETED,
+      )
+      .catch(() => {});
+    await this.clearOrderItemsFromCart(studentObjId, order.items).catch(() => {});
+  }
+
+  /** Create or extend a student's enrollment for a purchased item. */
+  private async upsertEnrollment(
+    studentId: Types.ObjectId,
+    courseId: Types.ObjectId,
+    itemType: PurchaseType,
+    sectionId: Types.ObjectId | null,
+  ): Promise<void> {
+    let enrollment = await this.enrollmentModel.findOne({ studentId, courseId });
+    if (!enrollment) {
+      enrollment = new this.enrollmentModel({
+        studentId,
+        courseId,
+        type: itemType,
+        sectionIds:
+          itemType === PurchaseType.SECTION && sectionId ? [sectionId] : [],
+      });
+    } else if (itemType === PurchaseType.FULL_COURSE) {
+      enrollment.type = PurchaseType.FULL_COURSE;
+    } else if (itemType === PurchaseType.SECTION && sectionId) {
+      if (
+        !enrollment.sectionIds.some((id) => id.toString() === sectionId.toString())
+      ) {
+        enrollment.sectionIds.push(sectionId);
+      }
+    }
+    await enrollment.save();
+  }
+
+  /** Remove just-purchased items (and any section now covered by a full buy). */
+  private async clearOrderItemsFromCart(
+    studentId: Types.ObjectId,
+    items: Array<{
+      courseId: Types.ObjectId;
+      itemType: PurchaseType;
+      sectionId?: Types.ObjectId;
+    }>,
+  ): Promise<void> {
+    const cart = await this.cartModel.findOne({ studentId });
+    if (!cart || cart.items.length === 0) return;
+
+    const key = (c: string, t: string, s?: string) => `${c}|${t}|${s ?? ''}`;
+    const bought = new Set(
+      items.map((i) =>
+        key(i.courseId.toString(), i.itemType, i.sectionId?.toString()),
+      ),
+    );
+    const fullCourseBought = new Set(
+      items
+        .filter((i) => i.itemType === PurchaseType.FULL_COURSE)
+        .map((i) => i.courseId.toString()),
+    );
+
+    const before = cart.items.length;
+    cart.items = cart.items.filter((ci) => {
+      const exact = bought.has(
+        key(ci.courseId.toString(), ci.itemType, ci.sectionId?.toString()),
+      );
+      const supersededByFull = fullCourseBought.has(ci.courseId.toString());
+      return !exact && !supersededByFull;
+    });
+    if (cart.items.length === before) return;
+
+    if (cart.items.length === 0) {
+      await this.cartModel.deleteOne({ _id: cart._id }).exec();
+    } else {
+      await cart.save();
+    }
   }
 
   // ---- Disputes (chargebacks) ----------------------------------------------

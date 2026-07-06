@@ -39,6 +39,7 @@ describe('PaymentsService', () => {
       payoutRequestModel,
       { findOne: () => query(null) } as any,
       { create: jest.fn() } as any,
+      { findOne: () => query(null) } as any,
     );
   };
 

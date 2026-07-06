@@ -169,9 +169,6 @@ export class ProgressService {
     // 5. Determine quizRequired & Section Completed Logic
     const quiz = await this.quizModel.findOne({ sectionId: foundSection._id });
     if (quiz) {
-      quizRequired = true;
-      quizSectionId = foundSection._id.toString();
-
       // Check if they passed the quiz
       const passedAttempt = await this.quizAttemptModel.findOne({
         studentId: new Types.ObjectId(studentId),
@@ -180,9 +177,23 @@ export class ProgressService {
       });
 
       if (allLessonsCompleted && passedAttempt) {
+        // All lessons watched AND quiz already passed → section done.
         sectionCompleted = true;
-      } else {
+        quizRequired = false;
+        quizSectionId = null;
+      } else if (allLessonsCompleted && !passedAttempt) {
+        // Section's lessons are finished but the quiz isn't passed yet — only
+        // NOW prompt the quiz. Previously quizRequired was set true on every
+        // mid-video progress save, which made the quiz pop repeatedly before
+        // the section was complete.
         sectionCompleted = false;
+        quizRequired = true;
+        quizSectionId = foundSection._id.toString();
+      } else {
+        // Still watching lessons — no quiz yet.
+        sectionCompleted = false;
+        quizRequired = false;
+        quizSectionId = null;
       }
     } else {
       quizRequired = false;
