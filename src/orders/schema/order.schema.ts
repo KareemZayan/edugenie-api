@@ -16,6 +16,11 @@ class OrderItem {
   @Prop({ type: Types.ObjectId, ref: 'Section' })
   sectionId?: Types.ObjectId;
 
+  // The course's instructor at purchase time — lets multi-instructor cart
+  // fulfillment group items and create one Stripe Transfer per instructor.
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  instructorId?: Types.ObjectId;
+
   @Prop({ required: true })
   courseTitle: string;
 

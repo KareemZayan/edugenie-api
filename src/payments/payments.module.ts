@@ -24,6 +24,7 @@ import {
   Notification,
   NotificationSchema,
 } from '../notifications/schema/notification.schema';
+import { Cart, CartSchema } from '../cart/schema/cart.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
@@ -37,6 +38,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: PayoutRequest.name, schema: PayoutRequestSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
       { name: Notification.name, schema: NotificationSchema },
+      { name: Cart.name, schema: CartSchema },
     ]),
     NotificationsModule,
   ],

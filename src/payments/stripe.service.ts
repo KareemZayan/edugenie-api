@@ -132,6 +132,89 @@ export class StripeService {
     );
   }
 
+  /**
+   * Whole-cart Checkout Session using the "separate charges and transfers" model:
+   * the PLATFORM is the merchant (no transfer_data/destination), so ONE session
+   * can hold items from multiple instructors. Funds land on the platform balance;
+   * fulfillment then issues one Transfer per instructor (see createTransfer). A
+   * shared `transferGroup` ties those transfers back to this charge.
+   */
+  async createCartCheckoutSession(params: {
+    lineItems: Array<{ name: string; amountCents: number }>;
+    transferGroup: string;
+    successUrl: string;
+    cancelUrl: string;
+    metadata: Record<string, string>;
+    idempotencyKey: string;
+  }): Promise<Stripe.Checkout.Session> {
+    return this.require().checkout.sessions.create(
+      {
+        mode: 'payment',
+        line_items: params.lineItems.map((li) => ({
+          quantity: 1,
+          price_data: {
+            currency: STRIPE_CURRENCY,
+            unit_amount: li.amountCents,
+            product_data: { name: li.name },
+          },
+        })),
+        payment_intent_data: {
+          transfer_group: params.transferGroup,
+          metadata: params.metadata,
+        },
+        success_url: params.successUrl,
+        cancel_url: params.cancelUrl,
+        metadata: params.metadata,
+      },
+      { idempotencyKey: params.idempotencyKey },
+    );
+  }
+
+  /**
+   * Transfer an instructor's share from the platform balance to their connected
+   * account, drawn from the specific charge (`source_transaction`) so it settles
+   * with those funds rather than needing a pre-funded platform balance. Idempotent
+   * per `idempotencyKey` so a replayed webhook can't double-pay.
+   */
+  async createTransfer(params: {
+    destinationAccountId: string;
+    amountCents: number;
+    transferGroup: string;
+    sourceTransaction: string;
+    idempotencyKey: string;
+  }): Promise<Stripe.Transfer> {
+    return this.require().transfers.create(
+      {
+        amount: params.amountCents,
+        currency: STRIPE_CURRENCY,
+        destination: params.destinationAccountId,
+        transfer_group: params.transferGroup,
+        source_transaction: params.sourceTransaction,
+      },
+      { idempotencyKey: params.idempotencyKey },
+    );
+  }
+
+  /** Retrieve a Checkout Session — used to confirm/fulfill on the return redirect. */
+  async retrieveCheckoutSession(
+    sessionId: string,
+  ): Promise<Stripe.Checkout.Session> {
+    return this.require().checkout.sessions.retrieve(sessionId, {
+      expand: ['payment_intent'],
+    });
+  }
+
+  /** The charge id backing a PaymentIntent (needed as a transfer source). */
+  async getChargeId(paymentIntentId: string): Promise<string | null> {
+    try {
+      const pi = await this.require().paymentIntents.retrieve(paymentIntentId);
+      const charge = pi.latest_charge;
+      return typeof charge === 'string' ? charge : (charge?.id ?? null);
+    } catch {
+      return null;
+    }
+  }
+
   /** Connected-account balance (available + pending), summed in STRIPE_CURRENCY. */
   async getConnectedBalance(
     accountId: string,
