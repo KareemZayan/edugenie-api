@@ -39,9 +39,14 @@ import {
   QuizAttempt,
   QuizAttemptSchema,
 } from '../quizzes/schema/quiz-attempt.schema';
+import { Progress, ProgressSchema } from '../progress/schema/progress.schema';
 
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { RagModule } from '../rag/rag.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { CoachProfileModule } from './coach-profile.module';
+import { CoachCronService } from './coach-cron.service';
+import { CoachMissionsService } from './coach-missions.service';
 
 @Module({
   imports: [
@@ -55,10 +60,15 @@ import { RagModule } from '../rag/rag.module';
       { name: RemediationPlan.name, schema: RemediationPlanSchema },
       { name: Quiz.name, schema: QuizSchema },
       { name: Notification.name, schema: NotificationSchema },
+      { name: Progress.name, schema: ProgressSchema },
     ]),
     EnrollmentsModule,
     // RAG retrieval for grounded, cited tutor answers (Phase 2).
     RagModule,
+    // Streak + weekly-goal state; also the proactive coach cron pushes here.
+    CoachProfileModule,
+    // Proactive coach nudges (weekly digest, weak-spot quiz-ready, goal reached).
+    NotificationsModule,
     // Same signing config as AuthModule so the gateway can verify session JWTs.
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -78,6 +88,8 @@ import { RagModule } from '../rag/rag.module';
   providers: [
     AiService,
     CoachService,
+    CoachCronService,
+    CoachMissionsService,
     PracticeService,
     RoadmapService,
     RemediationService,

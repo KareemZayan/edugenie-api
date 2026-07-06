@@ -15,6 +15,7 @@ import {
 } from '../enrollments/schema/enrollment.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CertificatesModule } from '../certificates/certificates.module';
+import { CoachProfileModule } from '../ai/coach-profile.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { CertificatesModule } from '../certificates/certificates.module';
     ]),
     NotificationsModule,
     CertificatesModule,
+    CoachProfileModule,
   ],
   controllers: [ProgressController],
   providers: [ProgressService],
