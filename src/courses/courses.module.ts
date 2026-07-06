@@ -20,6 +20,7 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RagModule } from '../rag/rag.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { RagModule } from '../rag/rag.module';
     EnrollmentsModule,
     NotificationsModule,
     RagModule,
+    PaymentsModule,
   ],
   controllers: [CoursesController, InstructorCoursesController],
   providers: [CoursesService],

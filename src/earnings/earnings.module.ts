@@ -12,16 +12,16 @@ import {
   PlatformConfig,
   PlatformConfigSchema,
 } from '../superadmin/schema/platform-config.schema';
-import { User, UserSchema } from '../users/schema/user.schema';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
+    PaymentsModule,
     MongooseModule.forFeature([
       { name: Earning.name, schema: EarningSchema },
       { name: PayoutRequest.name, schema: PayoutRequestSchema },
       { name: Course.name, schema: CourseSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
-      { name: User.name, schema: UserSchema },
     ]),
   ],
   controllers: [EarningsController],

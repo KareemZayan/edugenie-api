@@ -26,6 +26,7 @@ import { NotificationType } from '../notifications/enums/notification-type.enum'
 import { UserRole } from '../common/enums/user-role.enum';
 import { User } from '../users/schema/user.schema';
 import { IndexingService } from '../rag/indexing.service';
+import { PaymentsService } from '../payments/payments.service';
 
 /** Platform rule: a section quiz must be passed at this % to unlock the next. */
 const SECTION_UNLOCK_PASS_PERCENT = 80;
@@ -45,6 +46,7 @@ export class CoursesService {
     private readonly quizAttemptModel: Model<QuizAttempt>,
     private readonly notificationsService: NotificationsService,
     private readonly indexing: IndexingService,
+    private readonly payments: PaymentsService,
   ) {}
 
   async create(
@@ -728,6 +730,18 @@ export class CoursesService {
 
     if (!course)
       throw new NotFoundException('Course not found or unauthorized');
+
+    // 0. Payout gate: a PRICED course can't go live unless the instructor can be
+    // paid (Stripe payouts enabled) — destination charges fail otherwise. Free
+    // courses and a Stripe-less setup are exempt.
+    if (this.payments.isConfigured && course.price && course.price > 0) {
+      const connect = await this.payments.connectStatus(instructorId);
+      if (!connect.payoutsEnabled) {
+        throw new BadRequestException(
+          'Set up Stripe payouts before publishing a paid course — students can only buy courses whose instructor can receive payment. Go to Earnings → Set up payouts.',
+        );
+      }
+    }
 
     // 1. Validation: Details
     if (!course.title || course.title.trim() === '')

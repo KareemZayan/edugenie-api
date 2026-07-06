@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { WebhooksController } from './webhooks.controller';
-import { PaymobModule } from '../paymob/paymob.module';
 
 import { Order, OrderSchema } from '../orders/schema/order.schema';
 import {
@@ -34,7 +33,6 @@ import { QuizzesModule } from '../quizzes/quizzes.module';
       { name: WebhookFailureLog.name, schema: WebhookFailureLogSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },
     ]),
-    PaymobModule,
     NotificationsModule,
     CartModule,
     QuizzesModule,
