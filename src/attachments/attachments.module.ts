@@ -6,7 +6,6 @@ import { Attachment, AttachmentSchema } from './schema/attachment.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { Enrollment, EnrollmentSchema } from '../enrollments/schema/enrollment.schema';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
-import { EnrollmentsModule } from '../enrollments/enrollments.module';
 
 @Module({
     imports: [
@@ -16,7 +15,6 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
             { name: Enrollment.name, schema: EnrollmentSchema },
         ]),
         CloudinaryModule,
-        EnrollmentsModule,
     ],
     controllers: [AttachmentsController],
     providers: [AttachmentsService],
