@@ -158,6 +158,11 @@ export function resolveNotificationCta(
       return { label: 'View recovery plan', url: `${studentApp}/coach` };
 
     case NotificationType.CERTIFICATE_EARNED:
+      return {
+        label: 'View your certificate',
+        url: `${studentApp}/profile?tab=certificates`,
+      };
+
     case NotificationType.COURSE_COMPLETED:
     case NotificationType.GOAL_MILESTONE:
     case NotificationType.MILESTONE_REACHED:

@@ -27,6 +27,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ProgressModule } from './progress/progress.module';
 import { NotesModule } from './notes/notes.module';
+import { CertificatesModule } from './certificates/certificates.module';
 import { InstructorModule } from './instructor/instructor.module';
 import { EarningsModule } from './earnings/earnings.module';
 import { AdminModule } from './admin/admin.module';
@@ -131,6 +132,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     WebhooksModule,
     ProgressModule,
     NotesModule,
+    CertificatesModule,
     InstructorModule,
     EarningsModule,
     ReportsModule,

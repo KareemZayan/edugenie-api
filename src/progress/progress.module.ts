@@ -14,6 +14,7 @@ import {
   EnrollmentSchema,
 } from '../enrollments/schema/enrollment.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CertificatesModule } from '../certificates/certificates.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Enrollment.name, schema: EnrollmentSchema },
     ]),
     NotificationsModule,
+    CertificatesModule,
   ],
   controllers: [ProgressController],
   providers: [ProgressService],
