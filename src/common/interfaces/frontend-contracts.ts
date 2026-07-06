@@ -863,11 +863,6 @@ export interface SuperAdminDashboardOverviewResponse {
   payoutLiability: number;
   activeAdmins: number;
   pendingPayouts: number;
-  revenueGrowthPercent: number;
-  revenueChart: {
-    labels: string[];
-    data: number[];
-  };
   criticalAlerts: Array<{
     type: 'webhook_failure' | 'payout_backlog';
     service?: string;
