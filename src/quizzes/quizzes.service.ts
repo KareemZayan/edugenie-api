@@ -34,6 +34,7 @@ import {
 import { QUIZ_REGEN_ENROLLMENT_THRESHOLD, MAX_QUIZZES_PER_SECTION } from '../common/constants/quiz.constant';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { CertificatesService } from '../certificates/certificates.service';
 
 
 @Injectable()
@@ -52,6 +53,7 @@ export class QuizzesService {
     private aiService: AiService,
     private remediationService: RemediationService,
     private notificationsService: NotificationsService,
+    private certificatesService: CertificatesService,
   ) {}
 
 
@@ -535,13 +537,11 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
               .exec();
 
             if (enrollment) {
-              await this.notificationModel.create({
-                userId: new Types.ObjectId(studentId),
-                title: 'Certificate Earned!',
-                message: `Congratulations! You passed the quiz and completed ${course.title}. Your certificate is ready.`,
-                type: 'CERTIFICATE_EARNED',
-                isRead: false,
-              });
+              // Idempotent + quiz-gated issuance (also fires the notification/email).
+              await this.certificatesService.issueForCourse(
+                studentId,
+                courseId.toString(),
+              );
             }
           }
         }

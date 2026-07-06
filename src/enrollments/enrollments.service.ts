@@ -14,6 +14,7 @@ import { PaginateQueryDto } from '../common/dto/paginate-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { MyCourseItem } from './interfaces/my-course-item.interface';
+import { CertificatesService } from '../certificates/certificates.service';
 
 @Injectable()
 export class EnrollmentsService {
@@ -21,6 +22,7 @@ export class EnrollmentsService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     private readonly notificationsService: NotificationsService,
+    private readonly certificatesService: CertificatesService,
   ) {}
 
   async hasDuplicate(
@@ -363,26 +365,18 @@ export class EnrollmentsService {
       );
     }
 
-    // G. If they hit 100%, trigger graduation!
+    // G. If they hit 100% lessons, mark done. The certificate is issued below
+    // (after save) by CertificatesService, which also requires all quizzes passed.
     if (enrollment.progressPercentage === 100) {
       enrollment.isCourseCompleted = true;
-
-      // Fetch course title for the notification
-      const fullCourse = await this.courseModel
-        .findById(courseId)
-        .select('title')
-        .exec();
-
-      await this.notificationsService.create(
-        studentId,
-        'Certificate Earned!',
-        `You have earned a certificate for completing "${fullCourse?.title}".`,
-        NotificationType.CERTIFICATE_EARNED,
-        courseId,
-      );
     }
 
     await enrollment.save();
+
+    // Idempotent + quiz-gated. Post-save so the 100% progress is visible.
+    if (enrollment.progressPercentage === 100) {
+      await this.certificatesService.issueForCourse(studentId, courseId);
+    }
 
     return {
       success: true,

@@ -11,6 +11,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { computeCourseProgress } from '../common/utils/lesson-progress.util';
+import { CertificatesService } from '../certificates/certificates.service';
 
 @Injectable()
 export class ProgressService {
@@ -21,6 +22,7 @@ export class ProgressService {
     @InjectModel(QuizAttempt.name) private quizAttemptModel: Model<QuizAttempt>,
     @InjectModel(Enrollment.name) private enrollmentModel: Model<Enrollment>,
     private readonly notificationsService: NotificationsService,
+    private readonly certificatesService: CertificatesService,
   ) {}
 
   async trackProgress(
@@ -119,19 +121,21 @@ export class ProgressService {
         );
       }
 
-      // 100% — graduation. Guard on the flag so the certificate fires only once.
+      // 100% lessons — mark done; the certificate is issued below (after save)
+      // by CertificatesService, which additionally requires all quizzes passed.
       if (courseProgress === 100 && !enrollment.isCourseCompleted) {
         enrollment.isCourseCompleted = true;
-        await this.notificationsService.create(
-          studentId,
-          'Certificate Earned!',
-          `You have earned a certificate for completing "${course.title}".`,
-          NotificationType.CERTIFICATE_EARNED,
-          course._id.toString(),
-        );
       }
 
       await enrollment.save();
+
+      // Idempotent + quiz-gated. Runs post-save so the 100% progress is visible.
+      if (courseProgress === 100) {
+        await this.certificatesService.issueForCourse(
+          studentId,
+          course._id.toString(),
+        );
+      }
     }
 
     let nextLessonUnlocked = false;

@@ -21,6 +21,7 @@ import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { ProgressModule } from '../progress/progress.module';
 import { AiModule } from '../ai/ai.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CertificatesModule } from '../certificates/certificates.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     forwardRef(() => ProgressModule),
     AiModule,
     NotificationsModule,
+    CertificatesModule,
   ],
   controllers: [
     QuizzesController,

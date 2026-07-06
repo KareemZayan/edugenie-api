@@ -6,6 +6,7 @@ import { EnrollmentsCronService } from './enrollments-cron.service';
 import { Enrollment, EnrollmentSchema } from './schema/enrollment.schema';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CertificatesModule } from '../certificates/certificates.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Course.name, schema: CourseSchema },
     ]),
     NotificationsModule,
+    CertificatesModule,
   ],
   controllers: [EnrollmentsController],
   providers: [EnrollmentsService, EnrollmentsCronService],
