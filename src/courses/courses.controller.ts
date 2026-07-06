@@ -164,6 +164,23 @@ export class CoursesController {
     return { success: true, data: result };
   }
 
+  // Semantic search inside the student's own course content (transcripts) →
+  // lesson hits that deep-link to /learn/:courseId?lesson=. Declared before ':id'
+  // so 'lesson-search' isn't captured as a course id.
+  @Get('lesson-search')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Semantic lesson search in your courses' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 200, description: 'Lesson hits.' })
+  async lessonSearch(
+    @CurrentUser() user: { userId: string },
+    @Query('q') q?: string,
+  ) {
+    const data = await this.coursesService.searchLessons(user.userId, q ?? '');
+    return { success: true, data };
+  }
+
   @Get(':id')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Find one' })

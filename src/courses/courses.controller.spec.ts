@@ -1,21 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CoursesController } from './courses.controller';
 import { CoursesService } from './courses.service';
-import { getModelToken } from '@nestjs/mongoose';
-import { Course } from './schema/course.schema';
 
 describe('CoursesController', () => {
   let controller: CoursesController;
 
   beforeEach(async () => {
+    // Mock the service — the controller only depends on its interface, and the
+    // real CoursesService pulls in ~12 injected models/services.
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CoursesController],
       providers: [
-        CoursesService,
-        {
-          provide: getModelToken(Course.name),
-          useValue: {},
-        },
+        { provide: CoursesService, useValue: {} },
+        { provide: CACHE_MANAGER, useValue: {} },
       ],
     }).compile();
 

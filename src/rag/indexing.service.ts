@@ -346,15 +346,16 @@ export class IndexingService {
           .exec();
         return;
       }
+      // Catalog card is PUBLISHED-only (semantic catalog search must not surface
+      // drafts). Content chunks are built for EVERY course with transcripts —
+      // drafts included — so search is ready the moment access is granted; chunk
+      // retrieval is access-scoped by enrollment, so draft chunks never leak.
       if (course.courseStatus === CourseStatus.PUBLISHED) {
         await this.upsertCard(course);
-        // Index this course's transcripts now that it's live. Idempotent
-        // (unchanged lessons are skipped), and crucially we only ever embed
-        // transcripts for courses that actually reach PUBLISHED — never drafts.
-        await this.reindexCourse(courseId);
       } else {
         await this.cardModel.deleteOne({ courseId: course._id }).exec();
       }
+      await this.reindexCourse(courseId);
     } catch (err) {
       this.logger.warn(
         `onCourseChanged(${courseId}) failed: ${
@@ -382,18 +383,13 @@ export class IndexingService {
 
   /**
    * A lesson transcript was saved → (re)index that course's content chunks,
-   * but ONLY if the course is already published. Drafts are indexed in full at
-   * approval, so we never spend embeddings on a course that may never go live.
+   * regardless of publish status. Every uploaded video is embedded so semantic
+   * lesson search works for all owned content; retrieval is access-scoped, so
+   * unpublished chunks never surface to users without access.
    */
   async onTranscriptSaved(courseId: string): Promise<void> {
     try {
       if (!Types.ObjectId.isValid(courseId)) return;
-      const course = await this.courseModel
-        .findById(courseId)
-        .select('courseStatus')
-        .lean<{ courseStatus?: string } | null>()
-        .exec();
-      if (course?.courseStatus !== CourseStatus.PUBLISHED) return;
       await this.reindexCourse(courseId);
     } catch (err) {
       this.logger.warn(

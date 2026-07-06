@@ -4,7 +4,9 @@ import { RagController } from './rag.controller';
 import { IndexingService } from './indexing.service';
 import { RetrievalService } from './retrieval.service';
 import { GeminiEmbeddingsProvider } from './embeddings/gemini-embeddings.provider';
+import { OpenAiEmbeddingsProvider } from './embeddings/openai-embeddings.provider';
 import { EMBEDDINGS_PROVIDER } from './embeddings/embeddings.provider';
+import { Logger } from '@nestjs/common';
 import {
   ContentChunk,
   ContentChunkSchema,
@@ -31,7 +33,30 @@ import { Course, CourseSchema } from '../courses/schema/course.schema';
     IndexingService,
     RetrievalService,
     GeminiEmbeddingsProvider,
-    { provide: EMBEDDINGS_PROVIDER, useExisting: GeminiEmbeddingsProvider },
+    OpenAiEmbeddingsProvider,
+    // Prefer Gemini; fall back to OpenAI only when GEMINI_API_KEY is unset.
+    // (One provider at a time — vectors aren't cross-comparable; a switch needs a
+    // full re-embed via /rag/backfill.)
+    {
+      provide: EMBEDDINGS_PROVIDER,
+      inject: [GeminiEmbeddingsProvider, OpenAiEmbeddingsProvider],
+      useFactory: (
+        gemini: GeminiEmbeddingsProvider,
+        openai: OpenAiEmbeddingsProvider,
+      ) => {
+        const logger = new Logger('EmbeddingsProvider');
+        if (gemini.isConfigured) {
+          logger.log(`Embeddings: Gemini (${gemini.model}, ${gemini.dims}d)`);
+          return gemini;
+        }
+        if (openai.isConfigured) {
+          logger.log(`Embeddings: OpenAI (${openai.model}, ${openai.dims}d)`);
+          return openai;
+        }
+        logger.warn('Embeddings: no provider configured — RAG degrades to empty');
+        return gemini; // unconfigured → callers already short-circuit on isConfigured
+      },
+    },
   ],
   exports: [
     IndexingService,

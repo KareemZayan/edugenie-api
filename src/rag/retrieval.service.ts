@@ -10,6 +10,7 @@ import { EMBEDDINGS_PROVIDER } from './embeddings/embeddings.provider';
 import type { EmbeddingsProvider } from './embeddings/embeddings.provider';
 
 export interface RetrievedChunk {
+  courseId: string;
   lessonId: string;
   lessonTitle: string;
   sectionId: string;
@@ -49,6 +50,7 @@ const CARD_VECTOR_INDEX = 'course_card_vector_index';
 
 /** Row shapes returned by the $vectorSearch aggregations. */
 interface ChunkHit {
+  courseId?: Types.ObjectId;
   lessonId?: Types.ObjectId;
   lessonTitle?: string;
   sectionId?: Types.ObjectId;
@@ -155,6 +157,33 @@ export class RetrievalService {
     return this.retrieveInNode(filter, queryVec, k, minScore);
   }
 
+  /**
+   * Retrieve chunks under a CALLER-SUPPLIED Mongo filter (e.g. a cross-course
+   * access filter for semantic lesson search). Same embed + vector/in-Node
+   * fallback as `retrieve`, but the scope is the caller's responsibility.
+   */
+  async retrieveScoped(
+    query: string,
+    filter: Record<string, unknown>,
+    k = 8,
+    minScore = 0,
+  ): Promise<RetrievedChunk[]> {
+    if (!query?.trim() || !this.embeddings.isConfigured || !filter) return [];
+    const queryVec = await this.embedQuery(query);
+    if (!queryVec) return [];
+
+    if (this.useVectorSearch) {
+      try {
+        return await this.retrieveVector(filter, queryVec, k, minScore);
+      } catch (err) {
+        this.logger.warn(
+          `Scoped $vectorSearch failed — falling back to in-Node: ${this.msg(err)}`,
+        );
+      }
+    }
+    return this.retrieveInNode(filter, queryVec, k, minScore);
+  }
+
   // ── Atlas $vectorSearch backend ────────────────────────────────────────────
 
   private async retrieveCatalogVector(
@@ -219,6 +248,7 @@ export class RetrievalService {
       {
         $project: {
           _id: 0,
+          courseId: 1,
           lessonId: 1,
           lessonTitle: 1,
           sectionId: 1,
@@ -232,6 +262,7 @@ export class RetrievalService {
     const rows = await this.chunkModel.aggregate<ChunkHit>(pipeline).exec();
     return rows
       .map((c) => ({
+        courseId: c.courseId?.toString() ?? '',
         lessonId: c.lessonId?.toString() ?? '',
         lessonTitle: c.lessonTitle ?? '',
         sectionId: c.sectionId?.toString() ?? '',
@@ -249,7 +280,8 @@ export class RetrievalService {
     k: number,
   ): Promise<RetrievedCourse[]> {
     const cards = await this.cardModel
-      .find()
+      // `model` is a reserved key on Document — cast to satisfy the filter type.
+      .find({ model: this.embeddings.model } as Record<string, unknown>)
       .select(
         'courseId title level price ratingAverage totalEnrollments goals embedding',
       )
@@ -278,13 +310,19 @@ export class RetrievalService {
     minScore: number,
   ): Promise<RetrievedChunk[]> {
     const candidates = await this.chunkModel
-      .find(filter)
-      .select('lessonId lessonTitle sectionId sectionTitle text embedding')
+      // Only score chunks embedded by the ACTIVE provider — a provider switch
+      // leaves stale vectors in a different space; ignore them (backfill re-embeds).
+      .find({
+        ...filter,
+        model: this.embeddings.model,
+      } as Record<string, unknown>)
+      .select('courseId lessonId lessonTitle sectionId sectionTitle text embedding')
       .lean<ChunkVecRow[]>()
       .exec();
     if (!candidates.length) return [];
 
     const scored = candidates.map((c) => ({
+      courseId: c.courseId?.toString() ?? '',
       lessonId: c.lessonId?.toString() ?? '',
       lessonTitle: c.lessonTitle ?? '',
       sectionId: c.sectionId?.toString() ?? '',
