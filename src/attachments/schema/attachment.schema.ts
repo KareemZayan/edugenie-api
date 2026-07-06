@@ -21,6 +21,13 @@ export class Attachment {
     })
     sectionId!: Types.ObjectId;
 
+    @Prop({
+        type: Types.ObjectId,
+        required: true,
+        index: true,
+    })
+    lessonId!: Types.ObjectId;
+
     // Denormalized so attachment ownership can be checked without a join,
     // mirroring the instructorId-in-filter pattern used everywhere else.
     @Prop({
@@ -54,11 +61,10 @@ export class Attachment {
     @Prop({ required: true, min: 0 })
     fileSize!: number;
 
-    @Prop({ type: Boolean, default: false })
-    isPublic!: boolean;
+
 }
 
 export const AttachmentSchema = SchemaFactory.createForClass(Attachment);
 
-// Used by AttachmentsService to enforce the 5-per-section cap quickly.
-AttachmentSchema.index({ courseId: 1, sectionId: 1 });
+// Used by AttachmentsService to enforce the 5-per-lesson cap quickly.
+AttachmentSchema.index({ courseId: 1, sectionId: 1, lessonId: 1 });

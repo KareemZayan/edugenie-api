@@ -1,14 +1,7 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateAttachmentDto {
-  @ApiPropertyOptional({
-    description: 'Whether the attachment is visible to anyone (public) or restricted to enrolled students',
-  })
-  @IsOptional()
-  @IsBoolean()
-  isPublic?: boolean;
-
   @ApiPropertyOptional()
   @IsOptional()
   title?: string;
@@ -27,9 +20,11 @@ export class UpdateAttachmentDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsNumber()
   fileSize?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsString()
   originalFilename?: string;
 }

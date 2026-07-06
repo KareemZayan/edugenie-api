@@ -15,6 +15,10 @@ export class AttachmentSerializer {
   sectionId: string;
 
   @Expose()
+  @ApiProperty({ example: '507f1f77bcf86cd799439011' })
+  lessonId: string;
+
+  @Expose()
   @ApiProperty({ example: 'Course Syllabus' })
   title: string;
 
@@ -33,10 +37,6 @@ export class AttachmentSerializer {
   @Expose()
   @ApiProperty({ example: 204800 })
   fileSize: number;
-
-  @Expose()
-  @ApiProperty({ example: false })
-  isPublic: boolean;
 
   @Expose()
   @ApiProperty({ example: '2026-01-15T10:30:00.000Z' })
@@ -65,5 +65,6 @@ export class AttachmentSerializer {
     }
     if (this.courseId) this.courseId = this.courseId.toString();
     if (this.sectionId) this.sectionId = this.sectionId.toString();
+    if (this.lessonId) this.lessonId = this.lessonId.toString();
   }
 }
