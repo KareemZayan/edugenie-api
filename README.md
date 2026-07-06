@@ -93,6 +93,21 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 - Website - [https://nestjs.com](https://nestjs.com/)
 - Twitter - [@nestframework](https://twitter.com/nestframework)
 
+## Payments — Stripe Connect (TEST MODE)
+
+Payments/payouts run on **Stripe Connect (Express) + destination charges**.
+Required env vars (test keys only):
+
+```
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...   # from `stripe listen --forward-to localhost:5000/api/payments/webhook`
+STRIPE_CONNECT_CLIENT_ID=ca_...   # optional
+```
+
+All optional — without them the payment/payout endpoints return 503 but the app
+still boots. Full setup + end-to-end demo script: see
+[`STRIPE_CONNECT_DEMO.md`](./STRIPE_CONNECT_DEMO.md).
+
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

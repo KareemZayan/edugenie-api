@@ -23,7 +23,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AiModule } from './ai/ai.module';
-import { PaymobModule } from './paymob/paymob.module';
+import { PaymentsModule } from './payments/payments.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ProgressModule } from './progress/progress.module';
 import { NotesModule } from './notes/notes.module';
@@ -32,7 +32,6 @@ import { EarningsModule } from './earnings/earnings.module';
 import { AdminModule } from './admin/admin.module';
 import { ReportsModule } from './reports/reports.module';
 import { SuperAdminModule } from './superadmin/superadmin.module';
-import { DisbursementModule } from './disbursement/disbursement.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AttachmentsModule } from './attachments/attachments.module';
 @Module({
@@ -68,10 +67,15 @@ import { AttachmentsModule } from './attachments/attachments.module';
         NODE_ENV: Joi.string()
           .valid('development', 'production', 'test')
           .default('development'),
-        // Payments — required in production so the webhook can verify HMACs.
-        PAYMOB_SECRET_KEY: Joi.string().optional(),
-        PAYMOB_HMAC_SECRET: Joi.string().optional(),
-        PAYMOB_INTEGRATION_ID: Joi.string().optional(),
+        // Payments — Stripe Connect (TEST MODE). All optional: without the
+        // secret key the Stripe flow degrades gracefully (503 on payment/payout
+        // endpoints) but the rest of the app boots normally.
+        STRIPE_SECRET_KEY: Joi.string().allow('').optional(),
+        STRIPE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+        STRIPE_CONNECT_CLIENT_ID: Joi.string().allow('').optional(),
+        // Automatic-payout tuning (Stripe Connect). Optional/defaulted in code.
+        PAYOUT_DELAY_DAYS: Joi.number().min(0).optional(),
+        SUPPORTED_PAYOUT_COUNTRIES: Joi.string().allow('').optional(),
         // Transactional email (Brevo) — admin invites, email verification,
         // password reset, and notification emails. Optional: without the key,
         // mail degrades gracefully (logs instead of sending, never throws).
@@ -91,21 +95,6 @@ import { AttachmentsModule } from './attachments/attachments.module';
         GOOGLE_SUCCESS_REDIRECT: Joi.string().uri().allow('').optional(),
         CORS_ORIGINS: Joi.string().optional(),
         CLOUDINARY_WEBHOOK_URL: Joi.string().uri().optional(),
-        // Instructor payouts via PayPal Payouts API. All optional: without the
-        // client id/secret, disbursement degrades to the manual approve path.
-        PAYPAL_CLIENT_ID: Joi.string().allow('').optional(),
-        PAYPAL_CLIENT_SECRET: Joi.string().allow('').optional(),
-        PAYPAL_API_BASE: Joi.string()
-          .uri()
-          .allow('')
-          .default('https://api-m.sandbox.paypal.com'),
-        PAYPAL_WEBHOOK_ID: Joi.string().allow('').optional(),
-        // PayPal Payouts does not support EGP. Earnings are in EGP, so the payout
-        // is sent in PAYOUT_CURRENCY after multiplying by PAYOUT_FX_RATE
-        // (payout_amount = egp_amount * rate). Set a real rate before production;
-        // default 1 is only correct when PAYOUT_CURRENCY is itself EGP.
-        PAYOUT_CURRENCY: Joi.string().default('USD'),
-        PAYOUT_FX_RATE: Joi.number().positive().default(1),
       }),
     }),
     MongooseModule.forRootAsync({
@@ -138,7 +127,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     ReviewsModule,
     NotificationsModule,
     AiModule,
-    PaymobModule,
+    PaymentsModule,
     WebhooksModule,
     ProgressModule,
     NotesModule,
@@ -147,7 +136,6 @@ import { AttachmentsModule } from './attachments/attachments.module';
     ReportsModule,
     AdminModule,
     SuperAdminModule,
-    DisbursementModule,
     AttachmentsModule,
   ],
 

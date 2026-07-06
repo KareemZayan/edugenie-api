@@ -40,13 +40,33 @@ export class Order {
   @Prop({ type: Date, default: null })
   paidAt: Date | null;
 
+  // Stripe Checkout Session id — set on fulfillment; also the idempotency guard
+  // so a replayed checkout.session.completed webhook can't double-fulfill.
   @Prop({ type: String, default: null })
-  paymobOrderId: string | null;
+  stripeSessionId: string | null;
 
-  // Paymob intention client_secret from the FIRST checkout. Reused on retry so
-  // we never re-register the same special_reference (Paymob rejects duplicates).
   @Prop({ type: String, default: null })
-  paymobClientSecret: string | null;
+  stripePaymentIntentId: string | null;
+
+  // Stripe processing fee charged on this sale (major units, e.g. USD). The
+  // platform (merchant of record) absorbs this, so it's netted out of revenue.
+  @Prop({ type: Number, default: 0 })
+  stripeFee: number;
+
+  // Set when a dispute (chargeback) is handled on this order's charge.
+  @Prop({ type: String, default: null })
+  stripeChargeId: string | null;
+
+  @Prop({ type: String, default: null })
+  stripeTransferId: string | null;
+
+  // null = no dispute; 'disputed' = open chargeback; 'won'/'lost' = resolved.
+  @Prop({
+    type: String,
+    enum: ['disputed', 'won', 'lost'],
+    default: null,
+  })
+  disputeStatus: 'disputed' | 'won' | 'lost' | null;
 
   @Prop({ type: String, default: null })
   cartSnapshotHash: string | null;

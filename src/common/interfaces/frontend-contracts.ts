@@ -586,6 +586,8 @@ export interface EarningsPayoutResponse {
   totalEarned: number;
   /** Back-compat alias of totals.pending. */
   pendingPayout: number;
+  /** Payouts are automatic (Stripe pays out on a schedule) — no manual request. */
+  payoutsAutomatic?: boolean;
   canRequest: boolean;
   openRequest: {
     id: string;
@@ -597,6 +599,15 @@ export interface EarningsPayoutResponse {
   breakdown: {
     fromFullCourses: number;
     fromSections: number;
+  };
+  /** Stripe Connect onboarding + live connected-account balance. */
+  stripe: {
+    hasAccount: boolean;
+    detailsSubmitted: boolean;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    balanceAvailable: number;
+    balancePending: number;
   };
   requests: InstructorPayoutRequestItem[];
   history: Array<{
@@ -837,7 +848,18 @@ export interface AuditLogsFilterRequest {
 
 export interface SuperAdminDashboardOverviewResponse {
   systemStatus: string;
+  /** Platform commission kept = gross sales − instructor share. */
   platformRevenue: number;
+  /** Total gross of completed, non-charged-back sales. */
+  grossSales: number;
+  /** Total instructor share (money paid out to instructors). */
+  instructorPayouts: number;
+  /** Total Stripe processing fees the platform absorbed. */
+  stripeFees: number;
+  /** Daily net-platform-revenue trend for the chart. */
+  revenueChart: { labels: string[]; data: number[] };
+  /** Week-over-week net revenue growth (%). */
+  revenueGrowthPercent: number;
   payoutLiability: number;
   activeAdmins: number;
   pendingPayouts: number;
@@ -880,10 +902,12 @@ export interface PendingPayoutListItem {
   requestedAt: Date;
   /** PayPal destination the instructor chose (snapshot), if any. */
   paypalEmail?: string | null;
-  /** PENDING (new) or FAILED (a gateway payout awaiting retry). */
+  /** PENDING (new), PROCESSING (gateway payout in flight) or FAILED. */
   status?: string;
   /** Set when a gateway payout failed — why it failed. */
   failureReason?: string | null;
+  /** Gateway payout batch id (PayPal) — for status checks / verification. */
+  gatewayReference?: string | null;
 }
 
 export interface PendingPayoutPaginatedResponse extends PaginatedResponse<PendingPayoutListItem> {}

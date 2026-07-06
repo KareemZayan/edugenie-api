@@ -12,6 +12,8 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { User } from '../users/schema/user.schema';
 import { Earning, EarningDocument } from '../earnings/schema/earning.schema';
+import { Order, OrderDocument } from '../orders/schema/order.schema';
+import { OrderStatus } from '../common/enums/order-status.enum';
 import {
   PayoutRequest,
   PayoutRequestDocument,
@@ -46,7 +48,7 @@ import {
   AdminInviteDocument,
 } from './schema/admin-invite.schema';
 import { MailService } from '../mail/mail.service';
-import { DisbursementService } from '../disbursement/disbursement.service';
+import { PaymentsService } from '../payments/payments.service';
 import { CreateAdminInviteDto } from './dto/create-admin-invite.dto';
 import {
   SuperAdminDashboardOverviewResponse,
@@ -64,6 +66,7 @@ export class SuperAdminService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Earning.name) private earningModel: Model<EarningDocument>,
+    @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     @InjectModel(PayoutRequest.name)
     private payoutRequestModel: Model<PayoutRequestDocument>,
     @InjectModel(AuditLog.name) private auditLogModel: Model<AuditLogDocument>,
@@ -77,7 +80,7 @@ export class SuperAdminService {
     private adminInviteModel: Model<AdminInviteDocument>,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
-    private readonly disbursementService: DisbursementService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   private readonly INVITE_TTL_HOURS = 48;
@@ -267,20 +270,54 @@ export class SuperAdminService {
 
   async getDashboardOverview(): Promise<SuperAdminDashboardOverviewResponse> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const CHART_DAYS = 14;
+    const chartStart = new Date(Date.now() - (CHART_DAYS - 1) * 24 * 60 * 60 * 1000);
+    chartStart.setHours(0, 0, 0, 0);
 
     const [
-      platformRevenueResult,
+      grossSalesResult,
+      instructorShareResult,
       payoutLiabilityResult,
       activeAdminsCount,
       pendingPayoutsResult,
       webhookFailures,
+      revenueChartResult,
     ] = await Promise.all([
+      // Gross sales + Stripe fees that earned the platform its cut: completed
+      // orders that were not charged back.
+      this.orderModel
+        .aggregate([
+          {
+            $match: {
+              status: OrderStatus.COMPLETED,
+              disputeStatus: { $ne: 'lost' },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: '$totalAmount' },
+              fees: { $sum: '$stripeFee' },
+            },
+          },
+        ])
+        .exec(),
+      // Total instructor share on those sales (exclude reversed / charged back).
       this.earningModel
-        .aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+        .aggregate([
+          { $match: { status: { $ne: EarningStatus.REVERSED } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ])
         .exec(),
       this.earningModel
         .aggregate([
-          { $match: { status: { $ne: EarningStatus.PAID_OUT } } },
+          {
+            $match: {
+              status: {
+                $nin: [EarningStatus.PAID_OUT, EarningStatus.REVERSED],
+              },
+            },
+          },
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ])
         .exec(),
@@ -302,10 +339,71 @@ export class SuperAdminService {
         .find({ occurredAt: { $gte: twentyFourHoursAgo } })
         .sort({ occurredAt: -1 })
         .exec(),
+      // Daily gross for the revenue trend chart (last CHART_DAYS days).
+      this.orderModel
+        .aggregate([
+          {
+            $match: {
+              status: OrderStatus.COMPLETED,
+              disputeStatus: { $ne: 'lost' },
+              createdAt: { $gte: chartStart },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+              },
+              gross: { $sum: '$totalAmount' },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .exec(),
     ]);
 
-    const platformRevenue = platformRevenueResult[0]?.total || 0;
+    // Platform revenue = gross sales − instructor share = the commission the
+    // platform actually keeps (NOT the instructors' earnings).
+    const grossSales = grossSalesResult[0]?.total || 0;
+    const stripeFees = Math.round((grossSalesResult[0]?.fees || 0) * 100) / 100;
+    const instructorShare = instructorShareResult[0]?.total || 0;
+    // Net platform revenue = commission − Stripe processing fees (the platform,
+    // as merchant of record, absorbs the Stripe fee on every sale).
+    const platformRevenue = Math.max(
+      0,
+      Math.round((grossSales - instructorShare - stripeFees) * 100) / 100,
+    );
     const payoutLiability = payoutLiabilityResult[0]?.total || 0;
+
+    // Revenue trend: daily gross scaled by the net-revenue ratio, so the curve
+    // tracks net platform revenue and its sum matches the Platform Revenue tile.
+    const netRatio = grossSales > 0 ? platformRevenue / grossSales : 0;
+    const grossByDay = new Map<string, number>(
+      (revenueChartResult as Array<{ _id: string; gross: number }>).map((d) => [
+        d._id,
+        d.gross,
+      ]),
+    );
+    const revenueLabels: string[] = [];
+    const revenueData: number[] = [];
+    for (let i = CHART_DAYS - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const key = d.toISOString().slice(0, 10);
+      revenueLabels.push(key);
+      revenueData.push(
+        Math.round((grossByDay.get(key) || 0) * netRatio * 100) / 100,
+      );
+    }
+
+    // Week-over-week net revenue growth (last 7 days vs the 7 before).
+    const last7 = revenueData.slice(-7).reduce((s, v) => s + v, 0);
+    const prev7 = revenueData.slice(-14, -7).reduce((s, v) => s + v, 0);
+    const revenueGrowthPercent =
+      prev7 > 0
+        ? Math.round(((last7 - prev7) / prev7) * 100)
+        : last7 > 0
+          ? 100
+          : 0;
     const pendingPayouts = pendingPayoutsResult.length;
 
     const criticalAlerts: any[] = [];
@@ -353,6 +451,11 @@ export class SuperAdminService {
     return {
       systemStatus: webhookFailures.length === 0 ? 'operational' : 'degraded',
       platformRevenue,
+      grossSales,
+      instructorPayouts: instructorShare,
+      stripeFees,
+      revenueChart: { labels: revenueLabels, data: revenueData },
+      revenueGrowthPercent,
       payoutLiability,
       activeAdmins: activeAdminsCount,
       pendingPayouts,
@@ -449,6 +552,21 @@ export class SuperAdminService {
     };
   }
 
+  /**
+   * Poll PayPal for the live status of a PROCESSING payout and finalize it
+   * (APPROVED/PAID_OUT or FAILED). Lets the superadmin confirm delivery without
+   * a public webhook (local dev, or a missed webhook).
+   */
+  // DEPRECATED — payouts are automatic. Stripe pays instructors on the account's
+  // payout schedule, so there is no PROCESSING request to poll/finalize.
+  syncPayoutStatus(
+    _requestId: string,
+  ): Promise<{ requestId: string; status: string; detail?: string }> {
+    throw new BadRequestException(
+      'Payouts are automatic via Stripe — there is nothing to sync.',
+    );
+  }
+
   async getPendingPayouts(
     query: AdminActivityQueryDto,
   ): Promise<PendingPayoutPaginatedResponse> {
@@ -456,11 +574,16 @@ export class SuperAdminService {
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
 
-    // Open payout REQUESTS awaiting a decision: PENDING (new) + FAILED (a
-    // gateway payout that needs a retry or cancellation).
+    // Open payout REQUESTS the superadmin still acts on: PENDING (new decision),
+    // PROCESSING (a gateway payout in flight — can be status-checked), and FAILED
+    // (needs a retry or cancellation).
     const match = {
       status: {
-        $in: [PayoutRequestStatus.PENDING, PayoutRequestStatus.FAILED],
+        $in: [
+          PayoutRequestStatus.PENDING,
+          PayoutRequestStatus.PROCESSING,
+          PayoutRequestStatus.FAILED,
+        ],
       },
     };
     const total = await this.payoutRequestModel.countDocuments(match);
@@ -494,6 +617,7 @@ export class SuperAdminService {
       paypalEmail: r.destination?.paypalEmail ?? null,
       status: r.status,
       failureReason: r.failureReason ?? null,
+      gatewayReference: r.gatewayReference ?? null,
     }));
 
     return {
@@ -519,202 +643,16 @@ export class SuperAdminService {
     superAdminId: string,
     dto: ProcessPayoutDto,
   ): Promise<PayoutProcessResponse> {
-    const request = await this.payoutRequestModel.findById(requestId).exec();
-    if (!request) {
-      throw new NotFoundException('Payout request not found');
-    }
-    // PENDING = first decision; FAILED = a gateway payout that can be retried
-    // (approve) or cancelled (reject, reverting the earnings to PENDING).
-    if (
-      request.status !== PayoutRequestStatus.PENDING &&
-      request.status !== PayoutRequestStatus.FAILED
-    ) {
-      throw new BadRequestException(
-        'This payout request has already been processed',
-      );
-    }
-
-    const instructorObjId = request.instructorId;
-    const processedAt = new Date();
-
-    // AUTOMATED path: when the PayPal gateway is configured, initiate a real
-    // payout. PayPal payouts are async, so the request moves to PROCESSING and
-    // the covered earnings stay REQUESTED until the webhook confirms delivery
-    // (DisbursementService.applyWebhookEvent flips them to PAID_OUT).
-    if (this.disbursementService.isConfigured) {
-      if (!request.destination?.paypalEmail) {
-        throw new BadRequestException(
-          'This payout request has no PayPal destination on file.',
-        );
-      }
-
-      let reference: string;
-      try {
-        const result = await this.disbursementService.disburse({
-          _id: request._id,
-          amount: request.amount,
-          destination: request.destination,
-        });
-        if (result.status !== 'processing') {
-          // isConfigured is true here, so 'unconfigured' shouldn't occur —
-          // treat any non-processing result as a failure to be safe.
-          throw new Error('Gateway did not accept the payout');
-        }
-        reference = result.reference;
-      } catch (err) {
-        request.status = PayoutRequestStatus.FAILED;
-        request.failureReason = (err as Error)?.message ?? 'Payout failed';
-        request.method = 'paypal';
-        request.processedBy = new Types.ObjectId(superAdminId);
-        request.processedAt = processedAt;
-        await request.save();
-        await this.auditLogModel.create([
-          {
-            action: 'PAYOUT_FAILED',
-            performedBy: new Types.ObjectId(superAdminId),
-            targetUser: instructorObjId,
-            details: {
-              requestId: request._id.toString(),
-              amount: request.amount,
-              gateway: 'paypal',
-              reason: request.failureReason,
-            },
-          },
-        ]);
-        await this.notificationModel.create([
-          {
-            userId: instructorObjId,
-            title: 'Payout Failed',
-            message: `We could not start your payout of ${request.amount} EGP (${request.failureReason}). Our team will retry.`,
-            type: 'PAYOUT_FAILED',
-            isRead: false,
-          },
-        ]);
-        throw new ServiceUnavailableException(
-          `PayPal payout could not be initiated: ${request.failureReason}`,
-        );
-      }
-
-      request.status = PayoutRequestStatus.PROCESSING;
-      request.method = 'paypal';
-      request.gatewayProvider = 'paypal';
-      request.gatewayReference = reference;
-      request.reference = reference;
-      request.processedBy = new Types.ObjectId(superAdminId);
-      request.processedAt = processedAt;
-      await request.save();
-
-      await this.auditLogModel.create([
-        {
-          action: 'PAYOUT_PROCESSED',
-          performedBy: new Types.ObjectId(superAdminId),
-          targetUser: instructorObjId,
-          details: {
-            requestId: request._id.toString(),
-            amount: request.amount,
-            earningsCount: request.earningsCount,
-            gateway: 'paypal',
-            reference,
-          },
-        },
-      ]);
-
-      await this.notificationModel.create([
-        {
-          userId: instructorObjId,
-          title: 'Payout Initiated',
-          message: `Your payout of ${request.amount} EGP is being sent to your PayPal account. Reference: ${reference}`,
-          type: 'PAYOUT_PROCESSED',
-          isRead: false,
-        },
-      ]);
-
-      return {
-        requestId: request._id.toString(),
-        instructorId: instructorObjId.toString(),
-        amount: request.amount,
-        status: PayoutRequestStatus.PROCESSING,
-        processedBy: superAdminId,
-        processedAt,
-        reference,
-      };
-    }
-
-    // MANUAL fallback (gateway unconfigured): the superadmin sends the money
-    // externally and records the method + reference here.
-    if (!dto.method || !dto.reference) {
-      throw new BadRequestException(
-        'A payout method and reference are required to approve a payout manually.',
-      );
-    }
-    const method = dto.method;
-    const reference = dto.reference;
-
-    const session = await this.earningModel.db.startSession();
-    session.startTransaction();
-    try {
-      // The single open request owns all of this instructor's REQUESTED earnings.
-      await this.earningModel.updateMany(
-        { instructorId: instructorObjId, status: EarningStatus.REQUESTED },
-        { $set: { status: EarningStatus.PAID_OUT } },
-        { session },
-      );
-
-      request.status = PayoutRequestStatus.APPROVED;
-      request.method = method;
-      request.reference = reference;
-      request.processedBy = new Types.ObjectId(superAdminId);
-      request.processedAt = processedAt;
-      await request.save({ session });
-
-      await this.auditLogModel.create(
-        [
-          {
-            action: 'PAYOUT_PROCESSED',
-            performedBy: new Types.ObjectId(superAdminId),
-            targetUser: instructorObjId,
-            details: {
-              requestId: request._id.toString(),
-              amount: request.amount,
-              earningsCount: request.earningsCount,
-              method: dto.method,
-              reference: dto.reference,
-            },
-          },
-        ],
-        { session },
-      );
-
-      await this.notificationModel.create(
-        [
-          {
-            userId: instructorObjId,
-            title: 'Payout Processed',
-            message: `Your payout of ${request.amount} EGP has been processed successfully. Reference: ${dto.reference}`,
-            type: 'PAYOUT_PROCESSED',
-            isRead: false,
-          },
-        ],
-        { session },
-      );
-
-      await session.commitTransaction();
-      session.endSession();
-
-      return {
-        requestId: request._id.toString(),
-        instructorId: instructorObjId.toString(),
-        amount: request.amount,
-        status: EarningStatus.PAID_OUT,
-        processedBy: superAdminId,
-        processedAt,
-        reference: dto.reference,
-      };
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      throw error;
-    }
+    // DEPRECATED — payouts are AUTOMATIC. Money splits at purchase (destination
+    // charge) and Stripe pays the instructor's balance to their bank on the
+    // account's payout schedule. There is no manual approval; firing a payout
+    // here would double-pay. Guard so the (legacy) endpoint can't move money.
+    void requestId;
+    void superAdminId;
+    void dto;
+    throw new BadRequestException(
+      'Payouts are automatic via Stripe — no approval needed. Instructors are paid on their Stripe payout schedule.',
+    );
   }
 
   /**

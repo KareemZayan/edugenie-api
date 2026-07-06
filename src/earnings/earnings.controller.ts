@@ -1,12 +1,9 @@
 import {
-  Body,
   Controller,
-  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Post,
-  Put,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -23,7 +20,6 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { EarningsPayoutResponse } from '../common/interfaces/frontend-contracts';
-import { SetPayoutMethodDto } from './dto/set-payout-method.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('earnings')
@@ -33,7 +29,7 @@ export class EarningsController {
 
   @Roles(UserRole.INSTRUCTOR)
   @Get('my-payouts')
-  @ApiOperation({ summary: 'Get my payouts' })
+  @ApiOperation({ summary: 'Get my payouts + Stripe balance' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
   @ApiCookieAuth('jwt')
   @ApiBearerAuth()
@@ -52,7 +48,7 @@ export class EarningsController {
   @SwaggerApiResponse({ status: 201, description: 'Payout request created.' })
   @SwaggerApiResponse({
     status: 400,
-    description: 'Below minimum threshold / no pending earnings.',
+    description: 'Below threshold / onboarding incomplete / no pending earnings.',
   })
   @SwaggerApiResponse({ status: 409, description: 'A request is already open.' })
   @ApiCookieAuth('jwt')
@@ -62,37 +58,36 @@ export class EarningsController {
   }
 
   @Roles(UserRole.INSTRUCTOR)
-  @Get('payout-method')
-  @ApiOperation({ summary: 'Get my saved PayPal payout email (masked)' })
+  @Post('connect/onboard')
+  @ApiOperation({ summary: 'Start Stripe Connect onboarding (returns a link URL)' })
+  @SwaggerApiResponse({ status: 201, description: 'Onboarding link created.' })
+  @SwaggerApiResponse({ status: 503, description: 'Stripe not configured.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  async connectOnboard(@CurrentUser() user: { userId: string }) {
+    return this.earningsService.onboard(user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Get('connect/status')
+  @ApiOperation({ summary: 'Get my Stripe Connect onboarding + balance status' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
   @ApiCookieAuth('jwt')
   @ApiBearerAuth()
-  async getPayoutMethod(@CurrentUser() user: { userId: string }) {
-    return this.earningsService.getPayoutMethod(user.userId);
+  async connectStatus(@CurrentUser() user: { userId: string }) {
+    return this.earningsService.connectStatus(user.userId);
   }
 
   @Roles(UserRole.INSTRUCTOR)
-  @Put('payout-method')
-  @ApiOperation({ summary: 'Set/replace my PayPal payout email' })
-  @SwaggerApiResponse({ status: 200, description: 'Saved.' })
-  @SwaggerApiResponse({ status: 400, description: 'Invalid email.' })
+  @Get('connect/dashboard')
+  @ApiOperation({
+    summary: 'Get a one-time link to my Stripe Express dashboard (payout history)',
+  })
+  @SwaggerApiResponse({ status: 200, description: 'Login link created.' })
+  @SwaggerApiResponse({ status: 400, description: 'Onboarding not finished.' })
   @ApiCookieAuth('jwt')
   @ApiBearerAuth()
-  async setPayoutMethod(
-    @CurrentUser() user: { userId: string },
-    @Body() dto: SetPayoutMethodDto,
-  ) {
-    return this.earningsService.setPayoutMethod(user.userId, dto.paypalEmail);
-  }
-
-  @Roles(UserRole.INSTRUCTOR)
-  @Delete('payout-method')
-  @ApiOperation({ summary: 'Clear my PayPal payout email' })
-  @SwaggerApiResponse({ status: 200, description: 'Cleared.' })
-  @SwaggerApiResponse({ status: 409, description: 'A payout is in progress.' })
-  @ApiCookieAuth('jwt')
-  @ApiBearerAuth()
-  async clearPayoutMethod(@CurrentUser() user: { userId: string }) {
-    return this.earningsService.clearPayoutMethod(user.userId);
+  async connectDashboard(@CurrentUser() user: { userId: string }) {
+    return this.earningsService.expressDashboard(user.userId);
   }
 }

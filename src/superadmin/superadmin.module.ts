@@ -4,6 +4,7 @@ import { SuperAdminController } from './superadmin.controller';
 import { SuperAdminService } from './superadmin.service';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
+import { Order, OrderSchema } from '../orders/schema/order.schema';
 import {
   PayoutRequest,
   PayoutRequestSchema,
@@ -28,14 +29,15 @@ import {
   AdminInvite,
   AdminInviteSchema,
 } from './schema/admin-invite.schema';
-import { DisbursementModule } from '../disbursement/disbursement.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
-    DisbursementModule,
+    PaymentsModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Earning.name, schema: EarningSchema },
+      { name: Order.name, schema: OrderSchema },
       { name: PayoutRequest.name, schema: PayoutRequestSchema },
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: PlatformConfig.name, schema: PlatformConfigSchema },

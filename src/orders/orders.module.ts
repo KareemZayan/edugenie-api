@@ -10,7 +10,6 @@ import {
 import { Course, CourseSchema } from '../courses/schema/course.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { CartModule } from '../cart/cart.module';
-import { PaymobModule } from '../paymob/paymob.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { QuizzesModule } from '../quizzes/quizzes.module';
 
@@ -23,7 +22,6 @@ import { QuizzesModule } from '../quizzes/quizzes.module';
       { name: User.name, schema: UserSchema },
     ]),
     CartModule,
-    PaymobModule,
     NotificationsModule,
     QuizzesModule,
   ],

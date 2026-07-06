@@ -170,6 +170,21 @@ export class SuperAdminController {
     return this.superAdminService.approvePayout(requestId, user.userId, dto);
   }
 
+  @Patch('payouts/:requestId/sync')
+  @ApiOperation({
+    summary: 'Poll PayPal and finalize a processing payout (no webhook needed)',
+  })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Request not found.' })
+  @ApiParam({ name: 'requestId', type: String })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async syncPayout(@Param('requestId') requestId: string) {
+    return this.superAdminService.syncPayoutStatus(requestId);
+  }
+
   @Patch('payouts/:requestId/reject')
   @ApiOperation({ summary: 'Reject (decline) a payout request' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
