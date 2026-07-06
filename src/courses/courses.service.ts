@@ -26,6 +26,7 @@ import { NotificationType } from '../notifications/enums/notification-type.enum'
 import { UserRole } from '../common/enums/user-role.enum';
 import { User } from '../users/schema/user.schema';
 import { IndexingService } from '../rag/indexing.service';
+import { RetrievalService } from '../rag/retrieval.service';
 import { PaymentsService } from '../payments/payments.service';
 
 /** Platform rule: a section quiz must be passed at this % to unlock the next. */
@@ -46,6 +47,7 @@ export class CoursesService {
     private readonly quizAttemptModel: Model<QuizAttempt>,
     private readonly notificationsService: NotificationsService,
     private readonly indexing: IndexingService,
+    private readonly retrieval: RetrievalService,
     private readonly payments: PaymentsService,
   ) {}
 
@@ -157,6 +159,54 @@ export class CoursesService {
       ...(maxDuration !== undefined && { totalHours: { $lte: maxDuration } }),
     };
 
+    // Semantic search: when there's a query, rank PUBLISHED courses by meaning
+    // (vector search over course cards) instead of a title/description substring.
+    // Facets still apply (as an id filter); we re-order to the semantic ranking
+    // and paginate in-app. Falls back to the regex `query` below when embeddings
+    // are unconfigured or return nothing — so search never comes back empty.
+    if (search) {
+      const hits = await this.retrieval.retrieveCatalog(search, 60);
+      const rankedIds = hits
+        .map((h) => h.courseId)
+        .filter((id) => Types.ObjectId.isValid(id));
+      if (rankedIds.length) {
+        const rank = new Map(rankedIds.map((id, i) => [id, i]));
+        const facetFilter: Record<string, unknown> = {
+          ...query,
+          _id: { $in: rankedIds.map((id) => new Types.ObjectId(id)) },
+        };
+        delete (facetFilter as { $or?: unknown }).$or; // replace the regex with semantic ids
+
+        const matched = await this.courseModel
+          .find(facetFilter)
+          .select('-sections -description -requirements -goals')
+          .populate('instructorId', 'firstName lastName email avatar')
+          .populate('categoryId', 'name')
+          .exec();
+        matched.sort(
+          (a, b) =>
+            (rank.get(a._id.toString()) ?? Number.MAX_SAFE_INTEGER) -
+            (rank.get(b._id.toString()) ?? Number.MAX_SAFE_INTEGER),
+        );
+
+        const total = matched.length;
+        const pageData = matched.slice(skip, skip + limit);
+        const page = Math.floor(skip / limit) + 1;
+        const totalPages = Math.ceil(total / limit);
+        return {
+          data: pageData.map((d) => new CourseSerializer(d.toObject())),
+          meta: {
+            total,
+            page,
+            limit,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1,
+          },
+        };
+      }
+    }
+
     const [data, total] = await Promise.all([
       this.courseModel
         .find(query)
@@ -184,6 +234,62 @@ export class CoursesService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  /**
+   * Semantic search WITHIN the student's accessible course content: vector search
+   * over transcript chunks scoped to what they own (full courses, or their owned
+   * sections). Returns lesson hits that deep-link to `/learn/:courseId?lesson=`.
+   * Empty when there's no query, no access, or embeddings are unconfigured.
+   */
+  async searchLessons(
+    userId: string,
+    query: string,
+  ): Promise<
+    Array<{
+      courseId: string;
+      lessonId: string;
+      lessonTitle: string;
+      sectionTitle: string;
+      snippet: string;
+      score: number;
+    }>
+  > {
+    if (!query?.trim() || !Types.ObjectId.isValid(userId)) return [];
+
+    const enrollments = await this.enrollmentModel
+      .find({ studentId: new Types.ObjectId(userId) })
+      .select('courseId type sectionIds')
+      .lean<
+        Array<{
+          courseId: Types.ObjectId;
+          type: PurchaseType;
+          sectionIds?: Types.ObjectId[];
+        }>
+      >();
+    if (!enrollments.length) return [];
+
+    const or: Record<string, unknown>[] = [];
+    const fullCourseIds: Types.ObjectId[] = [];
+    for (const e of enrollments) {
+      if (e.type === PurchaseType.FULL_COURSE) {
+        fullCourseIds.push(e.courseId);
+      } else if (e.sectionIds?.length) {
+        or.push({ courseId: e.courseId, sectionId: { $in: e.sectionIds } });
+      }
+    }
+    if (fullCourseIds.length) or.push({ courseId: { $in: fullCourseIds } });
+    if (!or.length) return [];
+
+    const hits = await this.retrieval.retrieveScoped(query, { $or: or }, 8);
+    return hits.map((h) => ({
+      courseId: h.courseId,
+      lessonId: h.lessonId,
+      lessonTitle: h.lessonTitle,
+      sectionTitle: h.sectionTitle,
+      snippet: h.text,
+      score: h.score,
+    }));
   }
 
   async findInstructorCourses(
