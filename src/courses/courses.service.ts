@@ -32,6 +32,14 @@ import { PaymentsService } from '../payments/payments.service';
 /** Platform rule: a section quiz must be passed at this % to unlock the next. */
 const SECTION_UNLOCK_PASS_PERCENT = 80;
 
+/**
+ * Relevance floor for semantic lesson search (Atlas $vectorSearchScore scale,
+ * which sits in a high band — gibberish still scores ~0.79, real matches ~0.83).
+ * 0.80 drops off-topic/filler queries to empty instead of returning the nearest
+ * 8 regardless. Literal substring hits bypass this (they're exact).
+ */
+const LESSON_SEARCH_MIN_SCORE = 0.8;
+
 @Injectable()
 export class CoursesService {
   constructor(
@@ -242,54 +250,103 @@ export class CoursesService {
    * sections). Returns lesson hits that deep-link to `/learn/:courseId?lesson=`.
    * Empty when there's no query, no access, or embeddings are unconfigured.
    */
+  /**
+   * Semantic lesson search across the WHOLE published catalog (enrollment not
+   * required). Scope is every PUBLISHED course; drafts are excluded. Returns one
+   * hit per lesson with course/section/lesson titles + the chunk's `start` time
+   * (when time-coded). `owned` marks lessons the (optional) signed-in student can
+   * access, so the UI shows a seek-into-the-player chip only for those.
+   */
   async searchLessons(
-    userId: string,
     query: string,
+    userId?: string,
   ): Promise<
     Array<{
       courseId: string;
+      courseTitle: string;
       lessonId: string;
       lessonTitle: string;
       sectionTitle: string;
-      snippet: string;
+      start?: number;
+      owned: boolean;
       score: number;
     }>
   > {
-    if (!query?.trim() || !Types.ObjectId.isValid(userId)) return [];
+    if (!query?.trim()) return [];
 
-    const enrollments = await this.enrollmentModel
-      .find({ studentId: new Types.ObjectId(userId) })
-      .select('courseId type sectionIds')
-      .lean<
-        Array<{
-          courseId: Types.ObjectId;
-          type: PurchaseType;
-          sectionIds?: Types.ObjectId[];
-        }>
-      >();
-    if (!enrollments.length) return [];
+    const published = await this.courseModel
+      .find({ courseStatus: CourseStatus.PUBLISHED })
+      .select('_id title')
+      .lean<Array<{ _id: Types.ObjectId; title?: string }>>();
+    if (!published.length) return [];
 
-    const or: Record<string, unknown>[] = [];
-    const fullCourseIds: Types.ObjectId[] = [];
-    for (const e of enrollments) {
-      if (e.type === PurchaseType.FULL_COURSE) {
-        fullCourseIds.push(e.courseId);
-      } else if (e.sectionIds?.length) {
-        or.push({ courseId: e.courseId, sectionId: { $in: e.sectionIds } });
+    const titleById = new Map(
+      published.map((c) => [c._id.toString(), c.title ?? '']),
+    );
+    const filter = {
+      courseId: { $in: published.map((c) => c._id) },
+    } as Record<string, unknown>;
+
+    // Access sets for the signed-in student (empty when anonymous): full-course
+    // enrollments own every lesson; section enrollments own their sections only.
+    const ownedCourses = new Set<string>();
+    const ownedSections = new Set<string>();
+    if (userId && Types.ObjectId.isValid(userId)) {
+      const enrollments = await this.enrollmentModel
+        .find({ studentId: new Types.ObjectId(userId) })
+        .select('courseId type sectionIds')
+        .lean<
+          Array<{
+            courseId: Types.ObjectId;
+            type: PurchaseType;
+            sectionIds?: Types.ObjectId[];
+          }>
+        >();
+      for (const e of enrollments) {
+        if (e.type === PurchaseType.FULL_COURSE) {
+          ownedCourses.add(e.courseId.toString());
+        } else {
+          for (const s of e.sectionIds ?? []) ownedSections.add(s.toString());
+        }
       }
     }
-    if (fullCourseIds.length) or.push({ courseId: { $in: fullCourseIds } });
-    if (!or.length) return [];
 
-    const hits = await this.retrieval.retrieveScoped(query, { $or: or }, 8);
-    return hits.map((h) => ({
-      courseId: h.courseId,
-      lessonId: h.lessonId,
-      lessonTitle: h.lessonTitle,
-      sectionTitle: h.sectionTitle,
-      snippet: h.text,
-      score: h.score,
-    }));
+    // Hybrid: literal substring matches (exact phrase the vector space may miss)
+    // ranked FIRST, then semantic hits above a relevance floor (below it a query
+    // is off-topic — return nothing rather than the nearest-8). Over-fetch both,
+    // then collapse to distinct lessons (a lesson can produce several chunks).
+    const [literal, semantic] = await Promise.all([
+      this.retrieval.retrieveByText(query, filter, 24),
+      this.retrieval.retrieveScoped(query, filter, 24, LESSON_SEARCH_MIN_SCORE),
+    ]);
+    const hits = [...literal, ...semantic];
+    const seen = new Set<string>();
+    const out: Array<{
+      courseId: string;
+      courseTitle: string;
+      lessonId: string;
+      lessonTitle: string;
+      sectionTitle: string;
+      start?: number;
+      owned: boolean;
+      score: number;
+    }> = [];
+    for (const h of hits) {
+      if (seen.has(h.lessonId)) continue;
+      seen.add(h.lessonId);
+      out.push({
+        courseId: h.courseId,
+        courseTitle: titleById.get(h.courseId) ?? '',
+        lessonId: h.lessonId,
+        lessonTitle: h.lessonTitle,
+        sectionTitle: h.sectionTitle,
+        start: h.start,
+        owned: ownedCourses.has(h.courseId) || ownedSections.has(h.sectionId),
+        score: h.score,
+      });
+      if (out.length >= 8) break;
+    }
+    return out;
   }
 
   async findInstructorCourses(

@@ -164,20 +164,19 @@ export class CoursesController {
     return { success: true, data: result };
   }
 
-  // Semantic search inside the student's own course content (transcripts) →
-  // lesson hits that deep-link to /learn/:courseId?lesson=. Declared before ':id'
-  // so 'lesson-search' isn't captured as a course id.
+  // Semantic search across the whole published catalog's lesson transcripts →
+  // lesson hits (course + section + lesson titles + timestamp). Public, but reads
+  // an OPTIONAL JWT so owned lessons can be flagged for the seek-to-moment chip.
+  // Declared before ':id' so 'lesson-search' isn't captured as an id.
   @Get('lesson-search')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Semantic lesson search in your courses' })
-  @ApiCookieAuth('jwt')
-  @ApiBearerAuth()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Semantic lesson search across all courses' })
   @SwaggerApiResponse({ status: 200, description: 'Lesson hits.' })
   async lessonSearch(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { userId: string } | undefined,
     @Query('q') q?: string,
   ) {
-    const data = await this.coursesService.searchLessons(user.userId, q ?? '');
+    const data = await this.coursesService.searchLessons(q ?? '', user?.userId);
     return { success: true, data };
   }
 

@@ -28,6 +28,14 @@ export class ContentChunk {
   @Prop({ default: 0 })
   ordinal: number;
 
+  /**
+   * Start time (seconds) of this chunk in the lesson video — set only when the
+   * transcript was generated with timestamps (segmented). Absent for legacy
+   * plain-text transcripts; the UI then omits the seek-to-moment chip.
+   */
+  @Prop({ type: Number })
+  start?: number;
+
   @Prop({ required: true })
   text: string;
 

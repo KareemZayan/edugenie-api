@@ -8,6 +8,12 @@ import { CloudinaryController } from './cloudinary.controller';
 import { CloudinaryService } from './cloudinary.service';
 import { RagModule } from '../rag/rag.module';
 import { GeminiTranscriptionProvider } from '../ai/gemini-transcription.provider';
+import { OpenAiTranscriptionProvider } from '../ai/openai-transcription.provider';
+import {
+  TRANSCRIPTION_PROVIDER,
+  TranscriptionProvider,
+} from '../ai/transcription.provider';
+import { Logger } from '@nestjs/common';
 import {
   PendingTranscript,
   PendingTranscriptSchema,
@@ -24,7 +30,27 @@ import {
     RagModule,
   ],
   controllers: [CloudinaryController],
-  providers: [CloudinaryService, GeminiTranscriptionProvider],
+  providers: [
+    CloudinaryService,
+    GeminiTranscriptionProvider,
+    OpenAiTranscriptionProvider,
+    {
+      // Prefer OpenAI Whisper for transcription (real segment timestamps + more
+      // headroom than Gemini's free-tier audio quota); fall back to Gemini.
+      provide: TRANSCRIPTION_PROVIDER,
+      inject: [OpenAiTranscriptionProvider, GeminiTranscriptionProvider],
+      useFactory: (
+        openai: OpenAiTranscriptionProvider,
+        gemini: GeminiTranscriptionProvider,
+      ): TranscriptionProvider => {
+        const active = openai.isConfigured ? openai : gemini;
+        new Logger('TranscriptionProvider').log(
+          `Active transcription provider: ${active.constructor.name} (${active.model})`,
+        );
+        return active;
+      },
+    },
+  ],
   exports: [CloudinaryService],
 })
 export class CloudinaryModule {}

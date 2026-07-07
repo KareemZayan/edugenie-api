@@ -47,3 +47,59 @@ export function chunkText(raw: string, opts: ChunkOptions = {}): string[] {
   }
   return result.filter(Boolean);
 }
+
+export interface TranscriptSegment {
+  start: number;
+  text: string;
+}
+
+/** A chunk that remembers where in the video it starts (seconds). */
+export interface TimedChunk {
+  text: string;
+  start: number;
+}
+
+/**
+ * Time-aware variant of `chunkText`: pack consecutive timestamped segments into
+ * embedding-sized windows, each window remembering the start time of its first
+ * segment so a search hit can deep-link to that moment. No cross-window text
+ * overlap here (a chunk's start must map cleanly to one segment); the small
+ * recall loss at seams is acceptable for lesson-level seeking.
+ */
+export function chunkSegments(
+  segments: TranscriptSegment[],
+  opts: ChunkOptions = {},
+): TimedChunk[] {
+  const maxChars = opts.maxChars ?? 1800;
+  const out: TimedChunk[] = [];
+
+  let curText = '';
+  let curStart = 0;
+  const flush = () => {
+    const t = curText.trim();
+    if (t) out.push({ text: t, start: curStart });
+    curText = '';
+  };
+
+  for (const seg of segments ?? []) {
+    const text = (seg?.text ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const start = typeof seg?.start === 'number' && seg.start >= 0 ? seg.start : 0;
+
+    // A single oversized segment: hard-split, all pieces share its start.
+    if (text.length > maxChars * 1.5) {
+      flush();
+      for (let i = 0; i < text.length; i += maxChars) {
+        const piece = text.slice(i, i + maxChars).trim();
+        if (piece) out.push({ text: piece, start });
+      }
+      continue;
+    }
+
+    if (curText && curText.length + 1 + text.length > maxChars) flush();
+    if (!curText) curStart = start;
+    curText = curText ? `${curText} ${text}` : text;
+  }
+  flush();
+  return out;
+}

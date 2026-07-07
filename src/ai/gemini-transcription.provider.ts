@@ -3,6 +3,10 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import {
+  TranscriptionProvider,
+  TranscriptSegment,
+} from './transcription.provider';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // gemini-2.0-flash was retired (Jun 1 2026). Use a current Flash id; overridable
@@ -15,6 +19,19 @@ const PROMPT =
   'plain text. Output ONLY the transcript — no preamble, timestamps, speaker ' +
   'labels, or commentary. If there is no intelligible speech, output nothing.';
 
+// Segmented (time-coded) transcription prompt. Gemini timestamps are APPROXIMATE
+// and may drift a few seconds — acceptable for lesson-level seeking. For frame-
+// accurate alignment, swap this provider for a forced-alignment tool (e.g.
+// WhisperX) that re-aligns the verbatim text to the audio; the rest of the
+// pipeline already consumes {start,text} segments and needs no further change.
+const SEGMENT_PROMPT =
+  'You are a video transcription engine. Transcribe the spoken audio verbatim ' +
+  'and split it into short segments (roughly one sentence, or a few seconds ' +
+  'each). Return ONLY a JSON array — no markdown, no code fences, no commentary ' +
+  '— where each element is {"start": <number of seconds from the start of the ' +
+  'audio>, "text": "<segment text>"}. Timestamps must be non-decreasing. If ' +
+  'there is no intelligible speech, return [].';
+
 /**
  * Speech-to-text via the Gemini API (free-tier Flash). Given an audio URL
  * (an audio-only Cloudinary delivery URL), it downloads the bytes, sends them
@@ -26,7 +43,7 @@ const PROMPT =
  *   GEMINI_TRANSCRIBE_MODEL optional model id override (default gemini-flash-latest)
  */
 @Injectable()
-export class GeminiTranscriptionProvider {
+export class GeminiTranscriptionProvider implements TranscriptionProvider {
   private readonly logger = new Logger(GeminiTranscriptionProvider.name);
   private readonly apiKey = process.env.GEMINI_API_KEY;
   readonly model = process.env.GEMINI_TRANSCRIBE_MODEL || DEFAULT_MODEL;
@@ -44,6 +61,30 @@ export class GeminiTranscriptionProvider {
     audioUrl: string,
     mimeType = 'audio/mpeg',
   ): Promise<string> {
+    return (await this.generate(audioUrl, PROMPT, mimeType)).trim();
+  }
+
+  /**
+   * Time-coded transcription: returns approximate `{ start, text }` segments for
+   * a clickable transcript + timestamped search. Robust to the model wrapping
+   * its JSON in markdown fences, and falls back to a single start:0 segment when
+   * the output isn't parseable JSON (so a lesson never loses its transcript).
+   * Returns [] for silent/non-speech audio.
+   */
+  async transcribeSegments(
+    audioUrl: string,
+    mimeType = 'audio/mpeg',
+  ): Promise<TranscriptSegment[]> {
+    const raw = (await this.generate(audioUrl, SEGMENT_PROMPT, mimeType)).trim();
+    return this.parseSegments(raw);
+  }
+
+  /** Shared Gemini generateContent call: inline audio + prompt → raw text. */
+  private async generate(
+    audioUrl: string,
+    prompt: string,
+    mimeType: string,
+  ): Promise<string> {
     if (!this.isConfigured) {
       throw new ServiceUnavailableException(
         'Transcription is not configured (set GEMINI_API_KEY).',
@@ -58,7 +99,7 @@ export class GeminiTranscriptionProvider {
         {
           parts: [
             { inline_data: { mime_type: mimeType, data: base64 } },
-            { text: PROMPT },
+            { text: prompt },
           ],
         },
       ],
@@ -103,6 +144,38 @@ export class GeminiTranscriptionProvider {
 
     const json = (await res.json()) as unknown;
     return this.extractText(json).trim();
+  }
+
+  /**
+   * Parse the model's segmented output into clean `{ start, text }` records.
+   * Strips ```json fences, validates each entry, coerces `start` to a
+   * non-negative number, and drops junk. On any parse failure it degrades to a
+   * single segment (start 0) carrying the raw text, so the transcript survives.
+   */
+  private parseSegments(raw: string): TranscriptSegment[] {
+    if (!raw) return [];
+    const stripped = raw
+      .replace(/^\s*```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
+    try {
+      const parsed = JSON.parse(stripped) as unknown;
+      if (!Array.isArray(parsed)) throw new Error('not an array');
+      const segments = parsed
+        .map((s) => {
+          const o = s as Record<string, unknown>;
+          const start = Number(o?.start);
+          const text = typeof o?.text === 'string' ? o.text.trim() : '';
+          return { start: Number.isFinite(start) && start >= 0 ? start : 0, text };
+        })
+        .filter((s) => s.text.length > 0);
+      return segments;
+    } catch {
+      this.logger.warn(
+        'Segmented transcription was not valid JSON — falling back to one segment',
+      );
+      return [{ start: 0, text: stripped }];
+    }
   }
 
   /** Download the audio and base64-encode it for inline_data. */

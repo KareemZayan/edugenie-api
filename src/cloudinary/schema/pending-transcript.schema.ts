@@ -19,6 +19,10 @@ export class PendingTranscript {
   @Prop({ required: true })
   transcript!: string;
 
+  /** Time-coded segments (when the transcript was generated with timestamps). */
+  @Prop({ type: [{ start: Number, text: String }], default: undefined })
+  transcriptSegments?: { start: number; text: string }[];
+
   // Auto-delete after 24h so orphaned holds don't accumulate.
   @Prop({ type: Date, default: () => new Date(), expires: 60 * 60 * 24 })
   createdAt!: Date;
