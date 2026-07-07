@@ -766,7 +766,19 @@ export class CoursesService {
       );
     }
 
-    // 3. Validation: Videos (Must have at least one lesson with a video)
+    // 3. Validation: Content - Each section must have at least one lesson
+    const emptySections = course.sections.filter(
+      (s) => !s.lessons || s.lessons.length === 0
+    );
+
+    if (emptySections.length > 0) {
+      const names = emptySections.map((s) => `"${s.title}"`).join(', ');
+      throw new BadRequestException(
+        `Every section must contain at least one lesson before publishing. Add lessons to: ${names}.`,
+      );
+    }
+
+    // 4. Validation: Videos (Must have at least one lesson with a video)
     let hasVideo = false;
     for (const section of course.sections) {
       if (section.lessons && section.lessons.length > 0) {
@@ -786,7 +798,7 @@ export class CoursesService {
       );
     }
 
-    // 4. Validation: every section must have an APPROVED quiz — it gates the
+    // 5. Validation: every section must have an APPROVED quiz — it gates the
     // next section, so a pending or empty quiz would leave students stuck.
     const sectionIds = course.sections.map((s) => s._id);
     const quizzes = await this.quizModel
