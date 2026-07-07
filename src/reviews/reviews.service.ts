@@ -22,46 +22,47 @@ export class ReviewsService {
     @InjectModel(Enrollment.name)
     private readonly enrollmentModel: Model<Enrollment>,
     private readonly notificationsService: NotificationsService,
+    
   ) {}
 
   async getCourseReviews(
-    courseId: string,
-    page: number,
-    limit: number,
-    userId?: string,
-  ) {
-    if (!Types.ObjectId.isValid(courseId)) {
-      throw new BadRequestException('Invalid course ID');
+  courseId: string,
+  page: number,
+  limit: number,
+  userId?: string,
+  sectionId?: string,   // NEW
+) {
+  if (!Types.ObjectId.isValid(courseId)) {
+    throw new BadRequestException('Invalid course ID');
+  }
+
+  const filter: Record<string, unknown> = { courseId: new Types.ObjectId(courseId) };
+  if (sectionId) {
+    if (!Types.ObjectId.isValid(sectionId)) {
+      throw new BadRequestException('Invalid section ID');
     }
+    filter.sectionId = new Types.ObjectId(sectionId);
+  }
 
-    const skip = (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-    const [data, total] = await Promise.all([
-      this.reviewModel
-        .find({ courseId: new Types.ObjectId(courseId) })
-        .populate('studentId', 'firstName lastName avatar')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .exec(),
-      this.reviewModel.countDocuments({
-        courseId: new Types.ObjectId(courseId),
-      }),
-    ]);
+  const [data, total] = await Promise.all([
+    this.reviewModel.find(filter).populate('studentId', 'firstName lastName avatar')
+      .sort({ createdAt: -1 }).skip(skip).limit(limit).exec(),
+    this.reviewModel.countDocuments(filter),
+  ]);
 
-    const totalPages = Math.ceil(total / limit);
+  const totalPages = Math.ceil(total / limit);
 
-    let hasReviewed = false;
-    if (userId) {
-      const reviewExists = await this.reviewModel.exists({
-        courseId: new Types.ObjectId(courseId),
-        studentId: new Types.ObjectId(userId),
-      });
-      if (reviewExists) {
-        hasReviewed = true;
-      }
-    }
-
+  let hasReviewed = false;
+  if (userId) {
+    const reviewedFilter: Record<string, unknown> = {
+      courseId: new Types.ObjectId(courseId),
+      studentId: new Types.ObjectId(userId),
+    };
+    if (sectionId) reviewedFilter.sectionId = new Types.ObjectId(sectionId);
+    hasReviewed = !!(await this.reviewModel.exists(reviewedFilter));
+  }
     return {
       data: data.map(
         (d) =>
@@ -84,115 +85,128 @@ export class ReviewsService {
     };
   }
 
-  async createReview(
-    studentId: string,
-    dto: CreateReviewDto,
-  ): Promise<ReviewSerializer> {
-    if (!Types.ObjectId.isValid(dto.courseId)) {
-      throw new BadRequestException('Invalid course ID');
-    }
+  async createReview(studentId: string, dto: CreateReviewDto): Promise<ReviewSerializer> {
+  if (!Types.ObjectId.isValid(dto.courseId)) {
+    throw new BadRequestException('Invalid course ID');
+  }
+  if (!Types.ObjectId.isValid(dto.sectionId)) {
+    throw new BadRequestException('Invalid section ID');
+  }
 
-    // 1. Verify Enrollment
-    const enrollment = await this.enrollmentModel
-      .findOne({
-        courseId: new Types.ObjectId(dto.courseId),
-        studentId: new Types.ObjectId(studentId),
-      })
-      .exec();
+  // 1. Verify Enrollment
+  const enrollment = await this.enrollmentModel
+    .findOne({ courseId: new Types.ObjectId(dto.courseId), studentId: new Types.ObjectId(studentId) })
+    .exec();
+  if (!enrollment) {
+    throw new ForbiddenException('You must be enrolled in this course to write a review.');
+  }
 
-    if (!enrollment) {
-      throw new ForbiddenException(
-        'You must be enrolled in this course to write a review.',
-      );
-    }
+  // 2. Fetch course once — used for section validation AND instructor notification later
+  const course = await this.courseModel
+    .findById(dto.courseId)
+    .select('sections instructorId title')
+    .exec();
+  if (!course) throw new NotFoundException('Course not found');
 
-    // 2. Ensure user hasn't already reviewed
-    const existingReview = await this.reviewModel
-      .findOne({
-        courseId: new Types.ObjectId(dto.courseId),
-        studentId: new Types.ObjectId(studentId),
-      })
-      .exec();
+  const section = course.sections.id(dto.sectionId);
+  if (!section) {
+    throw new BadRequestException('This section does not belong to the given course.');
+  }
 
-    if (existingReview) {
-      throw new BadRequestException('You have already reviewed this course.');
-    }
-
-    // 3. Create Review
-    const newReview = await this.reviewModel.create({
+  // 3. Ensure user hasn't already reviewed THIS SECTION
+  const existingReview = await this.reviewModel
+    .findOne({
       courseId: new Types.ObjectId(dto.courseId),
+      sectionId: new Types.ObjectId(dto.sectionId),
       studentId: new Types.ObjectId(studentId),
-      rating: dto.rating,
-      comment: dto.comment,
-    });
+    })
+    .exec();
+  if (existingReview) {
+    throw new BadRequestException('You have already reviewed this section.');
+  }
 
-    // 4. Update Course Rating Metadata
-    await this.updateCourseRating(dto.courseId);
-    const populatedReview = await newReview.populate(
-      'studentId',
-      'firstName lastName avatar',
+  // 4. Create Review
+  const newReview = await this.reviewModel.create({
+    courseId: new Types.ObjectId(dto.courseId),
+    sectionId: new Types.ObjectId(dto.sectionId),
+    studentId: new Types.ObjectId(studentId),
+    rating: dto.rating,
+    comment: dto.comment,
+  });
+
+  // 5. Update Course Rating Metadata (weighted)
+  await this.updateCourseRating(dto.courseId);
+
+  const populatedReview = await newReview.populate('studentId', 'firstName lastName avatar');
+
+  // 6. Notifications — reuse `course` from step 2, no second fetch needed
+  if (course) {
+    const student = populatedReview.studentId as unknown as {
+      firstName: string;
+      lastName: string;
+    };
+    const studentName = `${student.firstName} ${student.lastName}`;
+
+    await this.notificationsService.create(
+      course.instructorId,
+      'New Review Posted',
+      `${studentName} left a ${dto.rating}-star review on your course "${course.title}".`,
+      NotificationType.NEW_REVIEW,
+      dto.courseId,
     );
 
-    // 5. Fetch course to get instructorId + title
-    const course = await this.courseModel
-      .findById(dto.courseId)
-      .select('instructorId title')
-      .exec();
-
-    if (course) {
-      const student = populatedReview.studentId as unknown as {
-        firstName: string;
-        lastName: string;
-      };
-      const studentName = `${student.firstName} ${student.lastName}`;
-
-      // NEW_REVIEW notification → instructor
+    if (dto.rating <= 2) {
       await this.notificationsService.create(
         course.instructorId,
-        'New Review Posted',
-        `${studentName} left a ${dto.rating}-star review on your course "${course.title}".`,
-        NotificationType.NEW_REVIEW,
+        'Low Rating Alert',
+        `Your course "${course.title}" received a ${dto.rating}-star review. Consider reviewing student feedback.`,
+        NotificationType.LOW_RATING,
         dto.courseId,
       );
-
-      // LOW_RATING notification → instructor (rating ≤ 2)
-      if (dto.rating <= 2) {
-        await this.notificationsService.create(
-          course.instructorId,
-          'Low Rating Alert',
-          `Your course "${course.title}" received a ${dto.rating}-star review. Consider reviewing student feedback.`,
-          NotificationType.LOW_RATING,
-          dto.courseId,
-        );
-      }
     }
-
-    return new ReviewSerializer(
-      (populatedReview.toObject
-        ? populatedReview.toObject()
-        : populatedReview) as unknown as Record<string, unknown>,
-    );
   }
+
+  return new ReviewSerializer(
+    (populatedReview.toObject
+      ? populatedReview.toObject()
+      : populatedReview) as unknown as Record<string, unknown>,
+  );
+}
 
   private async updateCourseRating(courseId: string) {
-    const result = await this.reviewModel.aggregate([
-      { $match: { courseId: new Types.ObjectId(courseId) } },
-      {
-        $group: {
-          _id: '$courseId',
-          averageRating: { $avg: '$rating' },
-        },
-      },
-    ]);
+  const course = await this.courseModel.findById(courseId).select('sections').exec();
+  if (!course) return;
 
-    const averageRating =
-      result.length > 0 ? parseFloat(result[0].averageRating.toFixed(1)) : 0;
-
-    await this.courseModel.updateOne(
-      { _id: new Types.ObjectId(courseId) },
-      { $set: { ratingAverage: averageRating } },
-    );
+  // Build weight-per-section from lesson count.
+  // ASSUMPTION: sections with more lessons carry more weight — confirm with lead.
+  const weightMap = new Map<string, number>();
+  for (const section of course.sections) {
+    const weight = section.lessons?.length || 1; // fallback so empty sections aren't ignored
+    weightMap.set(section._id.toString(), weight);
   }
+
+  const reviews = await this.reviewModel
+    .find({ courseId: new Types.ObjectId(courseId) })
+    .select('rating sectionId')
+    .exec();
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (const review of reviews) {
+    const weight = weightMap.get(review.sectionId?.toString()) || 1;
+    weightedSum += review.rating * weight;
+    totalWeight += weight;
+  }
+
+  const averageRating = totalWeight > 0
+    ? parseFloat((weightedSum / totalWeight).toFixed(1))
+    : 0;
+
+  await this.courseModel.updateOne(
+    { _id: new Types.ObjectId(courseId) },
+    { $set: { ratingAverage: averageRating } },
+  );
+}
 
   async findByInstructor(
     instructorId: string,

@@ -27,10 +27,12 @@ export class InstructorReviewsController {
 
   @Roles(UserRole.INSTRUCTOR)
   @Get()
-  @ApiOperation({ summary: 'Get reviews' })
+  @ApiOperation({ summary: 'Get reviews for instructor courses' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiQuery({ name: 'courseId', required: false, type: String, description: 'Filter by specific course' })
+  @ApiQuery({ name: 'rating', required: false, type: String, description: 'Filter by rating (comma-separated: 1,2,3,4,5)' })
   @ApiCookieAuth('jwt')
   @ApiBearerAuth()
   @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })

@@ -13,6 +13,9 @@ export class ReviewSerializer {
   @ApiProperty({ example: '507f1f77bcf86cd799439011' })
   studentId: string;
   @Expose()
+@ApiProperty({ example: '507f1f77bcf86cd799439011' })
+sectionId: string;
+  @Expose()
   @ApiProperty({ example: 'string_example' })
   studentName: string;
   @Expose()

@@ -7,6 +7,10 @@ export class CreateReviewDto {
   @ApiProperty({ example: '507f1f77bcf86cd799439011' })
   courseId: string;
 
+  @IsMongoId()
+  @ApiProperty({ example: '507f1f77bcf86cd799439012' })
+  sectionId: string;  
+
   @IsNumber()
   @Min(1)
   @Max(5)
