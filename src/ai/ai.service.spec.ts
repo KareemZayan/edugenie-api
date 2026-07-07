@@ -1,4 +1,8 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { Types } from 'mongoose';
 import { AiService } from './ai.service';
 import { QuestionType } from '../common/enums/questionsType.enum';
 import { QuizDifficulty } from '../common/enums/quizDifficulty.enum';
@@ -311,5 +315,86 @@ describe('AiService.generateQuizQuestions', () => {
     await expect(
       service.generateQuizQuestions(baseParams),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+});
+
+describe('AiService tutor — access + scope', () => {
+  beforeEach(() => {
+    process.env.SBG_API_URL = 'https://gw.test/api';
+    process.env.SBG_API_KEY = 'sbg_test_key';
+  });
+  afterEach(() => {
+    delete process.env.SBG_API_URL;
+    delete process.env.SBG_API_KEY;
+    jest.clearAllMocks();
+  });
+
+  async function drain(gen: AsyncGenerator<string>): Promise<string> {
+    const out: string[] = [];
+    for await (const x of gen) out.push(x);
+    return out.join('');
+  }
+
+  it('course chat: blocks a section-only owner (full course required)', async () => {
+    const enroll = {
+      getCourseAccess: jest.fn().mockResolvedValue({
+        accessType: 'section',
+        accessibleSections: ['s1'],
+        totalSections: 2,
+      }),
+    };
+    const svc = new AiService(
+      {} as never,
+      {} as never,
+      enroll as never,
+      {} as never,
+    );
+    const courseId = new Types.ObjectId().toString();
+    await expect(
+      drain(svc.streamCourseChat(courseId, 'u1', 'hello')),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lesson chat: retrieves scoped to the WHOLE section (not one lesson)', async () => {
+    const lessonId = new Types.ObjectId();
+    const sectionId = new Types.ObjectId();
+    const courseId = new Types.ObjectId();
+    const course = {
+      _id: courseId,
+      title: 'Course',
+      sections: [
+        {
+          _id: sectionId,
+          title: 'Section A',
+          lessons: [{ _id: lessonId, title: 'L1', transcript: 'content' }],
+        },
+      ],
+    };
+    const courseModel = {
+      findOne: jest.fn().mockReturnValue({
+        select: () => ({ lean: () => ({ exec: () => Promise.resolve(course) }) }),
+      }),
+    };
+    const enroll = { canAccessLesson: jest.fn().mockResolvedValue(true) };
+    const retrieval = { retrieve: jest.fn().mockResolvedValue([]) };
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'answer' }),
+    }) as unknown as typeof fetch;
+
+    const svc = new AiService(
+      courseModel as never,
+      {} as never,
+      enroll as never,
+      retrieval as never,
+    );
+    await drain(svc.streamLessonChat(lessonId.toString(), 'u1', 'where is X?'));
+
+    expect(retrieval.retrieve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        courseId: courseId.toString(),
+        sectionIds: [sectionId.toString()],
+      }),
+    );
   });
 });

@@ -11,6 +11,7 @@ import { Model, Types } from 'mongoose';
 import { Course } from '../courses/schema/course.schema';
 import { User } from '../users/schema/user.schema';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 import { RetrievalService } from '../rag/retrieval.service';
 import type { RetrievedChunk, RetrievedCourse } from '../rag/retrieval.service';
 import { QuestionType } from '../common/enums/questionsType.enum';
@@ -49,6 +50,35 @@ const ANSWER_STYLE =
   `- If listing steps or items, use a few short bullets instead of paragraphs.\n` +
   `- **Bold** the key term; put any code in a fenced code block.\n` +
   `- Warm but efficient — one line of encouragement at most, only if it fits.`;
+
+/**
+ * Hard on-topic guardrail appended to the lesson/section + course tutor prompts.
+ * Forces the model to refuse anything outside the scoped material instead of
+ * answering general questions — `scope` is e.g. `the section "Async" (course "Node")`.
+ */
+const stayOnTopic = (scope: string): string =>
+  `\n\n=== STAY ON TOPIC (STRICT) ===\n` +
+  `- You may ONLY answer questions about ${scope}. If the question is unrelated ` +
+  `to this material — another subject, general knowledge, personal chit-chat, or ` +
+  `anything outside ${scope} — do NOT answer it. Reply in one sentence that you can ` +
+  `only help with ${scope}, and invite a relevant question.\n` +
+  `- Ground every answer in the material provided below. If the material doesn't ` +
+  `cover it, say so plainly — never invent facts, and never reveal content from ` +
+  `sections the student hasn't unlocked.\n` +
+  `- When the material DOES contain the answer, point the student to the exact ` +
+  `moment(s); the cited timestamps are listed for you and appended to your reply.`;
+
+/** Format seconds as m:ss or h:mm:ss (null when not time-coded). */
+function fmtTime(sec?: number): string | null {
+  if (typeof sec !== 'number' || !isFinite(sec) || sec < 0) return null;
+  const s = Math.floor(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${ss}`
+    : `${m}:${ss}`;
+}
 
 /**
  * AI features backed by the SBG gateway (an OpenAI-incompatible proxy to AWS
@@ -463,7 +493,13 @@ export class AiService {
   // streaming gateway endpoint appears later, only streamReply() changes.
   // ───────────────────────────────────────────────────────────────────────────
 
-  /** Tier 1 — tutor scoped to a single lesson's material. */
+  /**
+   * Tier 1 — tutor scoped to the WHOLE SECTION the lesson belongs to (not just
+   * the one lesson). Access requires owning that section (or the full course).
+   * Answers are grounded in the section's transcripts and cite the exact
+   * timestamped moment when the point exists; otherwise stay within the
+   * section's topic.
+   */
   async *streamLessonChat(
     lessonId: string,
     studentId: string,
@@ -475,6 +511,8 @@ export class AiService {
     if (!Types.ObjectId.isValid(lessonId)) {
       throw new BadRequestException('Invalid lesson ID');
     }
+    // Section-level gate: owning any lesson means owning its section (or the
+    // full course) — canAccessLesson resolves lesson → section → ownership.
     const hasAccess = await this.enrollmentsService.canAccessLesson(
       studentId,
       lessonId,
@@ -485,23 +523,30 @@ export class AiService {
       );
     }
 
-    const ctx = await this.getLessonContext(lessonId);
+    const ctx = await this.getSectionContextByLesson(lessonId);
 
-    // RAG: retrieve the most relevant slices of THIS lesson's transcript and
-    // ground the answer in them. Falls back to the full-lesson prompt if no
-    // chunks are indexed (or embeddings aren't configured).
+    // RAG scoped to the ENTIRE section (all its lessons), so the tutor can
+    // answer across the section and cite the exact lesson + timestamp.
     const chunks = await this.retrieval
-      .retrieve({ query: message, lessonId, k: 5 })
+      .retrieve({
+        query: message,
+        courseId: ctx.courseId,
+        sectionIds: [ctx.sectionId],
+        k: 6,
+      })
       .catch(() => [] as RetrievedChunk[]);
 
     const systemPrompt = chunks.length
-      ? this.groundedLessonPrompt(ctx.lessonTitle, ctx.courseTitle, chunks)
-      : this.lessonSystemPrompt(ctx);
+      ? this.groundedSectionPrompt(ctx.sectionTitle, ctx.courseTitle, chunks)
+      : this.sectionSystemPrompt(ctx);
 
     yield* this.streamReply(systemPrompt, [
       ...this.trimHistory(history),
       { role: 'user', content: message },
     ]);
+
+    // Cite the exact moments the answer drew from (timestamp deep-links).
+    if (chunks.length) yield* this.streamSources(chunks, ctx.courseId);
   }
 
   /** Tier 2 — tutor scoped to an entire course the student has access to. */
@@ -520,9 +565,17 @@ export class AiService {
       studentId,
       courseId,
     );
-    if (!access || access.accessibleSections.length === 0) {
+    // Course tutor needs the WHOLE course — a full-course enrollment, or every
+    // section owned (same as the frontend's `every(isOwned)` unlock). Partial
+    // owners use the section tutor (lesson chat) for the sections they own.
+    const ownsWholeCourse =
+      !!access &&
+      (access.accessType === PurchaseType.FULL_COURSE ||
+        (access.totalSections > 0 &&
+          access.accessibleSections.length === access.totalSections));
+    if (!ownsWholeCourse) {
       throw new ForbiddenException(
-        'You must purchase part of this course to use the course tutor',
+        'Buy the full course to use the course tutor.',
       );
     }
 
@@ -545,10 +598,10 @@ export class AiService {
     const systemPrompt = chunks.length
       ? this.groundedCoursePrompt(ctx.courseTitle, chunks)
       : `You are EduGenie's AI tutor for the course "${ctx.courseTitle}". Use the ` +
-        `course outline and the material the student has unlocked to answer ` +
-        `questions, connect concepts across lessons, and guide their study. Do ` +
-        `not reveal content from sections they have not unlocked.\n\n` +
+        `course outline and material to answer questions, connect concepts across ` +
+        `lessons, and guide their study.\n\n` +
         `=== COURSE OUTLINE & MATERIAL ===\n${ctx.material}` +
+        stayOnTopic(`the course "${ctx.courseTitle}"`) +
         ANSWER_STYLE;
 
     yield* this.streamReply(systemPrompt, [
@@ -755,21 +808,56 @@ export class AiService {
   ): string {
     return (
       `You are EduGenie's AI tutor for the course "${courseTitle}". Answer using ` +
-      `PRIMARILY the excerpts below, drawn from the lessons the student has ` +
-      `unlocked. Connect concepts across lessons and reference lesson titles when ` +
-      `helpful. If the excerpts don't cover it, say so and suggest what to study — ` +
-      `do NOT invent facts, and never reveal content from locked sections.\n\n` +
+      `PRIMARILY the excerpts below. Connect concepts across lessons and reference ` +
+      `lesson titles when helpful.\n\n` +
       `=== RELEVANT EXCERPTS ===\n` +
       this.formatExcerpts(chunks) +
+      stayOnTopic(`the course "${courseTitle}"`) +
+      ANSWER_STYLE
+    );
+  }
+
+  /** Grounded tutor for a whole SECTION (tier-1, section-scoped). */
+  private groundedSectionPrompt(
+    sectionTitle: string,
+    courseTitle: string,
+    chunks: RetrievedChunk[],
+  ): string {
+    return (
+      `You are EduGenie's AI tutor for the section "${sectionTitle}" in the course ` +
+      `"${courseTitle}". Answer using PRIMARILY the excerpts from this section ` +
+      `below, and reference the lesson each point comes from.\n\n` +
+      `=== RELEVANT EXCERPTS ===\n` +
+      this.formatExcerpts(chunks) +
+      stayOnTopic(`the section "${sectionTitle}" of "${courseTitle}"`) +
+      ANSWER_STYLE
+    );
+  }
+
+  /** Non-RAG fallback for section chat (no indexed chunks). */
+  private sectionSystemPrompt(ctx: {
+    sectionTitle: string;
+    courseTitle: string;
+    material: string;
+  }): string {
+    return (
+      `You are EduGenie's AI tutor for the section "${ctx.sectionTitle}" in the ` +
+      `course "${ctx.courseTitle}". Help the student understand THIS section.\n\n` +
+      `=== SECTION MATERIAL ===\n${ctx.material}` +
+      stayOnTopic(`the section "${ctx.sectionTitle}" of "${ctx.courseTitle}"`) +
       ANSWER_STYLE
     );
   }
 
   private formatExcerpts(chunks: RetrievedChunk[]): string {
     return chunks
-      .map(
-        (c, i) => `[${i + 1}] (from lesson "${c.lessonTitle}")\n${c.text.trim()}`,
-      )
+      .map((c, i) => {
+        const at = fmtTime(c.start);
+        const from = at
+          ? `from lesson "${c.lessonTitle}" at ${at}`
+          : `from lesson "${c.lessonTitle}"`;
+        return `[${i + 1}] (${from})\n${c.text.trim()}`;
+      })
       .join('\n\n');
   }
 
@@ -789,10 +877,12 @@ export class AiService {
   }
 
   /**
-   * Stream a compact "sources" footer citing the distinct lessons the answer
-   * drew from. Each cited lesson is a deep-link into the player at that exact
-   * lesson — the client renders `[Title](/learn/<courseId>?lesson=<lessonId>)`
-   * as a clickable link.
+   * Stream a compact "jump to" footer citing the exact MOMENTS the answer drew
+   * from. Each distinct lesson is a deep-link into the player at the timestamp
+   * of its top-ranked matching chunk — the client renders
+   * `[Title — m:ss](/learn/<courseId>?lesson=<lessonId>&t=<seconds>)` as a
+   * clickable link that seeks the video. Chunks arrive in relevance order, so
+   * the first-seen chunk per lesson is the best moment for that lesson.
    */
   private async *streamSources(
     chunks: RetrievedChunk[],
@@ -805,14 +895,22 @@ export class AiService {
       const title = c.lessonTitle?.trim();
       if (!id || !title || seen.has(id)) continue;
       seen.add(id);
-      items.push(
-        courseId
-          ? `[${title}](/learn/${courseId}?lesson=${id})`
-          : title,
-      );
+      const at = fmtTime(c.start);
+      const t =
+        typeof c.start === 'number' && isFinite(c.start) && c.start >= 0
+          ? Math.floor(c.start)
+          : null;
+      const label = at ? `${title} — ${at}` : title;
+      const href = !courseId
+        ? null
+        : t !== null
+          ? `/learn/${courseId}?lesson=${id}&t=${t}`
+          : `/learn/${courseId}?lesson=${id}`;
+      items.push(href ? `[${label}](${href})` : label);
+      if (items.length >= 4) break;
     }
     if (!items.length) return;
-    yield `\n\n📚 Based on: ${items.join(' · ')}`;
+    yield `\n\n📚 Jump to: ${items.join(' · ')}`;
   }
 
   private trimHistory(history: ChatTurn[]): GatewayMessage[] {
@@ -871,6 +969,61 @@ export class AiService {
       : `(No transcript is available for this lesson. Lesson title: "${lessonTitle}".)`;
 
     return { lessonTitle, sectionTitle, courseTitle: course.title, material };
+  }
+
+  /**
+   * Resolve a lessonId to its OWNING SECTION: the section id/title, the course
+   * id/title, and section-wide material (all the section's lesson transcripts,
+   * capped). Used by the section-scoped tutor.
+   */
+  private async getSectionContextByLesson(lessonId: string): Promise<{
+    courseId: string;
+    courseTitle: string;
+    sectionId: string;
+    sectionTitle: string;
+    material: string;
+  }> {
+    const course = await this.courseModel
+      .findOne({ 'sections.lessons._id': new Types.ObjectId(lessonId) })
+      .select(
+        'title sections._id sections.title sections.lessons._id sections.lessons.title sections.lessons.transcript',
+      )
+      .lean<{
+        _id: Types.ObjectId;
+        title: string;
+        sections: {
+          _id: Types.ObjectId;
+          title: string;
+          lessons: { _id: Types.ObjectId; title: string; transcript?: string }[];
+        }[];
+      }>()
+      .exec();
+
+    if (!course) throw new NotFoundException('Lesson not found');
+
+    const section = course.sections.find((s) =>
+      s.lessons.some((l) => l._id.toString() === lessonId),
+    );
+    if (!section) throw new NotFoundException('Lesson not found');
+
+    // Concatenate the section's lesson transcripts (labeled), capped for the prompt.
+    const parts: string[] = [];
+    for (const l of section.lessons) {
+      const tr = (l.transcript ?? '').trim();
+      if (tr) parts.push(`## ${l.title}\n${tr}`);
+    }
+    const joined = parts.join('\n\n');
+    const material = joined
+      ? joined.slice(0, 8000)
+      : `(No transcripts available for this section. Section: "${section.title}".)`;
+
+    return {
+      courseId: course._id.toString(),
+      courseTitle: course.title,
+      sectionId: section._id.toString(),
+      sectionTitle: section.title,
+      material,
+    };
   }
 
   private async getCourseContext(
