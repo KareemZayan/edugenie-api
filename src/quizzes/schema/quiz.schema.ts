@@ -46,12 +46,19 @@ export const QuestionSchema = SchemaFactory.createForClass(Question);
 export class Quiz {
   @Prop({ type: Types.ObjectId, ref: 'Section', required: true })
   sectionId: Types.ObjectId;
-  @Prop({ type: String, enum: QuizDifficulty, required: true })
-  difficulty: QuizDifficulty;
+  @Prop({ type: String, enum: QuizDifficulty, required: false, default: null })
+  difficulty: QuizDifficulty | null;
   @Prop({ required: true, min: 1, max: 50 })
   numberOfQuestions: number;
-  @Prop({ type: String, enum: QuestionType, required: true })
-  questionType: QuestionType;
+  /**
+   * Records the AI generation configuration — which question types the instructor
+   * allowed the AI to produce for this quiz.
+   * This field is intentionally NOT recalculated after instructor edits because
+   * it represents the original generation instruction, not the current composition.
+   * Manual quizzes store an empty array (no AI configuration).
+   */
+  @Prop({ type: [String], enum: QuestionType, required: true })
+  questionTypes: QuestionType[];
   @Prop({
     type: String,
     enum: QuizGenerationStatus,

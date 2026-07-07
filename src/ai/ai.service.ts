@@ -247,17 +247,23 @@ export class AiService {
     sectionDescription?: string;
     lessons: { title: string; transcript?: string }[];
     difficulty: QuizDifficulty;
-    questionType: QuestionType;
+    questionTypes: QuestionType[];
     numberOfQuestions: number;
   }): Promise<GeneratedQuizQuestion[]> {
     this.assertConfigured();
+
+    if (!params.questionTypes || params.questionTypes.length === 0) {
+      throw new BadRequestException(
+        'At least one question type must be provided for AI generation.',
+      );
+    }
 
     const context = this.buildSectionContext(
       params.sectionTitle,
       params.sectionDescription,
       params.lessons,
     );
-    const typeRules = this.questionTypeRules(params.questionType);
+    const typeRules = this.questionTypeRules(params.questionTypes);
 
     const systemPrompt =
       'You are an expert instructional designer who writes high-quality ' +
@@ -295,7 +301,7 @@ export class AiService {
 
     const candidates = Array.isArray(parsed.questions) ? parsed.questions : [];
     const valid = candidates
-      .map((q) => this.normalizeQuestion(q, params.questionType))
+      .map((q) => this.normalizeQuestion(q, params.questionTypes))
       .filter((q): q is GeneratedQuizQuestion => q !== null)
       .slice(0, params.numberOfQuestions);
 
@@ -358,23 +364,44 @@ export class AiService {
     return ctx.slice(0, MAX_TOTAL);
   }
 
-  private questionTypeRules(type: QuestionType): string {
-    switch (type) {
-      case QuestionType.SINGLE_CHOICE:
-        return 'Every question must be type "SINGLE_CHOICE" with exactly 4 options and exactly 1 correct answer.';
-      case QuestionType.MULTI_CHOICE:
-        return 'Every question must be type "MULTI_CHOICE" with 4 to 5 options and 2 or more correct answers.';
-      case QuestionType.TRUE_FALSE:
-        return 'Every question must be type "TRUE_FALSE" with options exactly ["True","False"] and exactly 1 correct answer.';
-      case QuestionType.MIXED:
-      default:
-        return 'Mix the question types: each question may be "SINGLE_CHOICE" (4 options, 1 correct), "MULTI_CHOICE" (4-5 options, 2+ correct), or "TRUE_FALSE" (options ["True","False"], 1 correct). Set each question\'s "type" accordingly.';
+  private questionTypeRules(types: QuestionType[]): string {
+    if (types.length === 1) {
+      const type = types[0];
+      switch (type) {
+        case QuestionType.SINGLE_CHOICE:
+          return 'Every question must be type "SINGLE_CHOICE" with exactly 4 options and exactly 1 correct answer.';
+        case QuestionType.MULTI_CHOICE:
+          return 'Every question must be type "MULTI_CHOICE" with 4 to 5 options and 2 or more correct answers.';
+        case QuestionType.TRUE_FALSE:
+          return 'Every question must be type "TRUE_FALSE" with options exactly ["True","False"] and exactly 1 correct answer.';
+        default:
+          return 'Every question must be type "SINGLE_CHOICE" with exactly 4 options and exactly 1 correct answer.';
+      }
     }
+
+    // Multiple types: describe each one and instruct strict adherence
+    const typeDescriptions: string[] = [];
+    if (types.includes(QuestionType.SINGLE_CHOICE)) {
+      typeDescriptions.push('"SINGLE_CHOICE" (exactly 4 options, exactly 1 correct answer)');
+    }
+    if (types.includes(QuestionType.MULTI_CHOICE)) {
+      typeDescriptions.push('"MULTI_CHOICE" (4 to 5 options, 2 or more correct answers)');
+    }
+    if (types.includes(QuestionType.TRUE_FALSE)) {
+      typeDescriptions.push('"TRUE_FALSE" (options must be exactly ["True","False"], exactly 1 correct answer)');
+    }
+
+    const typeList = types.map((t) => `"${t}"`).join(', ');
+    return (
+      `Every generated question must be one of: ${typeList}. ` +
+      `You may mix these types freely, but MUST NOT generate any type outside this list. ` +
+      `Type-specific rules: ${typeDescriptions.join('; ')}.`
+    );
   }
 
   private normalizeQuestion(
     raw: unknown,
-    requestedType: QuestionType,
+    allowedTypes: QuestionType[],
   ): GeneratedQuizQuestion | null {
     if (!raw || typeof raw !== 'object') return null;
     const q = raw as Record<string, unknown>;
@@ -383,16 +410,14 @@ export class AiService {
       typeof q.questionText === 'string' ? q.questionText.trim() : '';
     if (!questionText) return null;
 
-    const type =
-      requestedType === QuestionType.MIXED
-        ? (q.type as QuestionType)
-        : requestedType;
-    const allowed: QuestionType[] = [
-      QuestionType.SINGLE_CHOICE,
-      QuestionType.MULTI_CHOICE,
-      QuestionType.TRUE_FALSE,
-    ];
-    if (!allowed.includes(type)) return null;
+    // If a single type was requested, override whatever the AI returned.
+    // Otherwise, ensure the returned type is in the allowed set.
+    let type = q.type as QuestionType;
+    if (allowedTypes.length === 1) {
+      type = allowedTypes[0];
+    } else if (!allowedTypes.includes(type)) {
+      return null;
+    }
 
     const toStringArray = (v: unknown): string[] =>
       Array.isArray(v)

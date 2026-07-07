@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -15,6 +15,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApproveQuizDto } from './dto/approve-quiz.dto';
+import { SaveManualDraftDto } from './dto/save-manual-draft.dto';
 import {
   PendingQuizListItem,
   QuizDetailForInstructorResponse,
@@ -39,6 +40,41 @@ export class InstructorQuizzesController {
     @CurrentUser() user: { userId: string },
   ): Promise<{ data: PendingQuizListItem[] }> {
     return this.quizzesService.findPendingReviewForInstructor(user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Post('manual-draft')
+  @ApiOperation({ summary: 'Create a new manual quiz draft' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiBody({ type: SaveManualDraftDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async createManualDraft(
+    @Body() dto: SaveManualDraftDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.upsertManualDraft(null, dto, user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Patch(':id/manual-draft')
+  @ApiOperation({ summary: 'Update an existing manual quiz draft' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Not Found.' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: SaveManualDraftDto })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async updateManualDraft(
+    @Param('id') id: string,
+    @Body() dto: SaveManualDraftDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.upsertManualDraft(id, dto, user.userId);
   }
 
   @Roles(UserRole.INSTRUCTOR)
@@ -140,5 +176,22 @@ export class InstructorQuizzesController {
     @CurrentUser() user: { userId: string },
   ) {
     return this.quizzesService.getEnrollmentStatusForSection(sectionId, user.userId);
+  }
+
+  @Roles(UserRole.INSTRUCTOR)
+  @Post(':id/delete')
+  @ApiOperation({ summary: 'Delete a pending review quiz' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Quiz not found.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - Cannot delete approved quizzes.' })
+  @ApiParam({ name: 'id', type: String, description: 'Quiz ID' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  async deletePendingQuiz(
+    @Param('id') id: string,
+    @CurrentUser() user: { userId: string },
+  ) {
+    return this.quizzesService.deletePendingQuiz(id, user.userId);
   }
 }

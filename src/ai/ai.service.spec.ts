@@ -18,7 +18,7 @@ describe('AiService.generateQuizQuestions', () => {
     sectionDescription: 'Async JS fundamentals',
     lessons: [{ title: 'Promises 101', transcript: 'A promise represents...' }],
     difficulty: QuizDifficulty.EASY,
-    questionType: QuestionType.SINGLE_CHOICE,
+    questionTypes: [QuestionType.SINGLE_CHOICE],
     numberOfQuestions: 5,
   };
 
@@ -194,7 +194,7 @@ describe('AiService.generateQuizQuestions', () => {
 
     const result = await service.generateQuizQuestions({
       ...baseParams,
-      questionType: QuestionType.SINGLE_CHOICE,
+      questionTypes: [QuestionType.SINGLE_CHOICE],
     });
     expect(result[0].type).toBe(QuestionType.SINGLE_CHOICE);
     expect(result[0].correctAnswers).toHaveLength(1);
@@ -214,13 +214,13 @@ describe('AiService.generateQuizQuestions', () => {
 
     const result = await service.generateQuizQuestions({
       ...baseParams,
-      questionType: QuestionType.TRUE_FALSE,
+      questionTypes: [QuestionType.TRUE_FALSE],
     });
     expect(result[0].options).toEqual(['True', 'False']);
     expect(result[0].correctAnswers).toEqual(['True']);
   });
 
-  it('respects per-question types when the quiz is MIXED', async () => {
+  it('respects per-question types when multiple types are requested', async () => {
     gatewayReturns({
       questions: [
         {
@@ -240,7 +240,7 @@ describe('AiService.generateQuizQuestions', () => {
 
     const result = await service.generateQuizQuestions({
       ...baseParams,
-      questionType: QuestionType.MIXED,
+      questionTypes: [QuestionType.TRUE_FALSE, QuestionType.SINGLE_CHOICE],
     });
     expect(result.map((q) => q.type)).toEqual([
       QuestionType.TRUE_FALSE,
