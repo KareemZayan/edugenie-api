@@ -8,6 +8,9 @@ export class Review {
   @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
   courseId: Types.ObjectId;
 
+  @Prop({ type: Types.ObjectId, required: true })
+  sectionId: Types.ObjectId;   // <-- NEW: id of the subdocument inside course.sections
+
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   studentId: Types.ObjectId;
 
@@ -25,4 +28,7 @@ export class Review {
 }
 
 export const ReviewSchema = SchemaFactory.createForClass(Review);
-ReviewSchema.index({ courseId: 1, studentId: 1 }, { unique: true });
+
+// CHANGED: was unique on {courseId, studentId} — one review per course.
+// Now it's one review per student PER SECTION.
+ReviewSchema.index({ courseId: 1, sectionId: 1, studentId: 1 }, { unique: true });
