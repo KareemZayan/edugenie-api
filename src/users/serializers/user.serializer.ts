@@ -44,6 +44,28 @@ export class UserSerializer implements UserResponse {
   @ApiProperty({ example: true })
   isVerified: boolean;
   @Expose()
+  @ApiProperty({ example: false, description: 'One-time onboarding completed' })
+  hasOnboarded?: boolean;
+  @Expose()
+  @ApiProperty({
+    required: false,
+    description: 'Raw onboarding answers + generated profile summary',
+  })
+  onboarding?: {
+    specialization: string;
+    currentLevel: string;
+    hoursPerWeek: string;
+    pace: string;
+    priorExperience: string;
+    endGoal: string;
+    learningStyle?: string;
+    knownTopics: string[];
+    focusTopics: string[];
+    extraNotes?: string;
+    profileSummary: string;
+    completedAt: Date;
+  };
+  @Expose()
   @ApiProperty({ example: '2026-01-15T10:30:00.000Z' })
   createdAt: Date;
   @Expose()

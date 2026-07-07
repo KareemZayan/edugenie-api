@@ -23,6 +23,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AiModule } from './ai/ai.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 import { PaymentsModule } from './payments/payments.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ProgressModule } from './progress/progress.module';
@@ -133,6 +134,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     ReviewsModule,
     NotificationsModule,
     AiModule,
+    OnboardingModule,
     PaymentsModule,
     WebhooksModule,
     ProgressModule,

@@ -29,11 +29,13 @@ export class RoadmapController {
   constructor(private readonly roadmap: RoadmapService) {}
 
   @Get('quota')
-  @ApiOperation({ summary: 'How many roadmap builds the user has left' })
+  @ApiOperation({
+    summary: "AI attempts left for the user's active roadmap (+ reset date)",
+  })
   @ApiBearerAuth()
   @ApiCookieAuth('jwt')
-  async quota(@CurrentUser() user: { userId: string }) {
-    return { remaining: await this.roadmap.remaining(user.userId) };
+  quota(@CurrentUser() user: { userId: string }) {
+    return this.roadmap.quota(user.userId);
   }
 
   @Post('build')
