@@ -14,6 +14,7 @@ import { ReviewSerializer } from './serializers/review.serializer';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
+import { PurchaseType } from '../common/enums/purchase-type.enum';
 @Injectable()
 export class ReviewsService {
   constructor(
@@ -93,13 +94,22 @@ export class ReviewsService {
     throw new BadRequestException('Invalid section ID');
   }
 
-  // 1. Verify Enrollment — TEMPORARILY BYPASSED for testing
-  // const enrollment = await this.enrollmentModel
-  //   .findOne({ courseId: new Types.ObjectId(dto.courseId), studentId: new Types.ObjectId(studentId) })
-  //   .exec();
-  // if (!enrollment) {
-  //   throw new ForbiddenException('You must be enrolled in this course to write a review.');
-  // }
+  // 1. Verify Enrollment — supports both full-course and section-only purchases
+  const enrollment = await this.enrollmentModel
+    .findOne({
+      courseId: new Types.ObjectId(dto.courseId),
+      studentId: new Types.ObjectId(studentId),
+      $or: [
+        { type: PurchaseType.FULL_COURSE },
+        { type: PurchaseType.SECTION, sectionIds: new Types.ObjectId(dto.sectionId) },
+      ],
+    })
+    .exec();
+  if (!enrollment) {
+    throw new ForbiddenException(
+      'You must be enrolled in this course or have purchased this section to write a review.',
+    );
+  }
 
   // 2. Fetch course once — used for section validation AND instructor notification later
   const course = await this.courseModel
