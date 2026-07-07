@@ -18,12 +18,13 @@ import {
 import { CourseCard, CourseCardDocument } from './schema/course-card.schema';
 import { EMBEDDINGS_PROVIDER } from './embeddings/embeddings.provider';
 import type { EmbeddingsProvider } from './embeddings/embeddings.provider';
-import { chunkText } from './chunking';
+import { chunkText, chunkSegments, TranscriptSegment } from './chunking';
 
 interface LeanLesson {
   _id: Types.ObjectId;
   title: string;
   transcript?: string;
+  transcriptSegments?: TranscriptSegment[];
 }
 interface LeanSection {
   _id: Types.ObjectId;
@@ -110,7 +111,13 @@ export class IndexingService {
         if (!transcript) continue;
         stats.lessonsWithTranscript++;
 
-        const hash = this.hash(`${this.embeddings.model}|${transcript}`);
+        // Hash over the segments when present so adding timestamps to a
+        // previously plain-text lesson invalidates its stale (start-less) chunks.
+        const segments = lesson.transcriptSegments?.length
+          ? lesson.transcriptSegments
+          : undefined;
+        const basis = segments ? JSON.stringify(segments) : transcript;
+        const hash = this.hash(`${this.embeddings.model}|${basis}`);
         const already = await this.chunkModel
           .findOne({ lessonId: lesson._id, contentHash: hash })
           .select('_id')
@@ -152,21 +159,32 @@ export class IndexingService {
     transcript: string,
     hash: string,
   ): Promise<number> {
-    const texts = chunkText(transcript);
-    if (!texts.length) return 0;
+    // Time-coded when segments exist (carries a per-chunk start for deep-links);
+    // otherwise plain windows with no start (legacy transcripts).
+    const segments = lesson.transcriptSegments?.length
+      ? lesson.transcriptSegments
+      : undefined;
+    const chunks = segments
+      ? chunkSegments(segments)
+      : chunkText(transcript).map((text) => ({ text, start: undefined }));
+    if (!chunks.length) return 0;
 
-    const vectors = await this.embeddings.embed(texts, 'document');
+    const vectors = await this.embeddings.embed(
+      chunks.map((c) => c.text),
+      'document',
+    );
 
     // Replace any prior chunks for this lesson, then insert the fresh set.
     await this.chunkModel.deleteMany({ lessonId: lesson._id }).exec();
-    const docs = texts.map((text, i) => ({
+    const docs = chunks.map((chunk, i) => ({
       courseId: course._id,
       sectionId: section._id,
       lessonId: lesson._id,
       lessonTitle: lesson.title,
       sectionTitle: section.title,
       ordinal: i,
-      text,
+      start: chunk.start,
+      text: chunk.text,
       embedding: vectors[i],
       dims: this.embeddings.dims,
       model: this.embeddings.model,

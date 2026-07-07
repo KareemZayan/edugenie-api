@@ -58,6 +58,8 @@ import { AttachmentsModule } from './attachments/attachments.module';
         // OpenAI embeddings fallback (text-embedding-3-small @768d), used only
         // when GEMINI_API_KEY is unset. Optional.
         OPEN_AI_API_KEY: Joi.string().allow('').optional(),
+        OPEN_AI_MODEL: Joi.string().allow('').optional(),
+        OPEN_AI_TRANSCRIBE_MODEL: Joi.string().allow('').optional(),
         // Gemini model for lesson audio transcription (default gemini-flash-latest).
         GEMINI_TRANSCRIBE_MODEL: Joi.string().allow('').optional(),
         // RAG retrieval backend. Default (false) ranks candidate embeddings with

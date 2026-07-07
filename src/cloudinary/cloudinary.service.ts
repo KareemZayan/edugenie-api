@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -6,7 +6,8 @@ import { v2 as cloudinary } from 'cloudinary';
 import { Course } from '../courses/schema/course.schema';
 import { CoursesService } from '../courses/courses.service';
 import { IndexingService } from '../rag/indexing.service';
-import { GeminiTranscriptionProvider } from '../ai/gemini-transcription.provider';
+import { TRANSCRIPTION_PROVIDER } from '../ai/transcription.provider';
+import type { TranscriptionProvider } from '../ai/transcription.provider';
 import { PendingTranscript } from './schema/pending-transcript.schema';
 import * as crypto from 'crypto';
 
@@ -23,7 +24,8 @@ export class CloudinaryService {
     private pendingTranscriptModel: Model<PendingTranscript>,
     private coursesService: CoursesService,
     private readonly indexing: IndexingService,
-    private readonly transcription: GeminiTranscriptionProvider,
+    @Inject(TRANSCRIPTION_PROVIDER)
+    private readonly transcription: TranscriptionProvider,
   ) {
     cloudinary.config({
       cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
@@ -213,19 +215,28 @@ export class CloudinaryService {
       this.logger.warn('GEMINI_API_KEY not set — skipping transcription');
       return;
     }
+    // Whether a good transcript already exists — so a FAILED force-regen doesn't
+    // downgrade a healthy lesson to 'failed' (its segments/text stay intact).
+    const hadReady = force && (await this.hasReadyTranscript(publicId));
     if (!force && (await this.hasReadyTranscript(publicId))) {
       return;
     }
     try {
       await this.markTranscriptStatus(publicId, 'pending');
       const audioUrl = this.audioUrlFor(publicId);
-      const text = await this.transcription.transcribeAudioUrl(audioUrl);
-      await this.saveTranscriptText(publicId, text);
+      const segments = await this.transcription.transcribeSegments(audioUrl);
+      const text = segments
+        .map((s) => s.text)
+        .join(' ')
+        .trim();
+      await this.saveTranscriptText(publicId, text, segments);
     } catch (err: any) {
       this.logger.warn(
         `Gemini transcription failed for ${publicId}: ${err?.message || err}`,
       );
-      await this.markTranscriptStatus(publicId, 'failed');
+      // Restore the prior 'ready' state on a failed re-gen; only mark 'failed'
+      // when there was no usable transcript to begin with.
+      await this.markTranscriptStatus(publicId, hadReady ? 'ready' : 'failed');
     }
   }
 
@@ -236,7 +247,11 @@ export class CloudinaryService {
    * PendingTranscript for adoption. This is the single save funnel — reused by
    * the Gemini path and by adoptTranscriptForPublicId.
    */
-  async saveTranscriptText(publicId: string, text: string): Promise<boolean> {
+  async saveTranscriptText(
+    publicId: string,
+    text: string,
+    segments?: { start: number; text: string }[],
+  ): Promise<boolean> {
     const transcript = (text || '').trim();
     if (!transcript) {
       await this.markTranscriptStatus(publicId, 'failed');
@@ -244,11 +259,17 @@ export class CloudinaryService {
       return false;
     }
 
+    // Only persist segments when they're time-coded and cover the transcript;
+    // a lone fallback segment (start 0) adds no seek value, so store text only.
+    const timed =
+      segments && segments.length > 1 ? segments : undefined;
+
     const result = await this.courseModel.updateOne(
       { 'sections.lessons.videoPublicId': publicId },
       {
         $set: {
           'sections.$[].lessons.$[l].transcript': transcript,
+          'sections.$[].lessons.$[l].transcriptSegments': timed,
           'sections.$[].lessons.$[l].transcriptStatus': 'ready',
         },
       },
@@ -269,7 +290,7 @@ export class CloudinaryService {
     // No lesson references this asset yet — park it; adopted on lesson create.
     await this.pendingTranscriptModel.updateOne(
       { videoPublicId: publicId },
-      { $set: { transcript, createdAt: new Date() } },
+      { $set: { transcript, transcriptSegments: timed, createdAt: new Date() } },
       { upsert: true },
     );
     this.logger.log(`No lesson yet for ${publicId} — parked transcript`);
@@ -283,10 +304,17 @@ export class CloudinaryService {
   async adoptTranscriptForPublicId(publicId: string): Promise<boolean> {
     const held = await this.pendingTranscriptModel
       .findOneAndDelete({ videoPublicId: publicId })
-      .lean<{ transcript?: string } | null>()
+      .lean<{
+        transcript?: string;
+        transcriptSegments?: { start: number; text: string }[];
+      } | null>()
       .exec();
     if (!held?.transcript) return false;
-    return this.saveTranscriptText(publicId, held.transcript);
+    return this.saveTranscriptText(
+      publicId,
+      held.transcript,
+      held.transcriptSegments,
+    );
   }
 
   /**

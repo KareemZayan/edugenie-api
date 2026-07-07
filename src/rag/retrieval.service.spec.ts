@@ -52,3 +52,51 @@ describe('RetrievalService.retrieveScoped (in-Node)', () => {
     expect(hits[0].score).toBeCloseTo(1); // identical vectors → cosine 1
   });
 });
+
+describe('RetrievalService.retrieveByText (literal substring)', () => {
+  const embeddings = {
+    model: 'gemini-embedding-001',
+    dims: 768,
+    isConfigured: true,
+    embed: jest.fn(),
+  };
+
+  const makeChunkModel = (rows: any[]) => {
+    const find = jest.fn().mockReturnValue({
+      select: () => ({
+        limit: () => ({ lean: () => ({ exec: () => Promise.resolve(rows) }) }),
+      }),
+    });
+    return { find } as any;
+  };
+
+  it('escapes the query, model-matches, and returns score-1 hits', async () => {
+    const courseId = new Types.ObjectId();
+    const chunkModel = makeChunkModel([
+      {
+        courseId,
+        lessonId: new Types.ObjectId(),
+        lessonTitle: 'Part 24',
+        sectionId: new Types.ObjectId(),
+        sectionTitle: 'S',
+        text: 'this is part 24',
+      },
+    ]);
+    const svc = new RetrievalService(chunkModel, {} as any, embeddings as any);
+
+    const hits = await svc.retrieveByText('part 24', { courseId: { $in: [courseId] } });
+
+    const passed = chunkModel.find.mock.calls[0][0];
+    expect(passed).toMatchObject({ model: 'gemini-embedding-001' });
+    // regex-special chars in the query are escaped into a literal matcher
+    expect(passed.$or[0].text.source).toBe('part 24');
+    expect(hits[0]).toMatchObject({ courseId: courseId.toString(), score: 1 });
+  });
+
+  it('returns [] for a blank query without hitting the DB', async () => {
+    const chunkModel = makeChunkModel([]);
+    const svc = new RetrievalService(chunkModel, {} as any, embeddings as any);
+    expect(await svc.retrieveByText('  ', { courseId: 1 })).toEqual([]);
+    expect(chunkModel.find).not.toHaveBeenCalled();
+  });
+});

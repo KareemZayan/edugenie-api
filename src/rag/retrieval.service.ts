@@ -15,6 +15,8 @@ export interface RetrievedChunk {
   lessonTitle: string;
   sectionId: string;
   sectionTitle: string;
+  /** Start time (seconds) in the lesson video, when the chunk is time-coded. */
+  start?: number;
   text: string;
   score: number;
 }
@@ -55,6 +57,7 @@ interface ChunkHit {
   lessonTitle?: string;
   sectionId?: Types.ObjectId;
   sectionTitle?: string;
+  start?: number;
   text?: string;
   score?: number;
 }
@@ -184,6 +187,45 @@ export class RetrievalService {
     return this.retrieveInNode(filter, queryVec, k, minScore);
   }
 
+  /**
+   * Literal (case-insensitive substring) match over chunk text + lesson/section
+   * titles, under a caller-supplied filter. Complements `retrieveScoped`: the
+   * vector space matches by *meaning*, so an exact phrase a student typed
+   * ("part 24", a product name) can be missed — this catches those verbatim.
+   * Fixed score 1 so an exact hit outranks any cosine result. Does not need
+   * embeddings configured; still model-matched so a provider switch doesn't
+   * surface stale duplicates.
+   */
+  async retrieveByText(
+    query: string,
+    filter: Record<string, unknown>,
+    k = 8,
+  ): Promise<RetrievedChunk[]> {
+    const q = query?.trim();
+    if (!q || !filter) return [];
+    const rx = new RegExp(escapeRegex(q), 'i');
+    const rows = await this.chunkModel
+      .find({
+        ...filter,
+        model: this.embeddings.model,
+        $or: [{ text: rx }, { lessonTitle: rx }, { sectionTitle: rx }],
+      } as Record<string, unknown>)
+      .select('courseId lessonId lessonTitle sectionId sectionTitle start text')
+      .limit(k)
+      .lean<ChunkHit[]>()
+      .exec();
+    return rows.map((c) => ({
+      courseId: c.courseId?.toString() ?? '',
+      lessonId: c.lessonId?.toString() ?? '',
+      lessonTitle: c.lessonTitle ?? '',
+      sectionId: c.sectionId?.toString() ?? '',
+      sectionTitle: c.sectionTitle ?? '',
+      start: c.start,
+      text: c.text ?? '',
+      score: 1,
+    }));
+  }
+
   // ── Atlas $vectorSearch backend ────────────────────────────────────────────
 
   private async retrieveCatalogVector(
@@ -253,6 +295,7 @@ export class RetrievalService {
           lessonTitle: 1,
           sectionId: 1,
           sectionTitle: 1,
+          start: 1,
           text: 1,
           score: { $meta: 'vectorSearchScore' },
         },
@@ -267,6 +310,7 @@ export class RetrievalService {
         lessonTitle: c.lessonTitle ?? '',
         sectionId: c.sectionId?.toString() ?? '',
         sectionTitle: c.sectionTitle ?? '',
+        start: c.start,
         text: c.text ?? '',
         score: c.score ?? 0,
       }))
@@ -316,7 +360,9 @@ export class RetrievalService {
         ...filter,
         model: this.embeddings.model,
       } as Record<string, unknown>)
-      .select('courseId lessonId lessonTitle sectionId sectionTitle text embedding')
+      .select(
+        'courseId lessonId lessonTitle sectionId sectionTitle start text embedding',
+      )
       .lean<ChunkVecRow[]>()
       .exec();
     if (!candidates.length) return [];
@@ -327,6 +373,7 @@ export class RetrievalService {
       lessonTitle: c.lessonTitle ?? '',
       sectionId: c.sectionId?.toString() ?? '',
       sectionTitle: c.sectionTitle ?? '',
+      start: c.start,
       text: c.text ?? '',
       score: cosine(queryVec, c.embedding),
     }));
@@ -385,6 +432,11 @@ export class RetrievalService {
 }
 
 /** Cosine similarity. Normalises internally, so inputs needn't be unit vectors. */
+/** Escape user input so it's a literal in a RegExp (no ReDoS / injection). */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function cosine(a: number[], b: number[]): number {
   if (!a || !b || a.length !== b.length) return 0;
   let dot = 0;
