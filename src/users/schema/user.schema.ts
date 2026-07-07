@@ -61,6 +61,47 @@ export class User extends Document {
   @Prop({ default: '' })
   roadmapQuotaMonth!: string;
 
+  // One-time onboarding gate: true once the student has completed the
+  // post-verification onboarding wizard. Drives the frontend gate — an
+  // email-verified student with this false is forced through /onboarding.
+  @Prop({ default: false })
+  hasOnboarded!: boolean;
+
+  // Raw onboarding answers (kept for later editing) plus a generated
+  // natural-language `profileSummary` fed to the AI roadmap/RAG. Set once the
+  // wizard is submitted. Absent until then.
+  @Prop({
+    type: {
+      specialization: { type: String },
+      currentLevel: { type: String },
+      hoursPerWeek: { type: String },
+      pace: { type: String },
+      priorExperience: { type: String },
+      endGoal: { type: String },
+      learningStyle: { type: String },
+      knownTopics: { type: [String], default: [] },
+      focusTopics: { type: [String], default: [] },
+      extraNotes: { type: String },
+      profileSummary: { type: String },
+      completedAt: { type: Date },
+    },
+    _id: false,
+  })
+  onboarding?: {
+    specialization: string;
+    currentLevel: string;
+    hoursPerWeek: string;
+    pace: string;
+    priorExperience: string;
+    endGoal: string;
+    learningStyle?: string;
+    knownTopics: string[];
+    focusTopics: string[];
+    extraNotes?: string;
+    profileSummary: string;
+    completedAt: Date;
+  };
+
   // Track instructor quiz generations (for rate limiting)
   @Prop({ default: 0 })
   quizGenerationsUsed!: number;

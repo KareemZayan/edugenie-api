@@ -94,6 +94,6 @@ import { CoachMissionsService } from './coach-missions.service';
     RoadmapService,
     RemediationService,
   ],
-  exports: [AiService, RemediationService],
+  exports: [AiService, RemediationService, RoadmapService],
 })
 export class AiModule {}

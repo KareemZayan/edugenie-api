@@ -61,6 +61,19 @@ export class Roadmap {
 
   @Prop({ type: Date, default: null })
   purchasedAt: Date | null;
+
+  // ── AI-usage budget (per-roadmap, fixed 30-day window) ─────────────────────
+  // Each roadmap gets 3 AI attempts per window. `aiWindowStart` is set to the
+  // moment of the FIRST AI attempt on this roadmap; the window runs 30 days from
+  // there. `aiAttemptsUsed` counts attempts inside the current window. When the
+  // window elapses the whole budget refills at once (computed, not stored). AI
+  // generation + regeneration each cost one attempt; manual edits cost nothing;
+  // the onboarding-exempt first build sets neither field.
+  @Prop({ default: 0 })
+  aiAttemptsUsed: number;
+
+  @Prop({ type: Date, default: null })
+  aiWindowStart: Date | null;
 }
 
 export type RoadmapDocument = HydratedDocument<Roadmap>;

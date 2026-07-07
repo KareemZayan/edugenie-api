@@ -22,9 +22,17 @@ import { AiService } from './ai.service';
 import { BuildRoadmapDto } from './dto/build-roadmap.dto';
 import { UpdateRoadmapDto } from './dto/update-roadmap.dto';
 
-// Roadmap builds allowed per calendar month.
+// AI attempts allowed PER ROADMAP inside one fixed 30-day window.
 const MAX_GENERATIONS = 3;
+const AI_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const CANDIDATE_COURSES = 6;
+
+/** A roadmap's per-window AI budget. `resetsAt` is null when no window is open. */
+interface WindowInfo {
+  remaining: number;
+  used: number;
+  resetsAt: Date | null;
+}
 
 interface CandidateSection {
   id: string;
@@ -62,52 +70,106 @@ export class RoadmapService {
     private ai: AiService,
   ) {}
 
-  // ── Quota (3 per calendar month) ───────────────────────────────────────────
+  // ── Per-roadmap AI budget (3 per fixed 30-day window) ──────────────────────
 
-  /** Current month as 'YYYY-MM'. */
-  private currentMonthKey(): string {
-    return new Date().toISOString().slice(0, 7);
-  }
-
-  async remaining(userId: string): Promise<number> {
-    const user = await this.userModel
-      .findById(userId)
-      .select('roadmapGenerationsUsed roadmapQuotaMonth')
-      .lean<{ roadmapGenerationsUsed?: number; roadmapQuotaMonth?: string }>();
-    // A new month means the stored count is stale → full quota again.
-    if (!user || user.roadmapQuotaMonth !== this.currentMonthKey()) {
-      return MAX_GENERATIONS;
+  /**
+   * Compute a roadmap's live AI budget from its stored window. FIXED window: if
+   * `now > windowStart + 30d` the whole budget is back (the next attempt opens a
+   * fresh window). A roadmap with no window yet (or none open) has the full
+   * budget and no reset date.
+   */
+  private windowInfo(doc: {
+    aiWindowStart?: Date | null;
+    aiAttemptsUsed?: number;
+  } | null): WindowInfo {
+    const start = doc?.aiWindowStart ? new Date(doc.aiWindowStart) : null;
+    if (!start || Date.now() > start.getTime() + AI_WINDOW_MS) {
+      return { remaining: MAX_GENERATIONS, used: 0, resetsAt: null };
     }
-    return Math.max(0, MAX_GENERATIONS - (user.roadmapGenerationsUsed ?? 0));
+    const used = doc?.aiAttemptsUsed ?? 0;
+    return {
+      remaining: Math.max(0, MAX_GENERATIONS - used),
+      used,
+      resetsAt: new Date(start.getTime() + AI_WINDOW_MS),
+    };
   }
 
-  /** Count one build against this month's quota (resetting on a new month). */
-  private async consumeGeneration(userId: string): Promise<void> {
-    const month = this.currentMonthKey();
-    const user = await this.userModel
-      .findById(userId)
-      .select('roadmapQuotaMonth')
-      .lean<{ roadmapQuotaMonth?: string }>();
-    if (user?.roadmapQuotaMonth === month) {
-      await this.userModel.updateOne(
-        { _id: new Types.ObjectId(userId) },
-        { $inc: { roadmapGenerationsUsed: 1 } },
+  /** The active roadmap's live budget (full budget when the user has none). */
+  private async activeWindow(userId: string): Promise<WindowInfo> {
+    const active = await this.roadmapModel
+      .findOne({ userId: new Types.ObjectId(userId), status: 'active' })
+      .select('aiWindowStart aiAttemptsUsed')
+      .lean<{ aiWindowStart?: Date | null; aiAttemptsUsed?: number }>();
+    return this.windowInfo(active);
+  }
+
+  /** Quota for the current user's active roadmap (drives the intake UI). */
+  async quota(
+    userId: string,
+  ): Promise<{ remaining: number; resetsAt: string | null; max: number }> {
+    const w = await this.activeWindow(userId);
+    return {
+      remaining: w.remaining,
+      resetsAt: w.resetsAt ? w.resetsAt.toISOString() : null,
+      max: MAX_GENERATIONS,
+    };
+  }
+
+  /** Kept for callers wanting just the number. */
+  async remaining(userId: string): Promise<number> {
+    return (await this.activeWindow(userId)).remaining;
+  }
+
+  /**
+   * Charge ONE AI attempt to a roadmap. Fixed window: if none is open (or it has
+   * elapsed) start a fresh one at `now` with used=1; otherwise increment inside
+   * the current window (which does NOT move the boundary).
+   */
+  private async consumeAttempt(roadmapId: Types.ObjectId): Promise<void> {
+    const doc = await this.roadmapModel
+      .findById(roadmapId)
+      .select('aiWindowStart aiAttemptsUsed')
+      .lean<{ aiWindowStart?: Date | null; aiAttemptsUsed?: number }>();
+    const start = doc?.aiWindowStart ? new Date(doc.aiWindowStart) : null;
+    const windowOpen = !!start && Date.now() <= start.getTime() + AI_WINDOW_MS;
+    if (windowOpen) {
+      await this.roadmapModel.updateOne(
+        { _id: roadmapId },
+        { $inc: { aiAttemptsUsed: 1 } },
       );
     } else {
-      await this.userModel.updateOne(
-        { _id: new Types.ObjectId(userId) },
-        { $set: { roadmapQuotaMonth: month, roadmapGenerationsUsed: 1 } },
+      await this.roadmapModel.updateOne(
+        { _id: roadmapId },
+        { $set: { aiWindowStart: new Date(), aiAttemptsUsed: 1 } },
       );
     }
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
 
-  async build(userId: string, dto: BuildRoadmapDto) {
-    const left = await this.remaining(userId);
-    if (left <= 0) {
+  /**
+   * @param opts.skipQuota when true, neither enforces nor consumes an AI attempt
+   *   AND does not open the roadmap's 30-day window. Used for the one-time
+   *   post-onboarding roadmap, which is attempt-exempt (free).
+   */
+  async build(
+    userId: string,
+    dto: BuildRoadmapDto,
+    opts: { skipQuota?: boolean } = {},
+  ) {
+    // Resolve the target roadmap first (collapse dup drafts; archive the active
+    // one if already bought so a fresh doc — with a fresh budget — is inserted),
+    // THEN read the surviving active roadmap's budget to enforce against.
+    await this.normalizeActive(userId);
+    await this.archiveActiveIfOwned(userId);
+
+    const win = await this.activeWindow(userId);
+    if (!opts.skipQuota && win.remaining <= 0) {
+      const on = win.resetsAt
+        ? ` They reset on ${win.resetsAt.toISOString().slice(0, 10)}.`
+        : '';
       throw new ForbiddenException(
-        `You've used all ${MAX_GENERATIONS} roadmap generations this month.`,
+        `No AI attempts left for this roadmap (${MAX_GENERATIONS} per 30 days).${on}`,
       );
     }
 
@@ -133,13 +195,9 @@ export class RoadmapService {
       `Here's a step-by-step path toward "${dto.goal}". Work through the milestones in order.`;
     const benefits = this.resolveBenefits(plan, dto, milestones);
 
-    // Single-active model: a user keeps ONE active roadmap. Collapse any legacy
-    // duplicate active drafts first, then — if the current active one has already
-    // been (partly) bought, archive it to history rather than lose it; otherwise
-    // the upsert below overwrites it in place.
-    await this.normalizeActive(userId);
-    await this.archiveActiveIfOwned(userId);
-
+    // Upsert the single active roadmap. Overwriting in place (regeneration)
+    // preserves its AI window; a fresh insert (after an archive/first build)
+    // starts with the schema-default budget (0 used / no window).
     const doc = await this.roadmapModel.findOneAndUpdate(
       { userId: new Types.ObjectId(userId), status: 'active' },
       {
@@ -157,12 +215,17 @@ export class RoadmapService {
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
 
-    await this.consumeGeneration(userId);
+    // Charge the attempt to THIS roadmap (opening its window on the first one).
+    // The onboarding-exempt build skips this entirely — free, window untouched.
+    if (!opts.skipQuota) {
+      await this.consumeAttempt(doc._id as Types.ObjectId);
+      // Re-read so the serialized budget reflects the attempt just spent (the
+      // `doc` above predates the consume update).
+      const fresh = await this.roadmapModel.findById(doc._id).lean();
+      if (fresh) return this.serialize(fresh as Roadmap & { _id: Types.ObjectId });
+    }
 
-    return {
-      ...this.serialize(doc as Roadmap & { _id: Types.ObjectId }),
-      generationsRemaining: Math.max(0, left - 1),
-    };
+    return this.serialize(doc as Roadmap & { _id: Types.ObjectId });
   }
 
   /** Archive the active roadmap to 'purchased' if the student owns ≥1 item. */
@@ -654,7 +717,15 @@ export class RoadmapService {
 
   // ── Serialize ────────────────────────────────────────────────────────────
 
-  private serialize(doc: Roadmap & { _id?: Types.ObjectId; createdAt?: Date }) {
+  private serialize(
+    doc: Roadmap & {
+      _id?: Types.ObjectId;
+      createdAt?: Date;
+      aiWindowStart?: Date | null;
+      aiAttemptsUsed?: number;
+    },
+  ) {
+    const w = this.windowInfo(doc);
     return {
       id: String(doc._id),
       goal: doc.goal,
@@ -667,6 +738,13 @@ export class RoadmapService {
       status: doc.status,
       purchasedAt: doc.purchasedAt ?? null,
       createdAt: doc.createdAt ?? null,
+      // Per-roadmap AI budget (fixed 30-day window).
+      aiRemaining: w.remaining,
+      aiAttemptsUsed: w.used,
+      aiMax: MAX_GENERATIONS,
+      aiResetsAt: w.resetsAt ? w.resetsAt.toISOString() : null,
+      // Back-compat alias the intake UI reads after a build.
+      generationsRemaining: w.remaining,
     };
   }
 }

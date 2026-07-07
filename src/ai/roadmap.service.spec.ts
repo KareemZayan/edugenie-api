@@ -9,7 +9,9 @@ const q = (value: unknown) => ({
   exec: () => Promise.resolve(value),
 });
 
-const currentMonth = new Date().toISOString().slice(0, 7);
+const DAY = 24 * 60 * 60 * 1000;
+const daysAgo = (n: number) => new Date(Date.now() - n * DAY);
+const U = new Types.ObjectId().toString();
 
 describe('RoadmapService', () => {
   let roadmapModel: any;
@@ -43,36 +45,56 @@ describe('RoadmapService', () => {
 
   beforeEach(build);
 
-  describe('remaining (3 per calendar month)', () => {
-    it('returns full quota when the stored month is stale', async () => {
-      userModel.findById.mockReturnValue(
-        q({ roadmapGenerationsUsed: 3, roadmapQuotaMonth: '2000-01' }),
-      );
-      expect(await service.remaining('u1')).toBe(3);
+  describe('quota — per-roadmap, fixed 30-day window', () => {
+    it('full budget + no reset when the user has no active roadmap', async () => {
+      roadmapModel.findOne.mockReturnValue(q(null));
+      expect(await service.quota(U)).toEqual({
+        remaining: 3,
+        resetsAt: null,
+        max: 3,
+      });
     });
 
-    it('subtracts this month usage', async () => {
-      userModel.findById.mockReturnValue(
-        q({ roadmapGenerationsUsed: 2, roadmapQuotaMonth: currentMonth }),
+    it('subtracts attempts used inside an open window and reports the reset date', async () => {
+      const start = daysAgo(10);
+      roadmapModel.findOne.mockReturnValue(
+        q({ aiWindowStart: start, aiAttemptsUsed: 2 }),
       );
-      expect(await service.remaining('u1')).toBe(1);
+      const res = await service.quota(U);
+      expect(res.remaining).toBe(1);
+      // resets 30 days after the window start
+      expect(new Date(res.resetsAt!).getTime()).toBe(start.getTime() + 30 * DAY);
     });
 
-    it('is 0 when this month is exhausted', async () => {
-      userModel.findById.mockReturnValue(
-        q({ roadmapGenerationsUsed: 3, roadmapQuotaMonth: currentMonth }),
+    it('is 0 when the window is exhausted', async () => {
+      roadmapModel.findOne.mockReturnValue(
+        q({ aiWindowStart: daysAgo(5), aiAttemptsUsed: 3 }),
       );
-      expect(await service.remaining('u1')).toBe(0);
+      expect((await service.quota(U)).remaining).toBe(0);
+    });
+
+    it('refills the whole budget once the 30-day window has elapsed', async () => {
+      roadmapModel.findOne.mockReturnValue(
+        q({ aiWindowStart: daysAgo(31), aiAttemptsUsed: 3 }),
+      );
+      const res = await service.quota(U);
+      expect(res.remaining).toBe(3);
+      expect(res.resetsAt).toBeNull();
     });
   });
 
-  describe('build', () => {
-    it('blocks when the month quota is used up', async () => {
-      userModel.findById.mockReturnValue(
-        q({ roadmapGenerationsUsed: 3, roadmapQuotaMonth: currentMonth }),
+  describe('build — enforces the active roadmap window', () => {
+    it('blocks AI generation when the window is exhausted', async () => {
+      // normalizeActive: one active draft (no prune)
+      roadmapModel.find.mockReturnValue({
+        sort: () => ({ lean: () => Promise.resolve([{ _id: new Types.ObjectId(), status: 'active' }]) }),
+      });
+      // archiveActiveIfOwned (no items → early return) AND activeWindow (exhausted)
+      roadmapModel.findOne.mockReturnValue(
+        q({ items: [], aiWindowStart: daysAgo(3), aiAttemptsUsed: 3 }),
       );
       await expect(
-        service.build('u1', { goal: 'x' } as any),
+        service.build(U, { goal: 'x' } as any),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
