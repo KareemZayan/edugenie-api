@@ -18,6 +18,7 @@ import { CreateQuizDto } from './dto/create-quiz.dto';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { SubmitQuizDto } from './dto/submit-quiz.dto';
 import { ApproveQuizDto, EditedQuestionDto } from './dto/approve-quiz.dto';
+import { SaveManualDraftDto } from './dto/save-manual-draft.dto';
 import { QuizGenerationStatus } from '../common/enums/questionsGenerationStatus.enum';
 import { QuizDifficulty } from '../common/enums/quizDifficulty.enum';
 import { QuestionType } from '../common/enums/questionsType.enum';
@@ -31,7 +32,7 @@ import {
   QuizSubmitResponse,
   QuizAttemptsHistoryResponse,
 } from '../common/interfaces/frontend-contracts';
-import { QUIZ_REGEN_ENROLLMENT_THRESHOLD, MAX_QUIZZES_PER_SECTION } from '../common/constants/quiz.constant';
+import { QUIZ_REGEN_ENROLLMENT_THRESHOLD, MAX_QUIZZES_PER_SECTION, MAX_PENDING_QUIZZES_PER_SECTION, MAX_QUESTIONS_PER_QUIZ } from '../common/constants/quiz.constant';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { CertificatesService } from '../certificates/certificates.service';
@@ -73,49 +74,112 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
   
   const courseId = course._id.toString();
 
-  // Step 1: Check if there's a pending_review quiz for this section
-  const pendingQuiz = await this.quizModel.findOne({
-    sectionId: new Types.ObjectId(dto.sectionId),
-    status: 'pending_review',
-  });
+  // ─── APPEND MODE: Adding AI questions to existing manual quiz ──────────────
+  if (dto.quizId) {
+    const quiz = await this.quizModel.findById(new Types.ObjectId(dto.quizId)).exec();
+    if (!quiz) throw new NotFoundException('Quiz not found');
 
-  // Step 2: If regenerating a pending quiz, skip all checks
-  if (pendingQuiz) {
-    console.log(`[QUIZ GENERATION] Regenerating pending quiz for section ${dto.sectionId}`);
-  } else {
-    // This is a NEW quiz generation - check all limits
-    
-    // Get all approved quizzes for this section, sorted by creation date
-    const approvedQuizzes = await this.quizModel
-      .find({
-        sectionId: new Types.ObjectId(dto.sectionId),
-        status: 'approved',
-      })
-      .sort({ createdAt: -1 })
-      .exec();
-    
-    const approvedCount = approvedQuizzes.length;
+    // Verify quiz belongs to this section
+    if (quiz.sectionId.toString() !== new Types.ObjectId(dto.sectionId).toString()) {
+      throw new BadRequestException('Quiz does not belong to this section');
+    }
 
-    // Check: Maximum quizzes per section limit (5)
-    if (approvedCount >= MAX_QUIZZES_PER_SECTION) {
-      throw new ForbiddenException(
-        `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} quizzes. No more quizzes can be generated.`,
+    // Verify quiz is still pending (not approved)
+    if (quiz.status === 'approved') {
+      throw new BadRequestException('Cannot add questions to an approved quiz');
+    }
+
+    // Calculate how many questions we can still add
+    const currentQuestionCount = quiz.questions.length;
+    const requestedNewQuestions = dto.numberOfQuestions;
+    const totalWillBe = currentQuestionCount + requestedNewQuestions;
+
+    if (totalWillBe > MAX_QUESTIONS_PER_QUIZ) {
+      throw new BadRequestException(
+        `Cannot add ${requestedNewQuestions} questions. Quiz currently has ${currentQuestionCount} questions. ` +
+        `Maximum total is ${MAX_QUESTIONS_PER_QUIZ}. You can add up to ${MAX_QUESTIONS_PER_QUIZ - currentQuestionCount} more questions.`,
       );
     }
-    
-    // Calculate the next quiz generation number
-    const nextQuizNumber = approvedCount + 1;
-    console.log(`[QUIZ GENERATION] Allowing quiz #${nextQuizNumber} for section ${dto.sectionId}.`);
+
+    try {
+      console.log(`[QUIZ APPEND] Appending ${requestedNewQuestions} AI questions to quiz ${dto.quizId}`);
+      
+      const questions = await this.aiService.generateQuizQuestions({
+        sectionTitle: content.sectionTitle,
+        sectionDescription: content.sectionDescription,
+        lessons: content.lessons,
+        difficulty: dto.difficulty,
+        questionTypes: dto.questionTypes,
+        numberOfQuestions: requestedNewQuestions,
+      });
+
+      // Append the new AI questions to existing questions
+      quiz.questions = [
+        ...quiz.questions,
+        ...(questions as unknown as QuizQuestion[]),
+      ];
+      quiz.numberOfQuestions = quiz.questions.length;
+      await quiz.save();
+
+      console.log(`[QUIZ APPEND] Successfully appended ${questions.length} questions to quiz #${quiz.quizGenerationNumber}. Total now: ${quiz.questions.length}`);
+
+      return {
+        message: `Successfully added ${questions.length} AI questions. Quiz now has ${quiz.questions.length} total questions.`,
+        quiz: new QuizSerializer(
+          quiz.toObject() as unknown as Partial<QuizSerializer>,
+        ),
+      };
+    } catch (error) {
+      console.error('[QUIZ APPEND] Error appending questions:', error);
+      throw error;
+    }
   }
 
-  // Step 3: Delete all non-approved quizzes (pending_review, rejected, etc.) when generating new quiz
-  // This ensures clean state - only one "in-progress" quiz per section at a time
-  const deletedResult = await this.quizModel.deleteMany({
-    sectionId: new Types.ObjectId(dto.sectionId),
-    status: { $ne: 'approved' },
-  });
-  if (deletedResult.deletedCount > 0) {
-    console.log(`[QUIZ GENERATION] Deleted ${deletedResult.deletedCount} non-approved quiz(es) for section ${dto.sectionId}`);
+  // ─── REPLACE MODE: Creating new quiz from scratch ──────────────────────────
+  // Check total quiz count (pending + approved) combined
+  const allQuizzes = await this.quizModel
+    .find({
+      sectionId: new Types.ObjectId(dto.sectionId),
+      status: { $in: ['pending_review', 'approved'] },
+    })
+    .exec();
+
+  const totalQuizCount = allQuizzes.length;
+
+  // Check: Maximum total quizzes per section limit (5 total: pending + approved combined)
+  if (totalQuizCount >= MAX_QUIZZES_PER_SECTION) {
+    throw new ForbiddenException(
+      `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} total quizzes (pending + approved combined). Delete or approve some pending quizzes before generating a new one.`,
+    );
+  }
+
+  // Count approved quizzes for numbering purposes
+  const approvedQuizzes = await this.quizModel
+    .find({
+      sectionId: new Types.ObjectId(dto.sectionId),
+      status: 'approved',
+    })
+    .sort({ createdAt: -1 })
+    .exec();
+  
+  const approvedCount = approvedQuizzes.length;
+  
+  // Calculate the next quiz generation number
+  const nextQuizNumber = approvedCount + 1;
+  console.log(`[QUIZ GENERATION] Allowing quiz #${nextQuizNumber} for section ${dto.sectionId}. (${totalQuizCount} total quizzes, ${approvedCount} approved)`);
+
+  // ─── ARCHITECTURAL NOTE ─────────────────────────────────────────────────────
+  // Manual quiz drafts are auto-saved via upsertManualDraft() while the instructor
+  // edits. AI-generated quizzes are persisted here immediately on generation.
+  // approveQuiz() performs the authoritative MAX_QUESTIONS_PER_QUIZ validation
+  // before final publication.
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // Validate question count (new questions can't exceed MAX_QUESTIONS_PER_QUIZ)
+  if (dto.numberOfQuestions > MAX_QUESTIONS_PER_QUIZ) {
+    throw new BadRequestException(
+      `Cannot generate more than ${MAX_QUESTIONS_PER_QUIZ} questions per quiz.`,
+    );
   }
 
   const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
@@ -123,20 +187,21 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
     dto.sectionId,
   );
 
-  // Calculate the quiz generation number for this new quiz
-  const approvedCount = await this.quizModel.countDocuments({
+  // Calculate the quiz generation number for this new quiz based on approved count
+  const approvedCountForNumber = await this.quizModel.countDocuments({
     sectionId: new Types.ObjectId(dto.sectionId),
     status: 'approved',
   });
   
-  const quizGenerationNumber = approvedCount + 1;
+  const quizGenerationNumber = approvedCountForNumber + 1;
 
   const quiz = await this.quizModel.create({
     sectionId: new Types.ObjectId(dto.sectionId),
     difficulty: dto.difficulty,
     numberOfQuestions: dto.numberOfQuestions,
-    questionType: dto.questionType,
+    questionTypes: dto.questionTypes,
     generationStatus: QuizGenerationStatus.GENERATING,
+    status: 'pending_review',
     passingScore: 80,
     questions: [],
     enrollmentCountAtGeneration: currentEnrollmentCount,
@@ -150,7 +215,7 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
       sectionDescription: content.sectionDescription,
       lessons: content.lessons,
       difficulty: dto.difficulty,
-      questionType: dto.questionType,
+      questionTypes: dto.questionTypes,
       numberOfQuestions: dto.numberOfQuestions,
     });
 
@@ -179,31 +244,31 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
  * Any pending_review quiz has already been deleted by the time this runs,
  * so the baseline here is always the last approved snapshot.
  */
-      private async assertEnoughNewEnrollments(
-        sectionId: string,
-        currentEnrollmentCount: number,
-      ): Promise<void> {
-        const lastApprovedQuiz = await this.quizModel
-          .findOne({
-            sectionId: new Types.ObjectId(sectionId),
-            status: 'approved',
-          })
-          .sort({ createdAt: -1 })
-          .select('enrollmentCountAtGeneration')
-          .exec();
+private async assertEnoughNewEnrollments(
+  sectionId: string,
+  currentEnrollmentCount: number,
+): Promise<void> {
+  const lastApprovedQuiz = await this.quizModel
+    .findOne({
+      sectionId: new Types.ObjectId(sectionId),
+      status: 'approved',
+    })
+    .sort({ createdAt: -1 })
+    .select('enrollmentCountAtGeneration')
+    .exec();
 
-        if (!lastApprovedQuiz) return;
+  if (!lastApprovedQuiz) return;
 
-        const newEnrollments =
-          currentEnrollmentCount - lastApprovedQuiz.enrollmentCountAtGeneration;
+  const newEnrollments =
+    currentEnrollmentCount - lastApprovedQuiz.enrollmentCountAtGeneration;
 
-        if (newEnrollments < QUIZ_REGEN_ENROLLMENT_THRESHOLD) {
-          const remaining = QUIZ_REGEN_ENROLLMENT_THRESHOLD - newEnrollments;
-          throw new BadRequestException(
-            `Not enough new enrollments yet — ${remaining} more student(s) must enroll in this section before you can generate another quiz.`,
-          );
-        }
-      }
+  if (newEnrollments < QUIZ_REGEN_ENROLLMENT_THRESHOLD) {
+    const remaining = QUIZ_REGEN_ENROLLMENT_THRESHOLD - newEnrollments;
+    throw new BadRequestException(
+      `Not enough new enrollments yet — ${remaining} more student(s) must enroll in this section before you can generate another quiz.`,
+    );
+  }
+}
 
   /**
    * Collect the lesson titles + transcripts for a section, used as grounding
@@ -292,7 +357,6 @@ async saveQuizConfig(dto: CreateQuizDto, instructorId: string) {
     attemptNumber: attemptCount + 1,
     maxAttempts: quiz.maxAttempts,
     attemptsRemaining: quiz.maxAttempts - attemptCount,
-    questionType: quiz.questionType,
     questions,
   };
 }
@@ -693,6 +757,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
         const questionObj = q as unknown as {
           _id?: Types.ObjectId;
           questionText: string;
+          type: string;
           options: string[];
           correctAnswers: string[];
           isIgnored?: boolean;
@@ -703,6 +768,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
             ? questionObj._id.toString()
             : index.toString(),
           text: questionObj.questionText,
+          type: questionObj.type,
           options: questionObj.options.map((opt: string) => ({
             optionId: opt,
             text: opt,
@@ -713,6 +779,115 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
         };
       }),
     };
+  }
+
+  private mapManualDraftQuestions(questions: EditedQuestionDto[]): QuizQuestion[] {
+    return questions.map((q) => ({
+      _id: q.questionId ? new Types.ObjectId(q.questionId) : new Types.ObjectId(),
+      questionText: q.questionText,
+      type: q.type,
+      options: q.options,
+      correctAnswers: q.correctAnswers,
+      isIgnored: false,
+      createdBy: 'INSTRUCTOR' as const,
+    }));
+  }
+
+  async upsertManualDraft(
+    quizId: string | null,
+    dto: SaveManualDraftDto,
+    instructorId: string,
+  ): Promise<{ quizId: string | null }> {
+    if (dto.questions.length > MAX_QUESTIONS_PER_QUIZ) {
+      throw new BadRequestException(
+        `A quiz cannot contain more than ${MAX_QUESTIONS_PER_QUIZ} questions. ` +
+        `Remove ${dto.questions.length - MAX_QUESTIONS_PER_QUIZ} question(s) before saving.`,
+      );
+    }
+
+    const isNewDraft =
+      !quizId || quizId === 'new' || quizId === 'undefined';
+
+    if (isNewDraft) {
+      if (dto.questions.length === 0) {
+        return { quizId: null };
+      }
+
+      const course = await this.courseModel
+        .findOne({ 'sections._id': new Types.ObjectId(dto.sectionId) })
+        .select('instructorId _id')
+        .exec();
+      if (!course) throw new NotFoundException('Section not found');
+      if (course.instructorId.toString() !== instructorId) {
+        throw new ForbiddenException('You do not own this section');
+      }
+
+      // Check total quizzes limit (pending + approved combined)
+      const totalQuizCount = await this.quizModel.countDocuments({
+        sectionId: new Types.ObjectId(dto.sectionId),
+        status: { $in: ['pending_review', 'approved'] },
+      });
+
+      if (totalQuizCount >= MAX_QUIZZES_PER_SECTION) {
+        throw new ForbiddenException(
+          `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} total quizzes (pending + approved combined). Delete or approve some quizzes before creating a new one.`,
+        );
+      }
+
+      // Count approved quizzes for numbering purposes
+      const approvedCount = await this.quizModel.countDocuments({
+        sectionId: new Types.ObjectId(dto.sectionId),
+        status: 'approved',
+      });
+
+      const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
+        course._id.toString(),
+        dto.sectionId,
+      );
+
+      const quiz = await this.quizModel.create({
+        sectionId: new Types.ObjectId(dto.sectionId),
+        difficulty: null,
+        numberOfQuestions: dto.questions.length,
+        questionTypes: [],
+        generationStatus: QuizGenerationStatus.COMPLETED,
+        status: 'pending_review',
+        passingScore: 80,
+        questions: this.mapManualDraftQuestions(dto.questions),
+        enrollmentCountAtGeneration: currentEnrollmentCount,
+        quizGenerationNumber: approvedCount + 1,
+        enrollmentCountAtApproval: 0,
+      });
+
+      return { quizId: quiz._id.toString() };
+    }
+
+    const quiz = await this.quizModel.findById(quizId).exec();
+    if (!quiz) throw new NotFoundException('Quiz not found');
+
+    const course = await this.courseModel
+      .findOne({ 'sections._id': quiz.sectionId })
+      .select('instructorId _id')
+      .exec();
+    if (!course) throw new NotFoundException('Course for this quiz not found');
+    if (course.instructorId.toString() !== instructorId) {
+      throw new ForbiddenException('You do not own this quiz');
+    }
+
+    if (quiz.status === 'approved') {
+      throw new BadRequestException('Cannot modify an approved quiz');
+    }
+
+    if (dto.questions.length === 0) {
+      await this.quizModel.deleteOne({ _id: quiz._id }).exec();
+      return { quizId: null };
+    }
+
+    quiz.questions = this.mapManualDraftQuestions(dto.questions) as typeof quiz.questions;
+    quiz.numberOfQuestions = dto.questions.length;
+    await quiz.save();
+
+    return { quizId: quiz._id.toString() };
   }
 
   async approveQuiz(
@@ -735,21 +910,21 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
         throw new ForbiddenException('You do not own this section');
       }
 
-      // Check: Maximum quizzes per section limit (5)
-      const approvedCount = await this.quizModel.countDocuments({
+      // Check: Maximum total quizzes per section limit (5 total: pending + approved combined)
+      const totalQuizCount = await this.quizModel.countDocuments({
         sectionId: new Types.ObjectId(dto.sectionId),
-        status: 'approved',
+        status: { $in: ['pending_review', 'approved'] },
       });
-      if (approvedCount >= MAX_QUIZZES_PER_SECTION) {
+      if (totalQuizCount >= MAX_QUIZZES_PER_SECTION) {
         throw new ForbiddenException(
-          `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} quizzes.`,
+          `This section has reached the maximum limit of ${MAX_QUIZZES_PER_SECTION} total quizzes (pending + approved combined).`,
         );
       }
 
-      // Delete non-approved quizzes
-      await this.quizModel.deleteMany({
+      // Get approved count for numbering
+      const approvedCount = await this.quizModel.countDocuments({
         sectionId: new Types.ObjectId(dto.sectionId),
-        status: { $ne: 'approved' },
+        status: 'approved',
       });
 
       const currentEnrollmentCount = await this.enrollmentsService.countEnrollmentsForSection(
@@ -759,10 +934,12 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
 
       quiz = await this.quizModel.create({
         sectionId: new Types.ObjectId(dto.sectionId),
-        difficulty: QuizDifficulty.MEDIUM,
+        difficulty: null,
         numberOfQuestions: dto.editedQuestions?.length || 0,
-        questionType: QuestionType.MIXED,
+        // Manual quizzes have no AI generation configuration; store empty array.
+        questionTypes: [],
         generationStatus: QuizGenerationStatus.COMPLETED,
+        status: 'approved',
         passingScore: 80,
         questions: [],
         enrollmentCountAtGeneration: currentEnrollmentCount,
@@ -783,8 +960,12 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       if (course.instructorId.toString() !== instructorId) {
         throw new ForbiddenException('You do not own this quiz');
       }
-    }
 
+      // Can only approve pending_review quizzes
+      if (quiz.status !== 'pending_review') {
+        throw new BadRequestException('Only pending review quizzes can be approved');
+      }
+    }
 
     const editedQuestions: EditedQuestionDto[] = dto.editedQuestions ?? [];
 
@@ -833,6 +1014,15 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       }
     }
 
+    // Authoritative 20-question cap — enforced here even if the frontend is bypassed.
+    // NOTE: This counts ALL persisted questions (including ignored ones) because ignored
+    // questions still occupy storage. Ignoring a question does not free a slot.
+    if (quiz.questions.length > MAX_QUESTIONS_PER_QUIZ) {
+      throw new BadRequestException(
+        `A quiz cannot contain more than ${MAX_QUESTIONS_PER_QUIZ} questions. ` +
+        `Remove ${quiz.questions.length - MAX_QUESTIONS_PER_QUIZ} question(s) before approving.`,
+      );
+    }
 
     // Guard: a quiz must retain at least one active (non-ignored) question.
     const activeCount = quiz.questions.filter(
@@ -863,7 +1053,6 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
     };
   }
 
-
   async findOneForInstructorBySection(sectionId: string, instructorId: string) {
   if (!Types.ObjectId.isValid(sectionId)) {
     throw new BadRequestException('Invalid section ID');
@@ -893,13 +1082,14 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
     sectionId: quiz.sectionId.toString(),
     difficulty: quiz.difficulty,
     numberOfQuestions: quiz.numberOfQuestions,
-    questionType: quiz.questionType,
+    questionTypes: quiz.questionTypes,
     generationStatus: quiz.generationStatus,
     status: quiz.status,
     questions: quiz.questions.map((q, index: number) => {
       const questionObj = q as unknown as {
         _id?: Types.ObjectId;
         questionText: string;
+        type: string;
         options: string[];
         correctAnswers: string[];
         isIgnored?: boolean;
@@ -910,6 +1100,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
           ? questionObj._id.toString()
           : index.toString(),
         text: questionObj.questionText,
+        type: questionObj.type,
         options: questionObj.options.map((opt: string) => ({
           optionId: opt,
           text: opt,
@@ -950,7 +1141,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
         quizId: quiz._id.toString(),
         difficulty: quiz.difficulty,
         numberOfQuestions: quiz.numberOfQuestions,
-        questionType: quiz.questionType,
+        questionTypes: quiz.questionTypes,
         generationStatus: quiz.generationStatus,
         status: quiz.status,
         timeLimit: quiz.timeLimit,
@@ -963,6 +1154,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
           const questionObj = q as unknown as {
             _id?: Types.ObjectId;
             questionText: string;
+            type: string;
             options: string[];
             correctAnswers: string[];
             isIgnored?: boolean;
@@ -973,6 +1165,7 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
               ? questionObj._id.toString()
               : index.toString(),
             text: questionObj.questionText,
+            type: questionObj.type,
             options: questionObj.options.map((opt: string) => ({
               optionId: opt,
               text: opt,
@@ -1059,6 +1252,43 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       canGenerateQuiz: approvedCount < MAX_QUIZZES_PER_SECTION,
       hasApprovedQuiz: !!lastApprovedQuiz,
       lastApprovedQuizGeneration: lastApprovedQuiz?.quizGenerationNumber || 0,
+    };
+  }
+
+  /**
+   * Delete a pending_review quiz. Approved quizzes cannot be deleted.
+   */
+  async deletePendingQuiz(quizId: string, instructorId: string): Promise<{ success: boolean; message: string }> {
+    if (!Types.ObjectId.isValid(quizId)) {
+      throw new BadRequestException('Invalid quiz ID');
+    }
+
+    const quiz = await this.quizModel.findById(new Types.ObjectId(quizId)).exec();
+    if (!quiz) {
+      throw new NotFoundException('Quiz not found');
+    }
+
+    // Verify the instructor owns the course
+    const course = await this.courseModel
+      .findOne({ 'sections._id': quiz.sectionId })
+      .select('instructorId')
+      .exec();
+    
+    if (!course || course.instructorId.toString() !== instructorId) {
+      throw new ForbiddenException('You do not own this quiz');
+    }
+
+    // Prevent deletion of approved quizzes
+    if (quiz.status === 'approved') {
+      throw new ForbiddenException('Cannot delete an approved quiz');
+    }
+
+    // Delete the quiz
+    await this.quizModel.deleteOne({ _id: new Types.ObjectId(quizId) }).exec();
+
+    return {
+      success: true,
+      message: 'Pending quiz deleted successfully',
     };
   }
 

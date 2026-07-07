@@ -10,14 +10,14 @@ export class QuizSerializer {
   @ApiProperty({ example: '507f1f77bcf86cd799439011' })
   sectionId: string;
   @Expose()
-  @ApiProperty({ example: 'string_example' })
-  difficulty: string;
+  @ApiProperty({ example: 'MEDIUM', nullable: true })
+  difficulty: string | null;
   @Expose()
   @ApiProperty({ example: 1 })
   numberOfQuestions: number;
   @Expose()
-  @ApiProperty({ example: 'string_example' })
-  questionType: string;
+  @ApiProperty({ example: ['SINGLE_CHOICE', 'TRUE_FALSE'], type: [String] })
+  questionTypes: string[];
   @Expose()
   @ApiProperty({ example: 'string_example' })
   generationStatus: string;

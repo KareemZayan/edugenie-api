@@ -52,7 +52,6 @@ export enum QuestionType {
   SINGLE_CHOICE = 'SINGLE_CHOICE',
   MULTI_CHOICE = 'MULTI_CHOICE',
   TRUE_FALSE = 'TRUE_FALSE',
-  MIXED = 'MIXED',
 }
 
 export enum QuizGenerationStatus {
@@ -242,7 +241,7 @@ export interface CreateQuizRequest {
   sectionId: string;
   difficulty: QuizDifficulty;
   numberOfQuestions: number;
-  questionType: QuestionType;
+  questionTypes: QuestionType[];
 }
 
 export interface QuizQuestion {
@@ -255,9 +254,9 @@ export interface QuizQuestion {
 export interface QuizResponse {
   id: string;
   sectionId: string;
-  difficulty: QuizDifficulty;
+  difficulty?: QuizDifficulty | null;
   numberOfQuestions: number;
-  questionType: QuestionType;
+  questionTypes: QuestionType[];
   generationStatus: QuizGenerationStatus;
   questions: QuizQuestion[];
   createdAt: Date;
@@ -375,8 +374,9 @@ export interface QuizForStudentResponse {
   attemptNumber: number;
   maxAttempts: number;
   attemptsRemaining: number;
-  /** Quiz-level type, drives single (radio) vs multi (checkbox) UI. */
-  questionType: string;
+  /** Removed: quiz-level questionType is no longer meaningful now that quizzes
+   * support multiple AI-generation types. Each individual question carries its
+   * own `type` field which the student UI should use. */
   questions: QuizQuestionForStudent[];
 }
 
