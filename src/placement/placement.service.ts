@@ -113,7 +113,7 @@ export class PlacementService {
             transcript: l.transcript,
           })),
           difficulty: QuizDifficulty.MEDIUM,
-          questionType: QuestionType.SINGLE_CHOICE,
+          questionTypes: [QuestionType.SINGLE_CHOICE],
           numberOfQuestions: QUESTIONS_PER_SECTION,
         }),
       ),

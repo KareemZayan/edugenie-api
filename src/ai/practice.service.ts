@@ -89,7 +89,7 @@ export class PracticeService {
         transcript: l.transcript,
       })),
       difficulty,
-      questionType: QuestionType.SINGLE_CHOICE,
+      questionTypes: [QuestionType.SINGLE_CHOICE],
       numberOfQuestions,
     });
     if (!generated.length) {
