@@ -151,6 +151,19 @@ export class SuperAdminController {
     return this.superAdminService.getPendingPayouts(query);
   }
 
+  @Get('payouts/stripe-balances')
+  @ApiOperation({
+    summary: 'Live per-instructor Stripe Connect payout balances',
+  })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @ApiCookieAuth('jwt')
+  @ApiBearerAuth()
+  @SwaggerApiResponse({ status: 401, description: 'Unauthorized.' })
+  @SwaggerApiResponse({ status: 403, description: 'Forbidden - insufficient role' })
+  async getInstructorStripeBalances() {
+    return this.superAdminService.getInstructorStripeBalances();
+  }
+
   @Patch('payouts/:requestId/approve')
   @ApiOperation({ summary: 'Approve (confirm) a payout request' })
   @SwaggerApiResponse({ status: 200, description: 'Success.' })
