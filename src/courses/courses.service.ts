@@ -422,6 +422,110 @@ export class CoursesService {
     };
   }
 
+  /**
+   * PUBLIC top-instructors board for the landing page. Ranks instructors by
+   * their published-course rating and total students so the frontend can render
+   * instructor cards (name, avatar, headline/bio, skills, rating, #courses,
+   * #students). Aggregates the Course collection (PUBLISHED only) grouped by
+   * instructor:
+   *   - studentsCount = sum of each course's cached `totalEnrollments`
+   *   - coursesCount  = number of published courses
+   *   - rating        = the instructor's maintained `averageInstructorRating`,
+   *                     falling back to the average of their course ratings.
+   * `sort`: 'rating' (default — rating desc, then students) or 'students'
+   * (students desc, then rating). Only active instructors are returned.
+   */
+  async getTopInstructors(opts: {
+    skip?: number;
+    limit?: number;
+    sort?: string;
+  }): Promise<
+    Array<{
+      id: string;
+      firstName?: string;
+      lastName?: string;
+      avatar?: string;
+      bio?: string;
+      skills: string[];
+      rating: number;
+      coursesCount: number;
+      studentsCount: number;
+    }>
+  > {
+    const skip = Math.max(0, opts.skip ?? 0);
+    const limit = Math.min(50, Math.max(1, opts.limit ?? 8));
+    const sortSpec =
+      opts.sort === 'students'
+        ? { studentsCount: -1 as const, rating: -1 as const }
+        : { rating: -1 as const, studentsCount: -1 as const };
+
+    const rows = await this.courseModel.aggregate<{
+      _id: Types.ObjectId;
+      firstName?: string;
+      lastName?: string;
+      avatar?: string;
+      bio?: string;
+      skills?: string[];
+      rating: number;
+      coursesCount: number;
+      studentsCount: number;
+    }>([
+      { $match: { courseStatus: CourseStatus.PUBLISHED } },
+      {
+        $group: {
+          _id: '$instructorId',
+          coursesCount: { $sum: 1 },
+          studentsCount: { $sum: { $ifNull: ['$totalEnrollments', 0] } },
+          avgCourseRating: { $avg: { $ifNull: ['$ratingAverage', 0] } },
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'instructor',
+        },
+      },
+      { $unwind: '$instructor' },
+      {
+        $match: {
+          'instructor.role': UserRole.INSTRUCTOR,
+          'instructor.isDeleted': { $ne: true },
+        },
+      },
+      {
+        $project: {
+          firstName: '$instructor.firstName',
+          lastName: '$instructor.lastName',
+          avatar: '$instructor.avatar',
+          bio: '$instructor.bio',
+          skills: { $ifNull: ['$instructor.skills', []] },
+          coursesCount: 1,
+          studentsCount: 1,
+          rating: {
+            $ifNull: ['$instructor.averageInstructorRating', '$avgCourseRating'],
+          },
+        },
+      },
+      { $sort: sortSpec },
+      { $skip: skip },
+      { $limit: limit },
+    ]);
+
+    return rows.map((r) => ({
+      id: r._id.toString(),
+      firstName: r.firstName,
+      lastName: r.lastName,
+      avatar: r.avatar,
+      bio: r.bio,
+      skills: r.skills ?? [],
+      rating: Math.round((r.rating ?? 0) * 10) / 10,
+      coursesCount: r.coursesCount,
+      studentsCount: r.studentsCount,
+    }));
+  }
+
   async findByInstructor(
     instructorId: string,
     filterDto: Record<string, unknown>,

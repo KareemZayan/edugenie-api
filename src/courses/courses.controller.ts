@@ -180,6 +180,26 @@ export class CoursesController {
     return { success: true, data };
   }
 
+  // PUBLIC top-instructors board: instructors ranked by rating + total students
+  // for the landing-page instructor cards. Declared before ':id' so
+  // 'top-instructors' isn't captured as a course id.
+  @Get('top-instructors')
+  @UseInterceptors(CacheInterceptor)
+  @ApiOperation({ summary: 'Public top instructors (by rating + students)' })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  async topInstructors(
+    @Query('skip') skip?: number,
+    @Query('limit') limit?: number,
+    @Query('sort') sort?: string,
+  ) {
+    const data = await this.coursesService.getTopInstructors({
+      skip: skip ? +skip : 0,
+      limit: limit ? +limit : 8,
+      sort,
+    });
+    return { success: true, data };
+  }
+
   // PUBLIC instructor storefront: an instructor's public profile + their PUBLISHED
   // course cards (landing-page instructor card → click → "his courses"). Declared
   // before ':id' so 'instructor' isn't captured as a course id.
