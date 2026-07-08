@@ -61,6 +61,20 @@ import {
   SystemHealthResponse,
 } from '../common/interfaces/frontend-contracts';
 
+/** One instructor's live Stripe Connect payout snapshot for the superadmin board. */
+export interface InstructorStripeBalanceItem {
+  instructorId: string;
+  instructorName: string;
+  instructorEmail: string;
+  /** 'enabled' = payouts on; 'onboarding' = account exists but not payout-ready; 'none' = no usable account. */
+  status: 'enabled' | 'onboarding' | 'none';
+  detailsSubmitted: boolean;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  balanceAvailable: number;
+  balancePending: number;
+}
+
 @Injectable()
 export class SuperAdminService {
   constructor(
@@ -652,6 +666,66 @@ export class SuperAdminService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  /**
+   * Live per-instructor Stripe Connect payout snapshot for the superadmin board.
+   * Payouts are automatic (Stripe pays each instructor's connected-account balance
+   * out on their schedule), so instead of the empty legacy PayoutRequest queue we
+   * surface every instructor who has a Stripe account with their onboarding status
+   * and current available/pending balances (read live from Stripe per account).
+   * Degrades gracefully: if Stripe is unconfigured, `connectStatus` returns zeros.
+   */
+  async getInstructorStripeBalances(): Promise<{
+    data: InstructorStripeBalanceItem[];
+  }> {
+    const instructors = await this.userModel
+      .find({
+        role: UserRole.INSTRUCTOR,
+        stripeAccountId: { $exists: true, $nin: [null, ''] },
+      })
+      .select('firstName lastName email')
+      .lean<
+        Array<{
+          _id: Types.ObjectId;
+          firstName?: string;
+          lastName?: string;
+          email?: string;
+        }>
+      >();
+
+    const rows = await Promise.all(
+      instructors.map(async (u) => {
+        const s = await this.paymentsService.connectStatus(u._id.toString());
+        const status: InstructorStripeBalanceItem['status'] = !s.hasAccount
+          ? 'none'
+          : s.payoutsEnabled
+            ? 'enabled'
+            : 'onboarding';
+        return {
+          instructorId: u._id.toString(),
+          instructorName: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim(),
+          instructorEmail: u.email ?? '',
+          status,
+          detailsSubmitted: s.detailsSubmitted,
+          chargesEnabled: s.chargesEnabled,
+          payoutsEnabled: s.payoutsEnabled,
+          balanceAvailable: s.balanceAvailable,
+          balancePending: s.balancePending,
+        };
+      }),
+    );
+
+    // Most actionable first: payout-ready accounts by largest available balance,
+    // then still-onboarding, then unusable.
+    const rank = { enabled: 0, onboarding: 1, none: 2 } as const;
+    rows.sort(
+      (a, b) =>
+        rank[a.status] - rank[b.status] ||
+        b.balanceAvailable - a.balanceAvailable,
+    );
+
+    return { data: rows };
   }
 
   /**
