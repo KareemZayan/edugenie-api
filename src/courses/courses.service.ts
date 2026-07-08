@@ -363,6 +363,65 @@ export class CoursesService {
     return courses.map((c) => new CourseSerializer(c.toObject()));
   }
 
+  /**
+   * PUBLIC instructor storefront: a single instructor's public profile plus their
+   * PUBLISHED course cards. Powers the landing-page instructor cards → click →
+   * "his courses" view. No auth required; drafts and sensitive user fields
+   * (email/password/status/etc.) are never exposed. Throws 404 when the id isn't a
+   * valid instructor.
+   */
+  async getPublicInstructorProfile(instructorId: string): Promise<{
+    instructor: {
+      id: string;
+      firstName?: string;
+      lastName?: string;
+      avatar?: string;
+      bio?: string;
+      skills: string[];
+      averageInstructorRating?: number;
+    };
+    courses: CourseSerializer[];
+  }> {
+    if (!Types.ObjectId.isValid(instructorId)) {
+      throw new NotFoundException('Instructor not found');
+    }
+
+    const instructorObjId = new Types.ObjectId(instructorId);
+    const user = await this.userModel
+      .findOne({ _id: instructorObjId, role: UserRole.INSTRUCTOR })
+      .select('firstName lastName avatar bio skills averageInstructorRating')
+      .lean<{
+        _id: Types.ObjectId;
+        firstName?: string;
+        lastName?: string;
+        avatar?: string;
+        bio?: string;
+        skills?: string[];
+        averageInstructorRating?: number;
+      }>();
+    if (!user) throw new NotFoundException('Instructor not found');
+
+    const courses = await this.courseModel
+      .find({ instructorId: instructorObjId, courseStatus: CourseStatus.PUBLISHED })
+      .select('-sections -description -requirements -goals')
+      .sort({ createdAt: -1 })
+      .populate('categoryId', 'name')
+      .exec();
+
+    return {
+      instructor: {
+        id: user._id.toString(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatar: user.avatar,
+        bio: user.bio,
+        skills: user.skills ?? [],
+        averageInstructorRating: user.averageInstructorRating,
+      },
+      courses: courses.map((c) => new CourseSerializer(c.toObject())),
+    };
+  }
+
   async findByInstructor(
     instructorId: string,
     filterDto: Record<string, unknown>,
