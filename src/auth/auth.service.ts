@@ -28,6 +28,7 @@ import {
 import {
   RefreshToken,
   RefreshTokenDocument,
+  RefreshTokenRevokeReason,
 } from './schemas/refresh-token.schema';
 import {
   AdminInvite,
@@ -423,16 +424,26 @@ export class AuthService {
 
     let benignRace = false;
     if (doc.revokedAt) {
-      if (Date.now() - doc.revokedAt.getTime() < ROTATION_GRACE_MS) {
-        // Two tabs (or parallel serverless proxy invocations) refreshed with
-        // the same token at once. The loser lands here milliseconds later —
-        // not theft. Issue it its own successor in the same family.
-        benignRace = true;
+      // The grace window ONLY forgives a genuine rotation (a multi-tab race).
+      // A THEFT/LOGOUT force-revoke — or any legacy/unknown reason — is terminal:
+      // it must never be revived, even within the grace window.
+      if (doc.revokeReason === RefreshTokenRevokeReason.ROTATION) {
+        if (Date.now() - doc.revokedAt.getTime() < ROTATION_GRACE_MS) {
+          // Two tabs (or parallel serverless proxy invocations) refreshed with
+          // the same token at once. The loser lands here milliseconds later —
+          // not theft. Issue it its own successor in the same family.
+          benignRace = true;
+        } else {
+          // A rotated copy replayed after the grace window = leak → revoke the
+          // whole family so the thief's and the victim's copies die together.
+          await this.revokeFamily(doc.family, RefreshTokenRevokeReason.THEFT);
+          this.logger.warn(
+            `Refresh-token reuse detected for user ${doc.userId.toString()} — family revoked`,
+          );
+          throw new UnauthorizedException('Session revoked');
+        }
       } else {
-        await this.revokeFamily(doc.family);
-        this.logger.warn(
-          `Refresh-token reuse detected for user ${doc.userId.toString()} — family revoked`,
-        );
+        // Force-revoked (theft/logout/legacy) — never mints a successor.
         throw new UnauthorizedException('Session revoked');
       }
     }
@@ -442,7 +453,12 @@ export class AuthService {
       // write, fall back to the benign-race path instead of double-rotating.
       const rotated = await this.refreshTokenModel.findOneAndUpdate(
         { _id: doc._id, revokedAt: null },
-        { $set: { revokedAt: new Date() } },
+        {
+          $set: {
+            revokedAt: new Date(),
+            revokeReason: RefreshTokenRevokeReason.ROTATION,
+          },
+        },
       );
       if (!rotated) {
         benignRace = true;
@@ -451,7 +467,7 @@ export class AuthService {
 
     const user = await this.usersService.findById(doc.userId.toString());
     if (!user || user.isDeleted || user.status !== UserStatus.ACTIVE) {
-      await this.revokeFamily(doc.family);
+      await this.revokeFamily(doc.family, RefreshTokenRevokeReason.THEFT);
       throw new UnauthorizedException('Account is no longer active');
     }
 
@@ -471,10 +487,19 @@ export class AuthService {
     };
   }
 
-  private async revokeFamily(family: string): Promise<void> {
+  /**
+   * Revokes every live token in a family, stamping WHY. The reason is terminal
+   * for THEFT/LOGOUT: those tokens can never be revived by the grace window
+   * (see `refresh`). Defaults to THEFT — the safe choice for any caller that
+   * doesn't specify one.
+   */
+  private async revokeFamily(
+    family: string,
+    reason: RefreshTokenRevokeReason = RefreshTokenRevokeReason.THEFT,
+  ): Promise<void> {
     await this.refreshTokenModel.updateMany(
       { family, revokedAt: null },
-      { $set: { revokedAt: new Date() } },
+      { $set: { revokedAt: new Date(), revokeReason: reason } },
     );
   }
 
@@ -485,7 +510,7 @@ export class AuthService {
       tokenHash: this.hashToken(rawToken),
     });
     if (doc) {
-      await this.revokeFamily(doc.family);
+      await this.revokeFamily(doc.family, RefreshTokenRevokeReason.LOGOUT);
     }
   }
 
@@ -493,7 +518,12 @@ export class AuthService {
   async revokeAllSessions(userId: string): Promise<{ revoked: number }> {
     const result = await this.refreshTokenModel.updateMany(
       { userId: new Types.ObjectId(userId), revokedAt: null },
-      { $set: { revokedAt: new Date() } },
+      {
+        $set: {
+          revokedAt: new Date(),
+          revokeReason: RefreshTokenRevokeReason.LOGOUT,
+        },
+      },
     );
     return { revoked: result.modifiedCount };
   }

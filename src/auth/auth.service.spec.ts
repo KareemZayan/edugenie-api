@@ -7,7 +7,10 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { ExchangeToken } from './schemas/exchange-token.schema';
 import { HandoffCode } from './schemas/handoff-code.schema';
-import { RefreshToken } from './schemas/refresh-token.schema';
+import {
+  RefreshToken,
+  RefreshTokenRevokeReason,
+} from './schemas/refresh-token.schema';
 import { AdminInvite } from '../superadmin/schema/admin-invite.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../mail/mail.service';
@@ -90,6 +93,7 @@ describe('AuthService', () => {
       userId,
       family: 'family-1',
       revokedAt: null,
+      revokeReason: null,
       expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1h out
     });
 
@@ -125,7 +129,12 @@ describe('AuthService', () => {
 
       expect(refreshTokenModel.findOneAndUpdate).toHaveBeenCalledWith(
         { _id: doc._id, revokedAt: null },
-        { $set: { revokedAt: expect.any(Date) as Date } },
+        {
+          $set: {
+            revokedAt: expect.any(Date) as Date,
+            revokeReason: RefreshTokenRevokeReason.ROTATION,
+          },
+        },
       );
       expect(refreshTokenModel.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -142,6 +151,7 @@ describe('AuthService', () => {
       refreshTokenModel.findOne.mockResolvedValue({
         ...liveDoc(),
         revokedAt: new Date(Date.now() - 5_000), // rotated 5s ago
+        revokeReason: RefreshTokenRevokeReason.ROTATION,
       });
 
       const result = await service.refresh('raced', '1.2.3.4', 'ua');
@@ -153,10 +163,11 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('signed-access-jwt');
     });
 
-    it('treats reuse after the grace window as theft: revokes the whole family', async () => {
+    it('treats reuse of a rotated token after the grace window as theft: revokes the whole family', async () => {
       refreshTokenModel.findOne.mockResolvedValue({
         ...liveDoc(),
         revokedAt: new Date(Date.now() - 60_000), // rotated a minute ago
+        revokeReason: RefreshTokenRevokeReason.ROTATION,
       });
 
       await expect(service.refresh('stolen', '1.2.3.4', 'ua')).rejects.toThrow(
@@ -164,8 +175,47 @@ describe('AuthService', () => {
       );
       expect(refreshTokenModel.updateMany).toHaveBeenCalledWith(
         { family: 'family-1', revokedAt: null },
-        { $set: { revokedAt: expect.any(Date) as Date } },
+        {
+          $set: {
+            revokedAt: expect.any(Date) as Date,
+            revokeReason: RefreshTokenRevokeReason.THEFT,
+          },
+        },
       );
+      expect(refreshTokenModel.create).not.toHaveBeenCalled();
+    });
+
+    // SECURITY REGRESSION GUARD: a family force-revoked for theft stamps
+    // revokedAt=now on its live tokens. Presenting one of those WITHIN the 30s
+    // grace window must NOT be mistaken for a benign rotation race — it must be
+    // rejected outright and must never mint a successor.
+    it('rejects a theft-revoked token inside the grace window and mints no successor', async () => {
+      refreshTokenModel.findOne.mockResolvedValue({
+        ...liveDoc(),
+        revokedAt: new Date(Date.now() - 2_000), // force-revoked 2s ago
+        revokeReason: RefreshTokenRevokeReason.THEFT,
+      });
+
+      await expect(
+        service.refresh('resurrect', '1.2.3.4', 'ua'),
+      ).rejects.toThrow('Session revoked');
+      // No new token issued, and no second revocation attempted.
+      expect(refreshTokenModel.create).not.toHaveBeenCalled();
+      expect(refreshTokenModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(refreshTokenModel.updateMany).not.toHaveBeenCalled();
+    });
+
+    // Same guard for a logout force-revoke replayed inside the grace window.
+    it('rejects a logout-revoked token inside the grace window and mints no successor', async () => {
+      refreshTokenModel.findOne.mockResolvedValue({
+        ...liveDoc(),
+        revokedAt: new Date(Date.now() - 2_000),
+        revokeReason: RefreshTokenRevokeReason.LOGOUT,
+      });
+
+      await expect(
+        service.refresh('loggedout', '1.2.3.4', 'ua'),
+      ).rejects.toThrow('Session revoked');
       expect(refreshTokenModel.create).not.toHaveBeenCalled();
     });
 
@@ -182,7 +232,12 @@ describe('AuthService', () => {
       );
       expect(refreshTokenModel.updateMany).toHaveBeenCalledWith(
         { family: 'family-1', revokedAt: null },
-        { $set: { revokedAt: expect.any(Date) as Date } },
+        {
+          $set: {
+            revokedAt: expect.any(Date) as Date,
+            revokeReason: RefreshTokenRevokeReason.THEFT,
+          },
+        },
       );
     });
   });
@@ -195,7 +250,12 @@ describe('AuthService', () => {
       await service.revokeRefreshToken('raw');
       expect(refreshTokenModel.updateMany).toHaveBeenCalledWith(
         { family: 'family-9', revokedAt: null },
-        { $set: { revokedAt: expect.any(Date) as Date } },
+        {
+          $set: {
+            revokedAt: expect.any(Date) as Date,
+            revokeReason: RefreshTokenRevokeReason.LOGOUT,
+          },
+        },
       );
     });
 
@@ -210,7 +270,12 @@ describe('AuthService', () => {
       expect(result).toEqual({ revoked: 3 });
       expect(refreshTokenModel.updateMany).toHaveBeenCalledWith(
         { userId, revokedAt: null },
-        { $set: { revokedAt: expect.any(Date) as Date } },
+        {
+          $set: {
+            revokedAt: expect.any(Date) as Date,
+            revokeReason: RefreshTokenRevokeReason.LOGOUT,
+          },
+        },
       );
     });
   });

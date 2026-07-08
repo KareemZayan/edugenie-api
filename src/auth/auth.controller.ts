@@ -247,7 +247,7 @@ export class AuthController {
   }
 
   /**
-   * Rotates the refresh token and mints a fresh 15-min access JWT. Deliberately
+   * Rotates the refresh token and mints a fresh 2h access JWT. Deliberately
    * NOT behind JwtAuthGuard: this is called precisely when the access token has
    * expired — auth comes from the httpOnly refresh cookie instead.
    */
