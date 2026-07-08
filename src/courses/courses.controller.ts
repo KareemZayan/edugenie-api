@@ -180,6 +180,20 @@ export class CoursesController {
     return { success: true, data };
   }
 
+  // PUBLIC instructor storefront: an instructor's public profile + their PUBLISHED
+  // course cards (landing-page instructor card → click → "his courses"). Declared
+  // before ':id' so 'instructor' isn't captured as a course id.
+  @Get('instructor/:instructorId')
+  @ApiOperation({ summary: "Public instructor profile + their published courses" })
+  @SwaggerApiResponse({ status: 200, description: 'Success.' })
+  @SwaggerApiResponse({ status: 404, description: 'Instructor not found.' })
+  @ApiParam({ name: 'instructorId', type: String })
+  async publicInstructor(@Param('instructorId') instructorId: string) {
+    const data =
+      await this.coursesService.getPublicInstructorProfile(instructorId);
+    return { success: true, data };
+  }
+
   @Get(':id')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Find one' })
