@@ -255,6 +255,23 @@ export class StripeService {
   }
 
   /**
+   * Every completed (`paid`) payout on a connected account, oldest first —
+   * auto-paginated. Used by the earnings backfill to reconcile historical
+   * payouts into PAID_OUT earnings.
+   */
+  async listPaidPayouts(accountId: string): Promise<Stripe.Payout[]> {
+    const out: Stripe.Payout[] = [];
+    for await (const p of this.require().payouts.list(
+      { status: 'paid', limit: 100 },
+      { stripeAccount: accountId },
+    )) {
+      out.push(p);
+    }
+    // Stripe returns newest-first; reconcile oldest-first (FIFO).
+    return out.reverse();
+  }
+
+  /**
    * The Stripe processing fee for a PaymentIntent, in major units (e.g. dollars).
    * Reads the balance transaction on the latest charge. Returns 0 if unavailable.
    */

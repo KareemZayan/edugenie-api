@@ -292,6 +292,7 @@ export class SuperAdminService {
       grossSalesResult,
       instructorShareResult,
       payoutLiabilityResult,
+      paidOutResult,
       activeAdminsCount,
       pendingPayoutsResult,
       webhookFailures,
@@ -333,6 +334,13 @@ export class SuperAdminService {
               },
             },
           },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ])
+        .exec(),
+      // Actually paid out to instructors (reconciled from Stripe payout.paid).
+      this.earningModel
+        .aggregate([
+          { $match: { status: EarningStatus.PAID_OUT } },
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ])
         .exec(),
@@ -389,6 +397,7 @@ export class SuperAdminService {
       Math.round((grossSales - instructorShare - stripeFees) * 100) / 100,
     );
     const payoutLiability = payoutLiabilityResult[0]?.total || 0;
+    const paidOut = Math.round((paidOutResult[0]?.total || 0) * 100) / 100;
 
     // Revenue trend: daily gross scaled by the net-revenue ratio, so the curve
     // tracks net platform revenue and its sum matches the Platform Revenue tile.
@@ -474,6 +483,7 @@ export class SuperAdminService {
       revenueChart: { labels: revenueLabels, data: revenueData },
       revenueGrowthPercent,
       payoutLiability,
+      paidOut,
       activeAdmins: activeAdminsCount,
       pendingPayouts,
       criticalAlerts,

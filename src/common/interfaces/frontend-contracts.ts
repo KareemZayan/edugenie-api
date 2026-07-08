@@ -852,7 +852,7 @@ export interface SuperAdminDashboardOverviewResponse {
   platformRevenue: number;
   /** Total gross of completed, non-charged-back sales. */
   grossSales: number;
-  /** Total instructor share (money paid out to instructors). */
+  /** Total instructor share earned (lifetime, non-reversed) — NOT money paid out. */
   instructorPayouts: number;
   /** Total Stripe processing fees the platform absorbed. */
   stripeFees: number;
@@ -860,7 +860,10 @@ export interface SuperAdminDashboardOverviewResponse {
   revenueChart: { labels: string[]; data: number[] };
   /** Week-over-week net revenue growth (%). */
   revenueGrowthPercent: number;
+  /** Instructor share not yet paid out (owed): status ∉ {PAID_OUT, REVERSED}. */
   payoutLiability: number;
+  /** Instructor share actually paid out (reconciled from Stripe payout.paid). */
+  paidOut: number;
   activeAdmins: number;
   pendingPayouts: number;
   criticalAlerts: Array<{

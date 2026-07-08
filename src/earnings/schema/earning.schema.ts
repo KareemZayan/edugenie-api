@@ -23,6 +23,15 @@ export class Earning {
 
   @Prop({ type: String, enum: EarningStatus, default: EarningStatus.PENDING })
   status: EarningStatus;
+
+  // Set when this earning is reconciled as PAID_OUT from a Stripe `payout.paid`
+  // webhook. `stripePayoutId` is the Stripe Payout id (also used for idempotency
+  // so a re-delivered event doesn't double-mark earnings).
+  @Prop({ type: String, default: null, index: true })
+  stripePayoutId?: string | null;
+
+  @Prop({ type: Date, default: null })
+  paidOutAt?: Date | null;
 }
 
 export const EarningSchema = SchemaFactory.createForClass(Earning);

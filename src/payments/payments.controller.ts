@@ -130,8 +130,11 @@ export class PaymentsController {
           break;
         case 'payout.paid':
         case 'payout.failed':
+          // `event.account` is the connected (instructor) account the payout
+          // belongs to — needed to reconcile that instructor's earnings.
           await this.payments.applyPayoutWebhook(
             event.data.object as Stripe.Payout,
+            event.account,
           );
           break;
         case 'charge.dispute.created':
