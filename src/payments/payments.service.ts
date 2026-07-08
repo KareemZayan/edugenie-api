@@ -1312,12 +1312,205 @@ export class PaymentsService {
   }
 
   /** Finalize from a webhook payout.paid / payout.failed event. */
-  async applyPayoutWebhook(payout: Stripe.Payout): Promise<void> {
+  async applyPayoutWebhook(
+    payout: Stripe.Payout,
+    accountId?: string | null,
+  ): Promise<void> {
+    // Legacy manual flow: a superadmin-fired payout tracked as a PayoutRequest.
     const doc = await this.payoutRequestModel
       .findOne({ gatewayReference: payout.id })
       .exec();
-    if (!doc || doc.status !== PayoutRequestStatus.PROCESSING) return;
-    await this.applyPayoutStatus(doc as never, payout.status);
+    if (doc && doc.status === PayoutRequestStatus.PROCESSING) {
+      await this.applyPayoutStatus(doc as never, payout.status);
+      return;
+    }
+
+    // Automatic flow (destination charges): Stripe pays the connected account's
+    // balance out to the instructor's bank on its schedule. On `payout.paid`,
+    // reconcile that instructor's PENDING earnings → PAID_OUT so the platform DB
+    // reflects money that actually left Stripe.
+    if (payout.status === 'paid' && accountId) {
+      await this.reconcileAutomaticPayout(accountId, payout);
+    }
+  }
+
+  /**
+   * Mark an instructor's oldest PENDING earnings as PAID_OUT to cover a completed
+   * Stripe payout to their bank. Matches FIFO up to the payout amount (each sale's
+   * destination transfer == that Earning's net share), so partial/rolling payouts
+   * only settle what they actually covered. Idempotent on the Stripe payout id.
+   */
+  private async reconcileAutomaticPayout(
+    accountId: string,
+    payout: Stripe.Payout,
+    opts: { dryRun?: boolean; notify?: boolean } = {},
+  ): Promise<{ settled: number; amount: number }> {
+    const { dryRun = false, notify = true } = opts;
+    const none = { settled: 0, amount: 0 };
+
+    const instructor = await this.userModel
+      .findOne({ stripeAccountId: accountId })
+      .select('_id')
+      .lean<{ _id: Types.ObjectId }>()
+      .exec();
+    if (!instructor) {
+      this.logger.warn(
+        `payout.paid for unknown connected account ${accountId} (payout ${payout.id})`,
+      );
+      return none;
+    }
+
+    // Idempotency: this payout id was already reconciled.
+    const already = await this.earningModel
+      .exists({ stripePayoutId: payout.id })
+      .exec();
+    if (already) return none;
+
+    const payoutAmount = (payout.amount ?? 0) / 100; // cents → major units
+    if (payoutAmount <= 0) return none;
+
+    const pending = await this.earningModel
+      .find({
+        instructorId: instructor._id,
+        status: EarningStatus.PENDING,
+      })
+      .sort({ createdAt: 1 }) // oldest first (FIFO)
+      .select('_id amount')
+      .lean<Array<{ _id: Types.ObjectId; amount: number }>>()
+      .exec();
+    if (!pending.length) return none;
+
+    // Accumulate oldest-first while the running total stays within the payout
+    // amount (small epsilon absorbs rounding / minor Stripe fee deltas).
+    const EPSILON = 0.01;
+    const toSettle: Types.ObjectId[] = [];
+    let running = 0;
+    for (const e of pending) {
+      if (running + e.amount > payoutAmount + EPSILON) break;
+      running = Math.round((running + e.amount) * 100) / 100;
+      toSettle.push(e._id);
+    }
+    if (!toSettle.length) return none;
+
+    if (dryRun) return { settled: toSettle.length, amount: running };
+
+    await this.earningModel
+      .updateMany(
+        { _id: { $in: toSettle }, status: EarningStatus.PENDING },
+        {
+          $set: {
+            status: EarningStatus.PAID_OUT,
+            stripePayoutId: payout.id,
+            paidOutAt: new Date(),
+          },
+        },
+      )
+      .exec();
+
+    if (notify) {
+      await this.notifyPayout(
+        instructor._id,
+        'PAYOUT_PROCESSED',
+        'Payout completed',
+        `Stripe paid ${running.toFixed(2)} to your bank.`,
+      );
+    }
+    return { settled: toSettle.length, amount: running };
+  }
+
+  /**
+   * One-off BACKFILL: reconcile historical Stripe `paid` payouts into PAID_OUT
+   * earnings for every onboarded instructor (or one, via `instructorId`). Idempotent
+   * and re-runnable — earnings already stamped with a payout id are skipped, so the
+   * FIFO matcher only ever consumes still-PENDING earnings. Pass `dryRun` to preview
+   * without writing. By default it does NOT spam old "payout completed" notifications
+   * (`notify: false`). Returns a per-instructor summary.
+   */
+  async backfillPaidPayouts(opts: {
+    dryRun?: boolean;
+    notify?: boolean;
+    instructorId?: string;
+  } = {}): Promise<{
+    dryRun: boolean;
+    instructors: number;
+    payoutsSeen: number;
+    earningsSettled: number;
+    amountSettled: number;
+    perInstructor: Array<{
+      instructorId: string;
+      accountId: string;
+      payouts: number;
+      settled: number;
+      amount: number;
+    }>;
+  }> {
+    if (!this.stripe.isConfigured) {
+      throw new ServiceUnavailableException('Stripe is not configured.');
+    }
+    const { dryRun = false, notify = false, instructorId } = opts;
+
+    const query: Record<string, unknown> = {
+      role: UserRole.INSTRUCTOR,
+      stripeAccountId: { $exists: true, $nin: [null, ''] },
+    };
+    if (instructorId) query._id = new Types.ObjectId(instructorId);
+
+    const instructors = await this.userModel
+      .find(query)
+      .select('_id stripeAccountId')
+      .lean<Array<{ _id: Types.ObjectId; stripeAccountId: string }>>()
+      .exec();
+
+    const summary = {
+      dryRun,
+      instructors: instructors.length,
+      payoutsSeen: 0,
+      earningsSettled: 0,
+      amountSettled: 0,
+      perInstructor: [] as Array<{
+        instructorId: string;
+        accountId: string;
+        payouts: number;
+        settled: number;
+        amount: number;
+      }>,
+    };
+
+    for (const inst of instructors) {
+      let payouts: Stripe.Payout[] = [];
+      try {
+        payouts = await this.stripe.listPaidPayouts(inst.stripeAccountId);
+      } catch (err) {
+        this.logger.warn(
+          `backfill: cannot list payouts for ${inst.stripeAccountId}: ${(err as Error).message}`,
+        );
+        continue;
+      }
+
+      let settled = 0;
+      let amount = 0;
+      for (const p of payouts) {
+        const r = await this.reconcileAutomaticPayout(inst.stripeAccountId, p, {
+          dryRun,
+          notify,
+        });
+        settled += r.settled;
+        amount = Math.round((amount + r.amount) * 100) / 100;
+      }
+
+      summary.payoutsSeen += payouts.length;
+      summary.earningsSettled += settled;
+      summary.amountSettled = Math.round((summary.amountSettled + amount) * 100) / 100;
+      summary.perInstructor.push({
+        instructorId: inst._id.toString(),
+        accountId: inst.stripeAccountId,
+        payouts: payouts.length,
+        settled,
+        amount,
+      });
+    }
+
+    return summary;
   }
 
   private async applyPayoutStatus(

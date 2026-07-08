@@ -8,6 +8,7 @@ import { Earning, EarningDocument } from '../../earnings/schema/earning.schema';
 import { CourseStatus } from '../../common/enums/course-status.enum';
 import { ReportStatus } from '../../common/enums/report-status.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { EarningStatus } from '../../common/enums/earning-status.enum';
 import {
   AnalyticsPeriodQueryDto,
   AnalyticsPeriod,
@@ -40,14 +41,20 @@ export class AdminAnalyticsService {
       .countDocuments({ status: ReportStatus.OPEN })
       .exec();
 
+    // Exclude charged-back (REVERSED) earnings from every money total.
+    const notReversed = { status: { $ne: EarningStatus.REVERSED } };
+
     const earningsAgg = await this.earningModel
-      .aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+      .aggregate([
+        { $match: notReversed },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ])
       .exec();
     const platformRevenue = earningsAgg.length > 0 ? earningsAgg[0].total : 0;
 
     const todayEarningsAgg = await this.earningModel
       .aggregate([
-        { $match: { createdAt: { $gte: today } } },
+        { $match: { ...notReversed, createdAt: { $gte: today } } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ])
       .exec();
@@ -86,6 +93,8 @@ export class AdminAnalyticsService {
     }
 
     const dateFilter = startDate ? { createdAt: { $gte: startDate } } : {};
+    // Exclude charged-back (REVERSED) earnings from every money total/chart.
+    const notReversed = { status: { $ne: EarningStatus.REVERSED } };
 
     const totalUsers = await this.userModel.countDocuments({}).exec();
     const totalInstructors = await this.userModel
@@ -100,7 +109,7 @@ export class AdminAnalyticsService {
 
     const earningsAgg = await this.earningModel
       .aggregate([
-        ...(startDate ? [{ $match: { createdAt: { $gte: startDate } } }] : []),
+        { $match: { ...notReversed, ...dateFilter } },
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ])
       .exec();
@@ -111,7 +120,10 @@ export class AdminAnalyticsService {
       const prevEarningsAgg = await this.earningModel
         .aggregate([
           {
-            $match: { createdAt: { $gte: previousStartDate, $lt: startDate } },
+            $match: {
+              ...notReversed,
+              createdAt: { $gte: previousStartDate, $lt: startDate },
+            },
           },
           { $group: { _id: null, total: { $sum: '$amount' } } },
         ])
@@ -128,7 +140,7 @@ export class AdminAnalyticsService {
 
     const topCoursesAgg = await this.earningModel
       .aggregate([
-        ...(startDate ? [{ $match: { createdAt: { $gte: startDate } } }] : []),
+        { $match: { ...notReversed, ...dateFilter } },
         { $group: { _id: '$courseId', revenue: { $sum: '$amount' }, enrollments: { $sum: 1 } } },
         { $sort: { enrollments: -1 } },
         { $limit: 5 },
@@ -153,7 +165,7 @@ export class AdminAnalyticsService {
 
     const topInstructorsAgg = await this.earningModel
       .aggregate([
-        ...(startDate ? [{ $match: { createdAt: { $gte: startDate } } }] : []),
+        { $match: { ...notReversed, ...dateFilter } },
         { $group: { _id: '$instructorId', totalRevenue: { $sum: '$amount' }, totalStudents: { $sum: 1 } } },
         { $sort: { totalRevenue: -1 } },
         { $limit: 5 },
@@ -196,7 +208,7 @@ export class AdminAnalyticsService {
       const weekStart = new Date();
       weekStart.setDate(weekStart.getDate() - 6);
       weekStart.setHours(0, 0, 0, 0);
-      const weeklyEarnings = await this.earningModel.find({ createdAt: { $gte: weekStart } }).exec();
+      const weeklyEarnings = await this.earningModel.find({ ...notReversed, createdAt: { $gte: weekStart } }).exec();
       for (const e of weeklyEarnings) {
         const d = new Date((e as any).createdAt);
         const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -219,7 +231,7 @@ export class AdminAnalyticsService {
       yearStart.setMonth(yearStart.getMonth() - 11);
       yearStart.setDate(1);
       yearStart.setHours(0, 0, 0, 0);
-      const yearlyEarnings = await this.earningModel.find({ createdAt: { $gte: yearStart } }).exec();
+      const yearlyEarnings = await this.earningModel.find({ ...notReversed, createdAt: { $gte: yearStart } }).exec();
       for (const e of yearlyEarnings) {
         const d = new Date((e as any).createdAt);
         const key = `${d.getFullYear()}-${d.getMonth()}`;
@@ -243,7 +255,7 @@ export class AdminAnalyticsService {
       const monthStart = new Date();
       monthStart.setDate(monthStart.getDate() - 30);
       monthStart.setHours(0, 0, 0, 0);
-      const monthlyEarnings = await this.earningModel.find({ createdAt: { $gte: monthStart } }).exec();
+      const monthlyEarnings = await this.earningModel.find({ ...notReversed, createdAt: { $gte: monthStart } }).exec();
       for (const e of monthlyEarnings) {
         const d = new Date((e as any).createdAt);
         const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
