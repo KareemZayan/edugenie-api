@@ -39,7 +39,7 @@ export class AdminUsersService {
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
 
-    const filter: any = { isDeleted: { $ne: true } };
+    const filter: any = {};
     if (query.role) {
       filter.role = query.role;
     } else {

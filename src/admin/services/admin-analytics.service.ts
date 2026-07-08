@@ -87,13 +87,13 @@ export class AdminAnalyticsService {
 
     const dateFilter = startDate ? { createdAt: { $gte: startDate } } : {};
 
-    const totalUsers = await this.userModel.countDocuments({}).exec();
     const totalInstructors = await this.userModel
       .countDocuments({ role: UserRole.INSTRUCTOR })
       .exec();
     const totalStudents = await this.userModel
       .countDocuments({ role: UserRole.STUDENT })
       .exec();
+    const totalUsers = totalStudents + totalInstructors;
     const totalCourses = await this.courseModel
       .countDocuments({ courseStatus: CourseStatus.PUBLISHED })
       .exec();
