@@ -96,13 +96,13 @@ export class AdminAnalyticsService {
     // Exclude charged-back (REVERSED) earnings from every money total/chart.
     const notReversed = { status: { $ne: EarningStatus.REVERSED } };
 
-    const totalUsers = await this.userModel.countDocuments({}).exec();
     const totalInstructors = await this.userModel
       .countDocuments({ role: UserRole.INSTRUCTOR })
       .exec();
     const totalStudents = await this.userModel
       .countDocuments({ role: UserRole.STUDENT })
       .exec();
+    const totalUsers = totalStudents + totalInstructors;
     const totalCourses = await this.courseModel
       .countDocuments({ courseStatus: CourseStatus.PUBLISHED })
       .exec();
