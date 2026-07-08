@@ -22,4 +22,5 @@ export const MAX_PENDING_QUIZZES_PER_SECTION = Number(
  * Every validation in the codebase must reference this constant —
  * never hardcode 5 anywhere else.
  */
-export const MAX_QUESTIONS_PER_QUIZ = 5;
+export const MAX_QUESTIONS_PER_QUIZ = 20;
+export const MIN_QUESTIONS_PER_QUIZ = 5;

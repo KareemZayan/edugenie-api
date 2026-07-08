@@ -32,7 +32,7 @@ import {
   QuizSubmitResponse,
   QuizAttemptsHistoryResponse,
 } from '../common/interfaces/frontend-contracts';
-import { QUIZ_REGEN_ENROLLMENT_THRESHOLD, MAX_QUIZZES_PER_SECTION, MAX_PENDING_QUIZZES_PER_SECTION, MAX_QUESTIONS_PER_QUIZ } from '../common/constants/quiz.constant';
+import { QUIZ_REGEN_ENROLLMENT_THRESHOLD, MAX_QUIZZES_PER_SECTION, MAX_PENDING_QUIZZES_PER_SECTION, MAX_QUESTIONS_PER_QUIZ, MIN_QUESTIONS_PER_QUIZ } from '../common/constants/quiz.constant';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/enums/notification-type.enum';
 import { CertificatesService } from '../certificates/certificates.service';
@@ -1024,13 +1024,13 @@ private async pickRandomApprovedQuiz(sectionId: string, studentId?: string) {
       );
     }
 
-    // Guard: a quiz must retain at least one active (non-ignored) question.
+    // Guard: a quiz must retain at least MIN_QUESTIONS_PER_QUIZ active (non-ignored) questions.
     const activeCount = quiz.questions.filter(
       (q) => !(q as unknown as { isIgnored?: boolean }).isIgnored,
     ).length;
-    if (activeCount === 0) {
+    if (activeCount < MIN_QUESTIONS_PER_QUIZ) {
       throw new BadRequestException(
-        'A quiz must have at least one active (non-ignored) question to be approved',
+        `A quiz must have at least ${MIN_QUESTIONS_PER_QUIZ} active (non-ignored) questions to be approved`,
       );
     }
 
