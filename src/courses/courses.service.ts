@@ -11,7 +11,7 @@ import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseStatus } from '../common/enums/course-status.enum';
 import { Category } from '../categories/schema/category.schema';
-import { Earning } from '../orders/schema/earning.schema';
+import { Earning } from '../earnings/schema/earning.schema';
 import { CourseSerializer } from './serializers/course.serializer';
 import { PaginatedResponse } from '../common/interfaces/paginated-response.interface';
 

@@ -4,7 +4,7 @@ import { InstructorController } from './instructor.controller';
 import { InstructorService } from './instructor.service';
 import { InstructorSummaryService } from './instructor-summary.service';
 import { Course, CourseSchema } from '../courses/schema/course.schema';
-import { Earning, EarningSchema } from '../orders/schema/earning.schema';
+import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import {
   Enrollment,
   EnrollmentSchema,
