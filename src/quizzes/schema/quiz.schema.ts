@@ -71,6 +71,8 @@ export class Quiz {
     default: 'pending_review',
   })
   status: string;
+  /** SECONDS, not minutes — QuizzesService.submitAttempt compares it against
+   * elapsed seconds. Default 600 = a 10-minute quiz. */
   @Prop({ required: true, default: 600 })
   timeLimit: number;
   // Platform rule: passing a section quiz requires 80%, and that pass is what

@@ -7,7 +7,7 @@ import { CoursesController } from './courses.controller';
 import { InstructorCoursesController } from './instructor-courses.controller';
 
 import { Course, CourseSchema } from './schema/course.schema';
-import { Earning, EarningSchema } from '../orders/schema/earning.schema';
+import { Earning, EarningSchema } from '../earnings/schema/earning.schema';
 import { Category, CategorySchema } from '../categories/schema/category.schema';
 import { User, UserSchema } from '../users/schema/user.schema';
 import { Quiz, QuizSchema } from '../quizzes/schema/quiz.schema';

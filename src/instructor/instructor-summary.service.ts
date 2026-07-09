@@ -4,7 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User } from '../users/schema/user.schema';
 import { Course } from '../courses/schema/course.schema';
-import { Earning } from '../orders/schema/earning.schema';
+import { Earning } from '../earnings/schema/earning.schema';
 import { Enrollment } from '../enrollments/schema/enrollment.schema';
 import { Review } from '../reviews/schema/review.schema';
 import { UserRole } from '../common/enums/user-role.enum';
