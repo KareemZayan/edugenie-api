@@ -111,4 +111,3 @@ src/
 
 Built by a 5-developer team as the graduation project for the **ITI Intensive Code Camp — Full-Stack Web & Generative AI Development using MERN**.
 
-Maintainer: [Hedra Emad](https://github.com/hedra-emad) — Team Leader
